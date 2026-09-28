@@ -91,6 +91,15 @@ CREATE TABLE IF NOT EXISTS cash_dividends (
     first_seen TEXT,
     PRIMARY KEY (symbol, ex_date)
 );
+CREATE TABLE IF NOT EXISTS watch_alerts (
+    chat_id TEXT NOT NULL,          -- a connected friend's Telegram chat (the website's bot, app/alerts.py)
+    symbol TEXT NOT NULL,
+    kind TEXT NOT NULL,             -- buy (a BUY signal) | above | below (a close past the price)
+    price REAL,
+    created TEXT,
+    fired TEXT,                     -- the close a buy alert was last sent for
+    PRIMARY KEY (chat_id, symbol, kind)
+);
 CREATE TABLE IF NOT EXISTS dividend_yield (
     symbol TEXT PRIMARY KEY,
     yield_pct REAL,                 -- the last 12 months' cash dividends ÷ the price (%), TradingView's figure

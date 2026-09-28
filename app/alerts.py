@@ -225,7 +225,7 @@ def build_site_message(d: views.Data, site_url: str = "") -> str:
 # it handled instead, and ignores any other /start (like your Mac's own link).
 STOP_RE = re.compile(r"^/stop(@\w+)?\s*$")
 WELCOME = ("✅ <b>Connected.</b> After each EGX close you'll get the day's signals here. Your share counts are on "
-           "the website.\nSend /stop to stop.")
+           "the website.\nSend /help for alerts on the stocks you follow, or /stop to stop.")
 STOPPED = "Stopped. To start again, open the website → Settings → Connect Telegram."
 RESET = ("The website's password has changed, so these messages have stopped. Open the website with the new "
          "password → Settings → Connect Telegram to get them again.")
@@ -246,13 +246,128 @@ def _reply(token: str, chat_id: str, text: str) -> None:
         pass  # only a courtesy: the next message tries again
 
 
+# Alerts for the stocks a friend follows: sent after a close, when the stock gets a BUY signal or closes past a price.
+WATCH_RE = re.compile(r"^/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?))?\s*$", re.I)
+UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})\s*$", re.I)
+LIST_RE = re.compile(r"^/(?:list|alerts)(?:@\w+)?\s*$", re.I)
+MAX_ALERTS = 20
+HELP = ("<b>Alerts for the stocks you follow</b>, checked after each close:\n"
+        "/watch COMI: when COMI gets a BUY signal\n"
+        "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n"
+        "/unwatch COMI: stop COMI's alerts\n"
+        "/list: your alerts\n"
+        "/stop: stop all messages\n"
+        "I read messages every few hours, so a reply can take up to 3 hours.")
+
+
+def _alert_key(a) -> tuple:
+    return a["chat_id"], a["symbol"], a["kind"]
+
+
+def _drop_alert(conn: sqlite3.Connection, key: tuple) -> None:
+    conn.execute("DELETE FROM watch_alerts WHERE chat_id=? AND symbol=? AND kind=?", key)
+
+
+def forget_alerts(conn: sqlite3.Connection, chat_id: str, symbol: str | None = None) -> int:
+    """Remove a chat's alerts (all, or one stock's). Returns how many there were."""
+    if symbol:
+        return conn.execute("DELETE FROM watch_alerts WHERE chat_id=? AND symbol=?", (chat_id, symbol)).rowcount
+    return conn.execute("DELETE FROM watch_alerts WHERE chat_id=?", (chat_id,)).rowcount
+
+
+def _alert_text(a) -> str:
+    if a["kind"] == "buy":
+        return f"{a['symbol']}: a BUY signal"
+    return f"{a['symbol']}: a close {a['kind']} {views.px(a['price'])}"
+
+
+def watch_command(conn: sqlite3.Connection, chat_id: str, text: str) -> str | None:
+    """A connected friend's alert command: the reply, or None when the message isn't a command."""
+    if not text.startswith("/"):
+        return None
+    if LIST_RE.match(text):
+        rows = conn.execute("SELECT * FROM watch_alerts WHERE chat_id=? ORDER BY symbol, kind", (chat_id,)).fetchall()
+        if not rows:
+            return "You have no alerts yet.\n\n" + HELP
+        return "<b>Your alerts</b>\n" + "\n".join(_e(_alert_text(a)) for a in rows)
+    m = UNWATCH_RE.match(text)
+    if m:
+        sym = m.group(1).upper()
+        n = forget_alerts(conn, chat_id, sym)
+        conn.commit()
+        return f"Removed {n} alert{'s' if n != 1 else ''} for {_e(sym)}." if n else f"You have no alert for {_e(sym)}."
+    m = WATCH_RE.match(text)
+    if not m:
+        return HELP
+    sym = m.group(1).upper()
+    if not conn.execute("SELECT 1 FROM stocks WHERE symbol=?", (sym,)).fetchone():
+        return f"I don't know {_e(sym)}. Use the stock's EGX symbol, like COMI."
+    have = conn.execute("SELECT COUNT(*) FROM watch_alerts WHERE chat_id=?", (chat_id,)).fetchone()[0]
+    if have >= MAX_ALERTS:
+        return f"You already have {MAX_ALERTS} alerts. Remove some with /unwatch first."
+    last = conn.execute("SELECT close FROM prices WHERE symbol=? ORDER BY date DESC LIMIT 1", (sym,)).fetchone()
+    if m.group(2) is None:
+        kind, price = "buy", None
+        reply = f"OK: I'll tell you when {sym} gets a BUY signal, after any close."
+    else:
+        price = float(m.group(2).replace(",", "."))
+        if last is None:
+            return f"There are no prices for {_e(sym)} yet, so I can't watch its price."
+        kind = "above" if price > last["close"] else "below"
+        reply = (f"OK: I'll tell you when {sym} closes {kind} {views.px(price)} "
+                 f"(last close {views.px(last['close'])}).")
+    conn.execute("INSERT OR REPLACE INTO watch_alerts(chat_id, symbol, kind, price, created, fired) VALUES "
+                 "(?,?,?,?,?,NULL)", (chat_id, sym, kind, price, _now()))
+    conn.commit()
+    return reply
+
+
+def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str) -> int:
+    """After a close: tell each connected friend about the stocks they follow. A BUY alert stays (it fires once per
+    close with a BUY); a price alert is done once it fires. Returns how many were sent."""
+    subs = _subscribers(conn)
+    _, df = views.current_scan(conn)
+    buys = {r["symbol"]: r for r in views.records(df) if r["action"] == "BUY"}
+    sent = 0
+    for a in conn.execute("SELECT * FROM watch_alerts ORDER BY chat_id, symbol").fetchall():
+        if a["chat_id"] not in subs:          # disconnected: their alerts go too
+            _drop_alert(conn, _alert_key(a))
+            continue
+        text = None
+        if a["kind"] == "buy":
+            b = buys.get(a["symbol"])
+            if b and a["fired"] != data_date:
+                text = (f"🔔 <b>{_e(a['symbol'])}</b> got a BUY signal at the {views.nice_date(data_date)} close: buy up "
+                        f"to {views.px(b['entry_high'])} · stop {views.px(b['stop'])} · target {views.px(b['target'])}."
+                        f"\nYour share count is on the website. /unwatch {_e(a['symbol'])} to stop these.")
+        else:
+            row = conn.execute("SELECT close FROM prices WHERE symbol=? AND date=?", (a["symbol"], data_date)).fetchone()
+            if row and (row["close"] >= a["price"] if a["kind"] == "above" else row["close"] <= a["price"]):
+                text = (f"🔔 <b>{_e(a['symbol'])}</b> closed at {views.px(row['close'])} on "
+                        f"{views.nice_date(data_date)}: {a['kind']} your {views.px(a['price'])}. This alert is done.")
+        if not text:
+            continue
+        try:
+            send(token, a["chat_id"], text)
+        except TelegramError:
+            continue            # tried again after the next run
+        sent += 1
+        if a["kind"] == "buy":
+            conn.execute("UPDATE watch_alerts SET fired=? WHERE chat_id=? AND symbol=? AND kind=?",
+                         (data_date, *_alert_key(a)))
+        else:
+            _drop_alert(conn, _alert_key(a))
+    conn.commit()
+    return sent
+
+
 def sync_subscribers(conn: sqlite3.Connection, token: str, code: str) -> dict:
     """Connect the friends who pressed Start through the site's link and disconnect those who sent /stop.
     Returns counts only (the logs are public)."""
     subs = _subscribers(conn)
     seen = int(db.get_meta(conn, "site_update_seen") or 0)
     fp = _fingerprint(code)
-    replies, joined, left = [], 0, 0
+    replies, joined, left, commands = [], 0, 0, 0
     for u in sorted(call(token, "getUpdates", timeout=0, allowed_updates=["message"]), key=lambda u: u["update_id"]):
         if int(u["update_id"]) <= seen:
             continue
@@ -271,17 +386,22 @@ def sync_subscribers(conn: sqlite3.Connection, token: str, code: str) -> dict:
                 joined += 1
         elif STOP_RE.match(text) and cid in subs:
             del subs[cid]
+            forget_alerts(conn, cid)
             replies.append((cid, STOPPED))
             left += 1
+        elif cid in subs and (reply := watch_command(conn, cid, text)):
+            replies.append((cid, reply))
+            commands += 1
     for cid in [c for c, s in subs.items() if s["code"] != fp]:   # the password changed
         del subs[cid]
+        forget_alerts(conn, cid)
         replies.append((cid, RESET))
         left += 1
     db.set_meta(conn, "site_subscribers", json.dumps(subs))
     db.set_meta(conn, "site_update_seen", str(seen))
     for cid, text in replies:
         _reply(token, cid, text)
-    return {"connected": len(subs), "joined": joined, "left": left}
+    return {"connected": len(subs), "joined": joined, "left": left, "commands": commands}
 
 
 def send_to_subscribers(conn: sqlite3.Connection, token: str, text: str, data_date: str) -> dict:

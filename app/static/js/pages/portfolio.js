@@ -1,11 +1,18 @@
-// My Portfolio: account tiles, open positions (sell, bonus shares, dividends, transactions), log a buy, closed trades.
+// My Portfolio: account tiles, then three tabs. Positions: open positions (sell, bonus shares, dividends,
+// transactions), log a buy, closed trades. Health: sectors, money at risk, how your stocks move together, your
+// account against EGX30. Journal: how your closed trades did, including after inflation.
 import {
   html, useApi, useState, useEffect, useStore, api, toast, refreshAll, fmt, tone, cls, go, todayISO,
 } from '../lib.js';
 import {
   Icon, StatusChip, Kpi, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, DayBar, Field,
-  StockPicker, Confirm, Callout,
+  StockPicker, Confirm, Callout, Seg, Empty,
 } from '../ui.js';
+import { LineChart } from '../charts.js';
+import { equityCurve, correlations, sectorMix, stopRisk, journal } from '../insights.js';
+
+const TABS = [{ value: 'positions', label: 'Positions' }, { value: 'health', label: 'Health' },
+  { value: 'journal', label: 'Journal' }];
 
 export function PortfolioPage({ route }) {
   const { data, error } = useApi('/portfolio');
@@ -42,6 +49,8 @@ export function PortfolioPage({ route }) {
     { key: 'exit_reason', label: 'Reason', render: r => html`<span class="muted">${r.exit_reason || '–'}</span>` },
   ];
   const cs = data.closed_stats;
+  const tab = TABS.some(t => t.value === route.query.tab) ? route.query.tab : 'positions';
+  const pickTab = v => go(v === 'positions' ? '#/portfolio' : `#/portfolio?tab=${v}`);
   return html`
     <${PageHead} title="My Portfolio"
       sub="Log the trades you place with your broker. After each close the agent checks every position against the exit rules.">
@@ -58,11 +67,12 @@ export function PortfolioPage({ route }) {
       <${Kpi} label="Realized P&L" value=${fmt.signed(s.realized)} valueClass=${tone(s.realized)}
         sub=${s.dividends ? `EGP, after fees · incl. ${fmt.int(s.dividends)} dividends` : 'EGP, after fees'} />
       <${Kpi} label="Loss if all stops hit" value=${fmt.short(s.open_risk)}
-        sub=${s.equity ? `${fmt.pct(s.open_risk / s.equity, 1, false)} of your account` : ''} />
+        sub=${s.equity ? `from your buy prices: ${fmt.pct(s.open_risk / s.equity, 1, false)} of your account` : ''} />
     </div>
     <p class="faint" style="font-size:12.5px;margin-top:10px">Starting capital ${fmt.egp(s.start)}${' '}
       (<a href="#/settings">change it in Settings</a>). P&L includes ${data.fee_pct}% fees per side.</p>
-
+    <div style="margin-top:16px"><${Seg} options=${TABS} value=${tab} onChange=${pickTab} /></div>
+    ${tab === 'health' ? html`<${HealthTab} data=${data} />` : tab === 'journal' ? html`<${JournalTab} data=${data} />` : html`
     <section class="section">
       <${SectionHead} title="Open positions" count=${data.positions.length}
         hint="Click a position to sell some or all of it, see its transactions or delete it." />
@@ -85,8 +95,147 @@ export function PortfolioPage({ route }) {
         hint=${cs.count ? `Win rate ${fmt.pct(cs.win_rate, 0, false)} · total ${fmt.signed(cs.total)} EGP` : ''} />
       <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
         empty="Nothing closed yet." /></div>
-    </section>
+    </section>`}
     <${Disclaimer} />`;
+}
+
+// ------------------------------------------------------------------ Health tab
+const togetherWords = r => (r >= 0.7 ? 'move closely together' : r >= 0.4 ? 'often move together' : r >= 0.1
+  ? 'move a little together' : 'move independently');
+
+function HealthTab({ data }) {
+  const { data: h, error } = useApi('/portfolio/history');
+  const s = data.summary;
+  const mix = sectorMix(data.positions, s.cash);
+  const risk = stopRisk(data.positions, s.equity);
+  const held = data.positions.map(p => p.symbol);
+  const corr = h ? correlations(h.series, held) : null;
+  const curve = h ? equityCurve(h) : null;
+  const top = Math.max(...mix.map(m => m.pct), 0.01);
+  const lines = curve && [
+    { title: 'Your account', data: curve.time.map((t, i) => ({ time: t, value: curve.value[i] })), area: true },
+    { title: 'EGX30, same start', color: '--text-3', dashed: true, width: 1.5,
+      data: curve.time.map((t, i) => ({ time: t, value: curve.index[i] })) },
+  ];
+  return html`
+    <section class="section">
+      <${SectionHead} title="Your account against EGX30"
+        hint="Its value after every session since your first buy (cash plus your shares at each close), next to EGX30 as if you had put the same money in it." />
+      ${!h ? html`<${PageLoading} error=${error} />` : !curve ? html`<div class="card"><${Empty} icon="chart"
+        title="No buys yet" text="Once you log a buy, your account's value is drawn here after every session." /></div>` : html`
+        <div class="kpis">
+          <${Kpi} label="Your account" value=${fmt.pct(curve.ret, 1)} valueClass=${tone(curve.ret)}
+            sub=${`since ${fmt.date(curve.time[0])}`} />
+          <${Kpi} label="EGX30 over the same time" value=${fmt.pct(curve.index_ret, 1)} valueClass=${tone(curve.index_ret)}
+            sub=${curve.ret >= curve.index_ret ? 'you did better' : 'EGX30 did better'} />
+          <${Kpi} label="Worst drop from a high" value=${fmt.pct(curve.max_drawdown, 1)}
+            valueClass=${curve.max_drawdown < -0.1 ? 'down' : ''} sub="your account's biggest fall" />
+        </div>
+        <div class="card flush" style="margin-top:14px"><${LineChart} lines=${lines} height=${300} /></div>`}
+    </section>
+
+    <div class="grid grid-2" style="margin-top:4px;align-items:start">
+      <section class="section">
+        <${SectionHead} title="Where your money is" hint="Each sector's share of your account, at the last close." />
+        <div class="card">${mix.map(m => html`<div class="mix-row">
+          <div class="mix-label"><b>${m.sector}</b><span class="faint">${m.symbols.join(', ')}</span></div>
+          <div class="gauge"><b style="width:44px;text-align:right">${fmt.pct(m.pct, 0, false)}</b>
+            <div class=${cls('bar', m.sector === 'Cash' ? '' : m.pct > 0.4 ? 'warn' : 'up')}><span style=${`width:${(m.pct / top) * 100}%`}></span></div></div>
+          <span class="faint mix-value">${fmt.short(m.value)}</span></div>`)}
+          ${mix.some(m => m.sector !== 'Cash' && m.pct > 0.4) && html`<p class="faint" style="font-size:12px;margin-top:10px">
+            More than 40% in one sector: news about that sector moves much of your account at once.</p>`}
+        </div>
+      </section>
+
+      <section class="section">
+        <${SectionHead} title="If every stop were hit" hint="What you'd lose from today's prices if every position fell to its stop." />
+        <div class="card">
+          ${data.positions.length ? html`
+            <div class="calc-shares down" style="font-size:26px">${fmt.egp(risk.total ? -risk.total : 0)}${' '}
+              <span>${fmt.pct(risk.pct, 1, false)} of your account</span></div>
+            <div class="stat-list" style="margin-top:10px">${risk.rows.map(r => html`
+              <span class="k">${r.symbol}${r.locked ? html` <span class="tag">stop above your price</span>` : ''}</span>
+              <span class="v">${r.loss ? fmt.egp(-r.loss) : '0 EGP'}<span class="faint" style="font-weight:500"> ${fmt.pct(-r.pct, 1)}</span></span>`)}</div>
+            <p class="faint" style="font-size:12px;margin-top:10px">Your limit of ${data.max_open_risk_pct}% counts the risk
+              from your buy prices: ${fmt.pct(s.equity ? s.open_risk / s.equity : 0, 1, false)} now${s.equity && s.open_risk / s.equity * 100 > data.max_open_risk_pct
+              ? ', over the limit, so the agent sizes new buys at 0 until it comes down' : ''}. A gap through a stop can lose more.</p>`
+          : html`<p class="muted" style="font-size:13px">No open positions.</p>`}
+        </div>
+      </section>
+    </div>
+
+    <section class="section">
+      <${SectionHead} title="How your stocks move together"
+        hint="Correlation of daily moves over the last 60 sessions: 1 means they rise and fall together, 0 means unrelated." />
+      <div class="card">${held.length < 2 ? html`<p class="muted" style="font-size:13px">This needs at least two open positions.</p>`
+        : !corr ? html`<${PageLoading} error=${error} />` : html`
+        <p style="font-size:13.5px;margin-bottom:12px">${corr.average == null ? 'Not enough shared history yet.'
+          : html`On average your stocks <b>${togetherWords(corr.average)}</b> (${fmt.num(corr.average, 2)}).${' '}
+            ${corr.average >= 0.5 ? 'A bad day for one is likely a bad day for most: your risk adds up more than the stops suggest.'
+              : 'That spreads your risk: they rarely all fall together.'}`}</p>
+        <div class="stat-list">${corr.pairs.map(p => html`
+          <span class="k">${p.a} & ${p.b}</span>
+          <span class="v"><b class=${p.r >= 0.7 ? 'warn' : ''}>${fmt.num(p.r, 2)}</b>
+            <span class="faint" style="font-weight:500"> ${togetherWords(p.r)}</span></span>`)}</div>`}
+      </div>
+    </section>`;
+}
+
+// ------------------------------------------------------------------ Journal tab
+function JournalTab({ data }) {
+  const { data: h, error } = useApi('/portfolio/history');
+  if (!data.closed.length) {
+    return html`<section class="section"><div class="card"><${Empty} icon="listCheck" title="Nothing closed yet"
+      text="Your journal fills in as you sell: win rate, average win and loss, where your trades came from, and what's left after inflation." /></div></section>`;
+  }
+  if (!h) return html`<section class="section"><${PageLoading} error=${error} /></section>`;
+  const j = journal(data.closed, h);
+  const month = m => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  const groupCols = first => [
+    { key: 'label', label: first, render: g => html`<b>${first === 'Month' ? month(g.label) : g.label}</b>` },
+    { key: 'n', label: 'Trades', align: 'r' },
+    { key: 'win_rate', label: 'Won', align: 'r', fmt: v => fmt.pct(v, 0, false) },
+    { key: 'avg_return', label: 'Avg return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>` },
+    { key: 'pnl', label: 'P&L (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+  ];
+  const tradeCols = [
+    { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} sub=${false} />` },
+    { key: 'entry_date', label: 'Bought', fmt: v => fmt.date(v) },
+    { key: 'exit_date', label: 'Sold', fmt: v => fmt.date(v) },
+    { key: 'days', label: 'Days', align: 'r' },
+    { key: 'return_pct', label: 'Return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>` },
+    { key: 'pnl', label: 'P&L', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'real_return', label: 'After inflation', align: 'r', title: "The return minus Egypt's inflation over the days you held it",
+      render: r => (r.inflation == null ? html`<span class="faint">–</span>` : html`<span class=${tone(r.real_return)}>${fmt.pct(r.real_return, 1)}</span>`) },
+    { key: 'source', label: 'From', render: r => html`<span class="muted">${r.source}</span>` },
+    { key: 'exit_reason', label: 'Why sold', render: r => html`<span class="muted">${r.exit_reason || '–'}</span>` },
+  ];
+  return html`
+    <section class="section">
+      <div class="kpis">
+        <${Kpi} label="Closed trades" icon="listCheck" value=${fmt.int(j.n)} sub=${`held ${fmt.num(j.avg_days, 0)} days on average`} />
+        <${Kpi} label="Won" value=${fmt.pct(j.win_rate, 0, false)} valueClass=${j.win_rate >= 0.5 ? 'up' : ''}
+          sub=${`avg win ${fmt.pct(j.avg_win, 1)} · avg loss ${fmt.pct(j.avg_loss, 1)}`} />
+        <${Kpi} label="Profit factor" value=${j.profit_factor == null ? 'no losses' : fmt.num(j.profit_factor, 2)}
+          valueClass=${j.profit_factor == null || j.profit_factor >= 1 ? 'up' : 'down'} sub="money won ÷ money lost (above 1 = profitable)" />
+        <${Kpi} label="Total P&L" value=${fmt.signed(j.pnl)} valueClass=${tone(j.pnl)}
+          sub=${`EGP after fees and dividends · ${fmt.signed(j.per_trade)} a trade`} />
+        ${j.has_inflation && html`<${Kpi} label="After inflation" value=${fmt.signed(j.real_pnl)} valueClass=${tone(j.real_pnl)}
+          sub=${`inflation took ${fmt.int(j.pnl - j.real_pnl)} EGP while your money was in`} />`}
+      </div>
+    </section>
+    <div class="grid grid-2" style="align-items:start">
+      <section class="section"><${SectionHead} title="Where your trades came from"
+          hint="A BUY signal in the week before your buy (its setup), or your own idea." />
+        <div class="card flush"><${DataTable} columns=${groupCols('From')} rows=${j.by_source} rowKey=${g => g.label} /></div></section>
+      <section class="section"><${SectionHead} title="How they ended" hint="The reason you gave when selling." />
+        <div class="card flush"><${DataTable} columns=${groupCols('Why sold')} rows=${j.by_exit} rowKey=${g => g.label} /></div></section>
+    </div>
+    <section class="section"><${SectionHead} title="By month" hint="By the month you sold." />
+      <div class="card flush"><${DataTable} columns=${groupCols('Month')} rows=${j.by_month} rowKey=${g => g.label} /></div></section>
+    <section class="section"><${SectionHead} title="Every closed trade" count=${j.n}
+        hint="After inflation: the return minus Egypt's yearly inflation for the days you held it (CAPMAS figures via TradingView)." />
+      <div class="card flush"><${DataTable} columns=${tradeCols} rows=${j.trades} rowKey=${r => r.id} /></div></section>`;
 }
 
 function PositionDetail({ p, data, onDone }) {

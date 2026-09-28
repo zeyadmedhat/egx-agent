@@ -1,6 +1,6 @@
 // Market: breadth (how many stocks rise with the index) and which sectors lead. Context only; the BUY rules don't use it.
-import { html, useApi, fmt, stockHref } from '../lib.js';
-import { Kpi, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, Empty, MarketSwitch } from '../ui.js';
+import { html, useApi, useState, useStore, fmt, tone, stockHref } from '../lib.js';
+import { Kpi, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, Empty, MarketSwitch, Seg } from '../ui.js';
 import { BreadthChart } from '../charts.js';
 
 const TONE = { ok: 'ok', warn: 'warn', bad: 'bad' };
@@ -57,6 +57,8 @@ export function MarketPage() {
         sub="stocks at a 1-year high or low" />
     </div>
 
+    ${data.movers && html`<${Movers} data=${data} />`}
+
     <section class="section">
       <${SectionHead} title="Breadth vs EGX30" hint="1 year. When most stocks are above their averages, breakouts have more support." />
       <div class="card flush"><${BreadthChart} h=${b.history} /></div>
@@ -69,4 +71,36 @@ export function MarketPage() {
         sort=${{ key: 'r21', dir: 'desc' }} /></div>
     </section>
     <${Disclaimer} />`;
+}
+
+const PERIODS = [{ value: 'chg1', label: 'Last session' }, { value: 'ret5', label: '1 week' }, { value: 'ret21', label: '1 month' }];
+
+// The liquid stocks that moved most, and the stocks at a 1-year high or low at the last close.
+function Movers({ data }) {
+  const [period, setPeriod] = useState('ret5');
+  const stocks = useStore(s => s.stocks) || [];
+  const name = sym => (stocks.find(s => s.symbol === sym) || {}).name_ar || '';
+  const m = data.movers[period];
+  const list = rows => html`<div class="mover-list">${rows.map(r => html`<a class="mover" href=${stockHref(r.symbol)}>
+    <span><b>${r.symbol}</b><span class="faint" dir="auto">${name(r.symbol)}</span></span>
+    <span class="price">${fmt.price(r.close)}</span><b class=${tone(r.ret)}>${fmt.pct(r.ret, 1)}</b></a>`)}</div>`;
+  const chips = syms => (syms.length ? html`<div class="sector-leaders">${syms.map(s => html`<a href=${stockHref(s)}>${s}</a>`)}</div>`
+    : html`<p class="muted" style="font-size:13px">None today.</p>`);
+  return html`
+    <section class="section">
+      <${SectionHead} title="Biggest movers"
+        hint="Among liquid stocks (enough daily trading for the BUY rules). A stock that jumped more than 30% in one day is left out: that's a split or bonus shares the prices don't reflect yet.">
+        <${Seg} options=${PERIODS} value=${period} onChange=${setPeriod} /><//>
+      <div class="grid grid-2">
+        <div class="card"><div class="card-title up">Rose most</div>${list(m.up)}</div>
+        <div class="card"><div class="card-title down">Fell most</div>${list(m.down)}</div>
+      </div>
+    </section>
+    <section class="section">
+      <${SectionHead} title="At a 1-year high or low" hint="Stocks that closed at their highest or lowest price of the last year." />
+      <div class="grid grid-2">
+        <div class="card"><div class="card-title up">1-year highs · ${data.highs.length}</div>${chips(data.highs)}</div>
+        <div class="card"><div class="card-title down">1-year lows · ${data.lows.length}</div>${chips(data.lows)}</div>
+      </div>
+    </section>`;
 }

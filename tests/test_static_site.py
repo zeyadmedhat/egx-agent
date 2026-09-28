@@ -13,6 +13,7 @@ from cryptography.exceptions import InvalidTag
 
 from app import static_site
 from egx_agent import config, corporate, db, portfolio, risk, scan, strategy
+from egx_agent.data import prices as prices_mod
 from egx_agent.indicators import add_indicators
 from tests.conftest import make_ohlcv
 
@@ -275,6 +276,11 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
     screen = files["screener.bin"]
     assert {r["symbol"] for r in screen["rows"]} == {"AAA", "BBB"} and "held" not in screen["rows"][0]   # yours: in the browser
     assert {"vs_ema50", "from_high", "rsi", "yield", "top10"} <= set(screen["rows"][0])
+    assert files["history.bin"]["buys"] == [{"date": files["core.bin"]["scan_date"], "symbol": "AAA", "setup": "Breakout"}]
+    assert {"dividends", "yields", "bonus"} <= set(files["dividends.bin"]) and "held" not in files["dividends.bin"]
+    market = files["market.bin"]
+    assert set(market["movers"]) == {"chg1", "ret5", "ret21"} and "AAA" in market["highs"]   # a steady climb
+    assert "fills" not in files["history.bin"]                                           # yours stay in your browser
     with pytest.raises(InvalidTag):
         static_site.unseal((out / "data" / "core.bin").read_bytes(),
                            static_site.derive_key("not the password", static_site.salt_for("me/egx")))
@@ -482,3 +488,117 @@ def test_size_calculator_uses_the_signals_own_sizing_rule():
     assert off["max_positions"] == 2 and any("portfolio is full" in c["text"] for c in off["checks"])
     assert any(c["level"] == "warn" and "usual stop is 4–12%" in c["text"] for c in wide["checks"])
     assert bad_stop == {"ok": False, "error": "The stop must be below the entry price."}
+
+
+def _history_db(path: Path, apply_bonus: bool):
+    conn = db.connect(path)
+    conn.execute("INSERT INTO stocks(symbol, name_ar, sector_ar) VALUES ('AAA', 'أ', 'بنوك'), ('BBB', 'ب', 'عقاري')")
+    for sym, base in (("AAA", 10.0), ("BBB", 20.0), (prices_mod.INDEX_SYMBOL, 1000.0)):
+        df = make_ohlcv(np.linspace(base, base * 1.3, 120), volume=2e6).rename_axis("date").reset_index()
+        df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+        db.upsert_prices(conn, sym, df)
+    days = [r[0] for r in conn.execute("SELECT date FROM prices WHERE symbol='AAA' ORDER BY date")]
+    c = dict(config.DEFAULTS)
+    a = portfolio.add_real_buy(conn, c, "AAA", days[20], 10.6, 100, 0.3)
+    b = portfolio.add_real_buy(conn, c, "BBB", days[30], 21.2, 50, 0.5)
+    portfolio.sell_real(conn, c, a, days[60], 11.4, 100, "Target reached")
+    corporate.add_dividend(conn, b, days[70], 25.0)
+    # BBB gives 1 free share for every 4 on days[80]: its stored history is re-based
+    conn.execute("UPDATE prices SET open=open/1.25, high=high/1.25, low=low/1.25, close=close/1.25 WHERE symbol='BBB'")
+    db.add_price_event(conn, "BBB", days[80], 1.25)
+    if apply_bonus:
+        event = conn.execute("SELECT id FROM price_events").fetchone()[0]
+        corporate.apply(conn, b, event, 62)
+    conn.commit()
+    return conn, c, days
+
+
+@needs_node
+@pytest.mark.parametrize("apply_bonus", [True, False])
+def test_portfolio_health_and_journal_add_up_to_my_portfolio(tmp_path, apply_bonus):
+    from app import views
+    conn, c, days = _history_db(tmp_path / "egx.db", apply_bonus)
+    d = views.Data(conn, c, views.Cache())
+    h = views.portfolio_history(d)
+    page = views.portfolio_view(d)
+    curve, j = run_js({"op": "equity", "args": h}, {"op": "journal", "args": {"closed": page["closed"], "history": h}})
+    assert curve["time"][0] == days[20] and len(curve["time"]) == 100
+    assert curve["value"][-1] == pytest.approx(page["summary"]["equity"], rel=1e-9)   # the same as My Portfolio
+    before, after = curve["time"].index(days[79]), curve["time"].index(days[80])
+    assert curve["value"][after] / curve["value"][before] == pytest.approx(1, abs=0.01)   # no jump on the ex-date
+    assert curve["index"][0] == pytest.approx(c["capital"])
+    assert j["n"] == 1 and j["pnl"] == pytest.approx(page["closed"][0]["pnl"]) and j["win_rate"] == 1
+    assert j["trades"][0]["source"] == "Your own idea" and not j["has_inflation"]
+
+
+@needs_node
+def test_journal_finds_the_signal_and_what_inflation_took():
+    closed = [{"id": 1, "symbol": "AAA", "entry_date": "2026-03-10", "exit_date": "2026-04-09", "entry_price": 10.0,
+               "shares": 100, "pnl": 50.0, "return_pct": 0.05, "exit_reason": "Target reached (2R)"},
+              {"id": 2, "symbol": "BBB", "entry_date": "2026-03-01", "exit_date": "2026-03-15", "entry_price": 20.0,
+               "shares": 50, "pnl": -40.0, "return_pct": -0.04, "exit_reason": "Stop-loss"}]
+    history = {"buys": [{"date": "2026-03-08", "symbol": "AAA", "setup": "Breakout"},
+                        {"date": "2026-01-02", "symbol": "BBB", "setup": "Pullback"}],        # too long before
+               "inflation": [{"date": "2026-01-31", "value": 12.0}, {"date": "2026-02-28", "value": 13.0}]}
+    j, = run_js({"op": "journal", "args": {"closed": closed, "history": history}})
+    aaa = next(t for t in j["trades"] if t["symbol"] == "AAA")
+    assert aaa["source"] == "Breakout" and aaa["days"] == 30
+    assert aaa["inflation"] == pytest.approx(1.13 ** (30 / 365.25) - 1)
+    assert aaa["real_pnl"] == pytest.approx(50 - 1000 * aaa["inflation"])
+    assert next(t for t in j["trades"] if t["symbol"] == "BBB")["source"] == "Your own idea"
+    assert j["win_rate"] == 0.5 and j["profit_factor"] == pytest.approx(50 / 40)
+    assert {g["label"] for g in j["by_exit"]} == {"Target reached", "Stop-loss"}
+    assert [g["label"] for g in j["by_month"]] == ["2026-04", "2026-03"]
+
+
+def test_market_movers_leave_out_splits_the_prices_dont_show_yet(tmp_path, cfg):
+    from app import views
+    conn = db.connect(_site_db(tmp_path / "egx.db"))
+    last = conn.execute("SELECT MAX(date) FROM prices").fetchone()[0]
+    conn.execute("UPDATE prices SET close = close / 4 WHERE symbol='BBB' AND date=?", (last,))   # a 1:4 split
+    conn.commit()
+    m = views.movers(views.Data(conn, cfg, views.Cache()))
+    week = m["movers"]["ret5"]
+    assert [r["symbol"] for r in week["up"]] == ["AAA"] and [r["symbol"] for r in week["down"]] == ["AAA"]
+
+
+def test_friends_set_alerts_in_telegram_and_get_them_after_a_close(tmp_path, monkeypatch):
+    from app import alerts
+    conn = db.connect(_site_db(tmp_path / "egx.db"))
+    bot = FakeBot()
+    monkeypatch.setattr(alerts, "call", bot.call)
+    monkeypatch.setattr(alerts, "send", bot.send)
+    code = static_site.telegram_code(PASSWORD, "me/egx")
+    last = conn.execute("SELECT MAX(date) FROM prices").fetchone()[0]
+    close = conn.execute("SELECT close FROM prices WHERE symbol='BBB' AND date=?", (last,)).fetchone()[0]
+    for text in (f"/start {code}", "/watch aaa", "/watch BBB 1000", "/watch BBB 1", "/watch ZZZ", "/list", "hello"):
+        bot.says(111, text)
+    bot.says(222, "/watch AAA")                                   # not connected: not listened to
+    subs = alerts.sync_subscribers(conn, "123:abc", code)
+    assert subs["connected"] == 1 and subs["commands"] == 5
+    replies = [t for c, t in bot.sent if c == "111"][1:]           # after the welcome
+    assert replies[0] == "OK: I'll tell you when AAA gets a BUY signal, after any close."
+    assert replies[1].startswith("OK: I'll tell you when BBB closes above 1,000") and "last close" in replies[1]
+    assert replies[2].startswith("OK: I'll tell you when BBB closes below 1.000")
+    assert replies[3].startswith("I don't know ZZZ") and "a close above" in replies[4]
+    assert not any(c == "222" for c, _ in bot.sent)
+
+    bot.sent.clear()
+    assert alerts.fire_watch_alerts(conn, "123:abc", last) == 1     # AAA is a BUY at this close
+    assert "AAA</b> got a BUY signal" in bot.sent[0][1]
+    assert alerts.fire_watch_alerts(conn, "123:abc", last) == 0     # once per close
+    conn.execute("UPDATE prices SET close=0.5 WHERE symbol='BBB' AND date=?", (last,))
+    assert alerts.fire_watch_alerts(conn, "123:abc", last) == 1     # BBB closed below 1: sent, and done
+    assert [r[0] for r in conn.execute("SELECT kind FROM watch_alerts WHERE symbol='BBB'")] == ["above"]
+    assert close < 1000
+
+    bot.says(111, "/unwatch bbb")
+    bot.says(111, "/stop")
+    alerts.sync_subscribers(conn, "123:abc", code)
+    assert conn.execute("SELECT COUNT(*) FROM watch_alerts").fetchone()[0] == 0       # /stop forgets them all
+
+
+def test_the_mac_watchlist_goes_to_the_site_with_the_portfolio_backup(tmp_path, cfg):
+    conn = db.connect(_site_db(tmp_path / "egx.db"))
+    db.set_user_meta(conn, "watchlist", json.dumps(["AAA", "BBB"]))
+    assert static_site.portfolio_backup(conn, cfg)["book"]["watchlist"] == ["AAA", "BBB"]

@@ -188,6 +188,15 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
         calc = c.get("/api/calc").json()
         assert calc["equity"] > 0 and calc["positions"] == [] and calc["cfg"]["risk_per_trade_pct"] > 0
         assert stock["plan"]["stop"] < stock["stats"]["close"] < stock["plan"]["target"]
+        hist = c.get("/api/portfolio/history").json()
+        assert hist["fills"] == [] and hist["index"] is None and "inflation" in hist
+        divs = c.get("/api/dividends").json()
+        assert divs["held"] == [] and divs["dividends"] == []
+        saved = c.put("/api/watchlist", json={"symbols": ["s01", "NOPE", "S01", "S02"]}, headers=H).json()
+        assert saved["symbols"] == ["S01", "S02"] and c.get("/api/watchlist").json()["symbols"] == ["S01", "S02"]
+        assert c.put("/api/watchlist", json={"symbols": []}).status_code == 403     # only the dashboard can change it
+        market = c.get("/api/market").json()
+        assert len(market["movers"]["ret5"]["up"]) <= 6
 
 
 def test_monthly_retrain_runs_after_a_scan_only_when_due(tmp_path, cfg, fast_model):

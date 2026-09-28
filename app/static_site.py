@@ -134,7 +134,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "scan_url": scan_url,
     }
     out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
-                              "screener": views.screener(d)}
+                              "screener": views.screener(d), "history": views.history_data(d),
+                              "dividends": views.dividend_calendar(d)}
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
     for sym in d.table.index:
         if sym in with_prices:
@@ -233,7 +234,7 @@ def portfolio_backup(conn, cfg: dict) -> dict:
                    if r["trade_id"] in ids and r["event_id"] in events]
     book = {"v": 1, "next_id": count + 1, "trades": trades, "fills": fills, "dividends": dividends,
             "adjustments": adjustments, "checklist": {}, "settings": {k: cfg[k] for k in personal_keys() if k in cfg},
-            "meta": {}}
+            "meta": {}, "watchlist": json.loads(db.get_user_meta(conn, "watchlist") or "[]")}
     return {"app": "egx-trading-agent", "kind": "portfolio-backup",
             "exported": datetime.now().isoformat(timespec="seconds"), "book": book}
 

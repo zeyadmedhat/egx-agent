@@ -1,7 +1,7 @@
 // Screener: every stock's trend, momentum, volume, model rank and dividend yield in one table, with filters.
 // Filters are remembered on this device. Information only: the BUY rules decide the signals.
 import { html, useApi, useState, useMemo, useStore, fmt, tone, go, stockHref, remember, cls } from '../lib.js';
-import { Icon, PageHead, PageLoading, DataTable, StockCell, StatusChip, Chance, Disclaimer } from '../ui.js';
+import { Icon, PageHead, PageLoading, DataTable, StockCell, StatusChip, Chance, Disclaimer, WatchStar } from '../ui.js';
 
 const DEFAULTS = {
   q: '', sector: '', trend: 'any', rsi: 'any', volume: 'any', high: 'any', model: 'any', shariah: 'any',
@@ -104,6 +104,7 @@ const above = (v, label) => html`<span class=${cls('trend-dot', v > 0 ? 'up' : v
   title=${v == null ? `Not enough history for the ${label}-day average` : `${fmt.pct(v, 1)} vs its ${label}-day average`}>${label}</span>`;
 
 const COLUMNS = [
+  { key: 'star', label: '', sortable: false, width: '34px', render: r => html`<${WatchStar} symbol=${r.symbol} />` },
   { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
   { key: 'sector', label: 'Sector', sortValue: r => r.info.sector || '', render: r => html`<span class="muted">${r.info.sector || ''}</span>` },
   { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },

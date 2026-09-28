@@ -1,7 +1,7 @@
 // Stock: TradingView-style chart with your levels, why it does or doesn't qualify, your position, Shariah details.
 import { html, useApi, useState, useEffect, useMemo, fmt, tone, cls, go, stockHref, remember } from '../lib.js';
 import {
-  Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, StockPicker, Seg, Disclaimer, DayBar, Chance,
+  Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, StockPicker, Seg, Disclaimer, DayBar, Chance, WatchStar,
 } from '../ui.js';
 import { PriceChart } from '../charts.js';
 
@@ -33,7 +33,8 @@ export function StockPage({ route }) {
   return html`${picker}
     <div class="card stock-head">
       <div class="who">
-        <div class="sym-line"><span class="sym-big" style="font-size:26px">${data.symbol}</span><${IndexPills} info=${info} />
+        <div class="sym-line"><span class="sym-big" style="font-size:26px">${data.symbol}</span>
+          <${WatchStar} symbol=${data.symbol} label /><${IndexPills} info=${info} />
           ${data.signal && html`<${StatusChip} status=${data.signal.action} />`}
           ${data.position && html`<span class="tag"><${Icon} name="briefcase" size=${13} />You hold it</span>`}</div>
         <div class="row" style="gap:8px"><span class="stock-name" dir="rtl">${info.name_ar || ''}</span>

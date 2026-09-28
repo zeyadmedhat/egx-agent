@@ -145,12 +145,16 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             report["site"] += ", unchanged (not published again)"
         if subs is not None:
             sent = {"sent": 0, "failed": 0, "gone": 0}
+            fired = 0
             if data_date and final and subs["connected"]:
                 text = alerts.build_site_message(views.Data(conn, cfg, views.Cache()), site_url)
                 sent = alerts.send_to_subscribers(conn, token, text, data_date)
+                fired = alerts.fire_watch_alerts(conn, token, data_date)
             report["telegram"] = (f"{subs['connected'] - sent['gone']} connected ({subs['joined']} new, "
                                   f"{subs['left'] + sent['gone']} left), sent to {sent['sent']}"
-                                  + (f", {sent['failed']} failed" if sent["failed"] else ""))
+                                  + (f", {sent['failed']} failed" if sent["failed"] else "")
+                                  + (f", {subs['commands']} commands answered" if subs.get("commands") else "")
+                                  + (f", {fired} alerts" if fired else ""))
         elif not token:
             report["telegram"] = "not set up"
         report["warnings"] = warnings

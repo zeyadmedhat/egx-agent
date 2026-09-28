@@ -273,7 +273,8 @@ async function portfolioView(c) {
     summary: s, positions: await openPositions(c), closed: rows, closed_stats: stats,
     signals: sig.filter(r => r.action === 'BUY').map(r => ({ symbol: r.symbol, entry_high: r.entry_high, shares: r.shares })),
     fee_pct: cfg.fee_pct_per_side, sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
-    review_day: cfg.review_day, nothing_saved: !book.trades.some(t => t.account === 'real'),
+    review_day: cfg.review_day, max_open_risk_pct: cfg.max_open_risk_pct,
+    nothing_saved: !book.trades.some(t => t.account === 'real'),
   };
 }
 
@@ -288,6 +289,13 @@ async function predictView(c) {
   return out;
 }
 
+// The dividend calendar (views.dividends_view): everyone's dividends, plus which of them you hold.
+async function dividendsView(c) {
+  const out = (await load('dividends').catch(() => null))
+    || { today: null, dividends: [], yields: [], bonus: [], min_value: c.cfg.min_avg_value_egp };
+  return { ...out, held: [...new Set(E.trades(c.book, 'real', ['open']).map(t => t.symbol))].sort() };
+}
+
 // The screener (views.screener_view): everyone's numbers, plus your Shariah filter's signals and what you hold.
 async function screenerView(c) {
   const out = await load('screener');
@@ -296,6 +304,33 @@ async function screenerView(c) {
   const action = Object.fromEntries(rows.map(r => [r.symbol, r.action]));
   const held = new Set(E.trades(c.book, 'real', ['open']).map(t => t.symbol));
   return { ...out, rows: out.rows.map(r => ({ ...r, action: action[r.symbol] ?? null, held: held.has(r.symbol) })) };
+}
+
+// My Portfolio's Health and Journal tabs (views.portfolio_history): your fills and dividends from this browser, the
+// published prices of the stocks you've held, and the shared history (past BUY signals, inflation).
+async function historyView(c) {
+  const real = new Set(c.book.trades.filter(t => t.account === 'real').map(t => t.id));
+  const fills = c.book.fills.filter(f => real.has(f.trade_id))
+    .map(f => ({ date: f.date, symbol: f.symbol, side: f.side, shares: f.shares, price: f.price, fees: f.fees || 0 }));
+  const dividends = c.book.dividends.filter(x => real.has(x.trade_id)).map(x => ({ date: x.date, amount: x.amount }));
+  const symbols = [...new Set(fills.map(f => f.symbol))];
+  const pages = await Promise.all(symbols.map(s => load(`stock/${s}`).catch(() => null)));
+  const series = {};
+  symbols.forEach((s, i) => { if (pages[i] && pages[i].series) series[s] = { time: pages[i].series.time, close: pages[i].series.close }; });
+  const shared = (await load('history').catch(() => null)) || { buys: [], inflation: [] };
+  const pending = Object.values(E.pending(c.book, c.core.events, 'real'))
+    .map(e => ({ symbol: e.symbol, ex_date: e.ex_date, factor: e.factor }));
+  return { start: +c.cfg.capital, fills, dividends, pending, events: c.core.events.filter(e => symbols.includes(e.symbol)),
+    series, index: fills.length ? c.core.index : null, ...shared };
+}
+
+// The stocks you starred (views.save_watchlist), kept in this browser with your portfolio and in its backups.
+function saveWatchlist(c, body) {
+  const known = new Set(c.core.stocks.map(s => s.symbol));
+  const out = [...new Set((body.symbols || []).map(s => String(s).trim().toUpperCase()))].filter(s => known.has(s)).slice(0, 100);
+  c.book.watchlist = out;
+  saveBook(c.book);
+  return { symbols: out };
 }
 
 // The size calculator's side (views.calc_view): your account, your limits and the market's state.
@@ -518,9 +553,11 @@ export async function localApi(path, { method = 'GET', body } = {}) {
       case 'stocks': return c.core.stocks;
       case 'today': return today(c);
       case 'stock': return stockDetail(c, decodeURIComponent(b || ''));
-      case 'portfolio': return portfolioView(c);
+      case 'portfolio': return b === 'history' ? historyView(c) : portfolioView(c);
       case 'calc': return calcView(c);
       case 'screener': return screenerView(c);
+      case 'dividends': return dividendsView(c);
+      case 'watchlist': return { symbols: c.book.watchlist || [] };
       case 'market': return load('market');
       case 'predict': return predictView(c);
       case 'settings': return settingsView(c);
@@ -537,6 +574,7 @@ export async function localApi(path, { method = 'GET', body } = {}) {
   if (method === 'DELETE' && a === 'portfolio' && b && !x) return deletePosition(c, id);
   if (method === 'DELETE' && a === 'dividends') return deleteDividend(c, id);
   if (method === 'PUT' && a === 'settings') return saveSettings(c, body);
+  if (method === 'PUT' && a === 'watchlist') return saveWatchlist(c, body || {});
   if (method === 'POST' && a === 'settings' && b === 'defaults') return resetSettings(c);
   return fail(404, "That isn't available on this site. Scans run by themselves after every close.");
 }

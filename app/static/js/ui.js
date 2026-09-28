@@ -1,7 +1,7 @@
 // Shared building blocks: icons, Shariah badges, KPI tiles, tables, forms, the stock picker, dialogs.
 import {
   html, Fragment, useState, useEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
-  stockHref, watchForData, STATIC,
+  stockHref, watchForData, toggleWatch, STATIC,
 } from './lib.js';
 
 // ------------------------------------------------------------------ icons (stroke icons, 24×24)
@@ -41,6 +41,7 @@ const ICONS = {
   target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
   bars: '<path d="M3 3v18h18"/><path d="M7 16v-4M12 16V8M17 16v-7"/>',
   copy: '<rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  percent: '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
   coins: '<circle cx="8" cy="8" r="6"/><path d="M18.1 10.4A6 6 0 1 1 10.3 18"/><path d="M7 6h1v4"/>',
   listCheck: '<path d="M11 6h10M11 12h10M11 18h10"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
   split: '<path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.2-2.8L3 3"/><path d="m15 9 6-6"/>',
@@ -176,6 +177,15 @@ export function Chance({ p, base, top }) {
   const ratio = base ? p / base : 1;
   return html`<span class=${cls('chance', ratio >= 1.3 ? 'up' : ratio <= 0.8 ? 'low' : '')}
     title=${base ? `The average liquid stock: ${fmt.pct(base, 0, false)}` : ''}>${fmt.pct(p, 0, false)}</span>`;
+}
+
+// A star that adds the stock to your watchlist (or takes it off).
+export function WatchStar({ symbol, label }) {
+  const list = useStore(s => s.watchlist) || [];
+  const on = list.includes(symbol);
+  return html`<button type="button" class=${cls('star-btn', on && 'on', label && 'labelled')}
+    title=${on ? 'On your watchlist: click to remove it' : 'Add to your watchlist'} aria-pressed=${on}
+    onClick=${e => { e.stopPropagation(); toggleWatch(symbol); }}>${on ? '★' : '☆'}${label ? html`<span>${on ? 'Watching' : 'Watch'}</span>` : ''}</button>`;
 }
 
 // The market switch for the model's picks: full size, half size or no new buys, from breadth.

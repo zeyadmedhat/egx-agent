@@ -107,6 +107,10 @@ class TokenIn(BaseModel):
     token: str = Field(min_length=1, max_length=120)
 
 
+class WatchlistIn(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=200)
+
+
 class AlertOptionsIn(BaseModel):
     only_action: bool
 
@@ -438,6 +442,18 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def stock(symbol: str, d: views.Data = Depends(get_data)):
         return JSON(views.stock_detail(d, symbol))
 
+    @app.get("/api/watchlist")
+    def watchlist(d: views.Data = Depends(get_data)):
+        return JSON({"symbols": views.watchlist(d)})
+
+    @app.put("/api/watchlist")
+    def watchlist_save(body: WatchlistIn, d: views.Data = Depends(get_data)):
+        return JSON(views.save_watchlist(d, body.symbols))
+
+    @app.get("/api/dividends")
+    def dividends_page(d: views.Data = Depends(get_data)):
+        return JSON(views.dividends_view(d))
+
     @app.get("/api/screener")
     def screener_page(d: views.Data = Depends(get_data)):
         return JSON(views.screener_view(d))
@@ -449,6 +465,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     @app.get("/api/portfolio")
     def portfolio_page(d: views.Data = Depends(get_data)):
         return JSON(views.portfolio_view(d))
+
+    @app.get("/api/portfolio/history")
+    def portfolio_history(d: views.Data = Depends(get_data)):
+        return JSON(views.portfolio_history(d))
 
     @app.get("/api/paper")
     def paper(d: views.Data = Depends(get_data)):

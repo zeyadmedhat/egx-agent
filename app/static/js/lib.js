@@ -60,6 +60,7 @@ export const store = {
   version: null,     // data version: changes after every scan / Kashif refresh
   tick: 0,           // bumped after anything you change, so pages reload
   stocks: null,      // all stocks for search and pickers
+  watchlist: null,   // the stocks you starred (kept with your portfolio)
   toasts: [],
   offline: false,
   theme: document.documentElement.dataset.theme || 'dark',
@@ -206,6 +207,20 @@ export async function startJob(path, body) {
 
 export async function loadStocks() {
   try { setStore({ stocks: await api('/stocks') }); } catch { /* retried on next version change */ }
+  try { setStore({ watchlist: (await api('/watchlist')).symbols }); } catch { /* the same */ }
+}
+
+// Star or unstar a stock. The star changes at once; it goes back if saving fails.
+export async function toggleWatch(symbol) {
+  const before = store.watchlist || [];
+  const next = before.includes(symbol) ? before.filter(s => s !== symbol) : [...before, symbol];
+  setStore({ watchlist: next });
+  try {
+    setStore({ watchlist: (await api('/watchlist', { method: 'PUT', body: { symbols: next } })).symbols });
+  } catch (e) {
+    setStore({ watchlist: before });
+    toast(e.message, 'error');
+  }
 }
 
 // ------------------------------------------------------------------ routing (#/page/arg?query)

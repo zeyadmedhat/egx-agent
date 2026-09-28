@@ -413,7 +413,8 @@ def screener(d: Data) -> dict:
             y = yields.get(sym)
             rows.append({
                 "symbol": sym, "date": str(ind.index[-1].date()), "close": last.close,
-                "chg1": c.iloc[-1] / c.iloc[-2] - 1, "ret21": c.iloc[-1] / c.iloc[-22] - 1 if len(c) > 21 else None,
+                "chg1": c.iloc[-1] / c.iloc[-2] - 1, "ret5": c.iloc[-1] / c.iloc[-6] - 1 if len(c) > 5 else None,
+                "ret21": c.iloc[-1] / c.iloc[-22] - 1 if len(c) > 21 else None,
                 "ret63": last.ret63, "rsi": last.rsi14, "adx": last.adx14, "vol_ratio": last.vol_ratio,
                 "value": last.value_avg20, "atr_pct": last.atr14 / last.close,
                 "vs_ema20": last.close / last.ema20 - 1, "vs_ema50": last.close / last.ema50 - 1,
@@ -425,6 +426,62 @@ def screener(d: Data) -> dict:
         return clean({"date": str(d.indicators(prices.INDEX_SYMBOL).index[-1].date()) if rows else None,
                       "min_value": d.cfg["min_avg_value_egp"], "rows": rows})
     return d.cache.get(d.version, ("screener",), build)
+
+
+def dividend_calendar(d: Data) -> dict:
+    """Every company's cash dividends the agent has seen (TradingView: the latest and the next announced), each one's
+    share of the price, the yields, and the bonus shares and splits of the last year. The same for everyone; what you
+    hold is marked where you look (dividends_view)."""
+    def build():
+        last = d.last_two()
+        today = date.today().isoformat()
+        value = {r["symbol"]: r["v"] for r in d.conn.execute(      # average traded value, last 20 sessions
+            """SELECT symbol, AVG(close * volume) AS v FROM (
+                   SELECT symbol, close, volume, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+                   FROM prices) WHERE rn <= 20 GROUP BY symbol""")}
+        cash = []
+        for r in d.conn.execute("SELECT symbol, ex_date, pay_date, amount FROM cash_dividends ORDER BY ex_date DESC"):
+            close = (last.get(r["symbol"]) or {}).get("close")
+            cash.append({"symbol": r["symbol"], "ex_date": r["ex_date"], "pay_date": r["pay_date"], "amount": r["amount"],
+                         "pct": r["amount"] / close if close else None, "upcoming": r["ex_date"] >= today})
+        yields = [{"symbol": r["symbol"], "yield": r["yield_pct"] / 100, "value": value.get(r["symbol"])}
+                  for r in d.conn.execute("SELECT symbol, yield_pct FROM dividend_yield WHERE yield_pct > 0 "
+                                          "ORDER BY yield_pct DESC") if r["symbol"] in d.table.index]
+        year_ago = (date.today() - pd.Timedelta(days=365)).isoformat()
+        bonus = [{"symbol": r["symbol"], "ex_date": r["ex_date"], "factor": r["factor"],
+                  "text": corporate.describe(r["factor"])}
+                 for r in d.conn.execute("SELECT symbol, ex_date, factor FROM price_events WHERE ex_date >= ? "
+                                         "ORDER BY ex_date DESC", (year_ago,))]
+        updated = d.conn.execute("SELECT MAX(updated) FROM dividend_yield").fetchone()[0]
+        return clean({"today": today, "updated": updated, "min_value": d.cfg["min_avg_value_egp"], "dividends": cash,
+                      "yields": yields, "bonus": bonus})
+    return d.cache.get(d.version, ("dividends",), build)
+
+
+def dividends_view(d: Data) -> dict:
+    return {**dividend_calendar(d), "held": sorted({p["symbol"] for p in open_positions(d)})}
+
+
+WATCH_MAX = 100
+
+
+def watchlist(d: Data) -> list[str]:
+    """The stocks you starred (your own list, kept with your portfolio)."""
+    try:
+        saved = json.loads(db.get_user_meta(d.conn, "watchlist") or "[]")
+    except ValueError:
+        saved = []
+    return [s for s in saved if isinstance(s, str)]
+
+
+def save_watchlist(d: Data, symbols: list[str]) -> dict:
+    out: list[str] = []
+    for s in symbols:
+        s = str(s).strip().upper()
+        if s in d.table.index and s not in out:
+            out.append(s)
+    db.set_user_meta(d.conn, "watchlist", json.dumps(out[:WATCH_MAX]))
+    return {"symbols": out[:WATCH_MAX]}
 
 
 def screener_view(d: Data) -> dict:
@@ -505,8 +562,46 @@ def portfolio_view(d: Data) -> dict:
     return clean({
         "summary": s, "positions": open_positions(d), "closed": rows, "closed_stats": stats, "signals": buy_signals,
         "fee_pct": cfg["fee_pct_per_side"], "sell_reasons": SELL_REASONS, "max_hold_days": cfg["max_hold_days"],
-        "review_day": cfg["review_day"],
+        "review_day": cfg["review_day"], "max_open_risk_pct": cfg["max_open_risk_pct"],
     })
+
+
+def history_data(d: Data) -> dict:
+    """History that's the same for everyone, for the Journal: every past BUY signal (to tell which of your trades
+    followed one) and Egypt's yearly inflation (to show what it took)."""
+    def build():
+        buys = [{"date": r["scan_date"], "symbol": r["symbol"], "setup": r["setup"]} for r in d.conn.execute(
+            "SELECT scan_date, symbol, setup FROM scans WHERE action='BUY' ORDER BY scan_date, symbol")]
+        inflation = [{"date": r["date"], "value": r["value"]} for r in d.conn.execute(
+            "SELECT date, value FROM macro WHERE series='inflation' AND date >= '2015-01-01' ORDER BY date")]
+        return {"buys": buys, "inflation": inflation}
+    return d.cache.get(d.version, ("history",), build)
+
+
+def portfolio_history(d: Data) -> dict:
+    """Your raw history for My Portfolio's Health and Journal tabs: fills, dividends, and the prices of every stock
+    you've held from a few months before your first buy. insights.js does the sums; the site does the same with the
+    portfolio in your browser (local/api.js historyView)."""
+    rows = lambda sql: [dict(r) for r in d.conn.execute(sql)]  # noqa: E731
+    fills = rows("SELECT f.date, f.symbol, f.side, f.shares, f.price, f.fees FROM fills f JOIN trades t "
+                 "ON t.id = f.trade_id WHERE t.account = 'real' ORDER BY f.date, f.id")
+    dividends = rows("SELECT v.date, v.amount FROM dividends v JOIN trades t ON t.id = v.trade_id "
+                     "WHERE t.account = 'real' ORDER BY v.date")
+    symbols = sorted({f["symbol"] for f in fills})
+    since = pd.Timestamp(min(f["date"] for f in fills)) - pd.Timedelta(days=120) if fills else pd.Timestamp.max
+
+    def closes(sym: str) -> dict:
+        px = d.prices(sym)
+        px = px[px.index >= since]
+        return {"time": [str(t.date()) for t in px.index], "close": column(px["close"])}
+
+    events = [{"symbol": r["symbol"], "ex_date": r["ex_date"], "factor": r["factor"]}
+              for r in d.conn.execute("SELECT symbol, ex_date, factor FROM price_events") if r["symbol"] in symbols]
+    start = portfolio.account_summary(d.conn, "real", d.cfg, d.closes())["start"]
+    pending = [{k: e[k] for k in ("symbol", "ex_date", "factor")} for e in corporate.pending(d.conn, "real").values()]
+    return clean({"start": start, "fills": fills, "dividends": dividends, "events": events, "pending": pending,
+                  "series": {s: closes(s) for s in symbols}, "index": closes(prices.INDEX_SYMBOL) if fills else None,
+                  **history_data(d)})
 
 
 def paper_view(d: Data) -> dict:
@@ -609,12 +704,48 @@ def breadth_data(d: Data) -> dict | None:
     return d.cache.get(d.version, "breadth", build)
 
 
+JUMP = 0.30   # a one-day move this big can't happen within EGX's daily price limits
+
+
+def movers(d: Data) -> dict:
+    """The liquid stocks that rose and fell most over a day, a week and a month, and the stocks at a 1-year closing
+    high or low (the rule of the 52-week highs/lows count), at the last close. From one price table, so it's quick."""
+    def build():
+        latest = d.conn.execute("SELECT MAX(date) FROM prices").fetchone()[0]
+        since = (pd.Timestamp(latest or date.today()) - pd.Timedelta(days=420)).strftime("%Y-%m-%d")
+        px = pd.read_sql_query("SELECT symbol, date, close, volume FROM prices WHERE date >= ?", d.conn, params=(since,))
+        px = px[px["symbol"].isin(d.table.index)]
+        if px.empty:
+            return {"movers": None, "highs": [], "lows": []}
+        close = px.pivot(index="date", columns="symbol", values="close").sort_index()
+        value = (close * px.pivot(index="date", columns="symbol", values="volume").reindex_like(close)).tail(20).mean()
+        today = close.iloc[-1].dropna().index                      # traded at the last close
+        c = close.ffill(limit=5)
+        year = close.tail(250)
+        enough = year.notna().sum() >= 120
+        liquid = today[value.reindex(today) >= d.cfg["min_avg_value_egp"]]
+        out = {}
+        daily = c.pct_change(fill_method=None).abs()
+        for key, n in (("chg1", 1), ("ret5", 5), ("ret21", 21)):
+            # a one-day move beyond EGX's ±20% limit means a split or bonus shares not re-based yet: not a real move
+            clean_ = daily.tail(n).max().reindex(liquid).fillna(0) <= JUMP
+            ret = (c.iloc[-1] / c.iloc[-1 - n] - 1).reindex(liquid[clean_.to_numpy()]).dropna().sort_values()
+            pick = lambda rs: [{"symbol": s, "ret": float(r), "close": float(close[s].iloc[-1])} for s, r in rs.items()]  # noqa: E731
+            out[key] = {"up": pick(ret[::-1].head(6)), "down": pick(ret.head(6))}
+        last = close.iloc[-1].reindex(today)
+        highs = [s for s in today if enough[s] and last[s] >= year[s].max() * 0.999]
+        lows = [s for s in today if enough[s] and last[s] <= year[s].min() * 1.001]
+        return clean({"movers": out, "highs": sorted(highs), "lows": sorted(lows)})
+    return d.cache.get(d.version, ("movers",), build)
+
+
 def market_view(d: Data) -> dict:
     b = breadth_data(d)
     m = market_info(d.conn)
     if not b:
         return {"breadth": None, "market": m or None}
-    return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("risk_off") if m else None), "market": m or None})
+    return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("risk_off") if m else None), "market": m or None,
+                  **movers(d)})
 
 
 def predictions(d: Data) -> dict:

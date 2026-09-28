@@ -4,6 +4,7 @@
 import * as E from '../../app/static/js/local/engine.js';
 import { readBackup } from '../../app/static/js/local/site.js';
 import { planTrade } from '../../app/static/js/sizing.js';
+import * as I from '../../app/static/js/insights.js';
 
 const input = JSON.parse(await new Promise(resolve => {
   let s = '';
@@ -39,6 +40,9 @@ const OPS = {
       settings: book.settings, next_id: E.nextId(book) };
   },
   plan: args => planTrade(args),
+  equity: args => I.equityCurve(args),
+  journal: ({ closed, history }) => I.journal(closed, history),
+  correlations: ({ series, symbols }) => I.correlations(series, symbols),
   describe: ({ factors }) => factors.map(f => E.describe(f)),
   sessionsAfter: ({ pairs }) => pairs.map(([d, n]) => E.sessionsAfter(d, n)),
   expected: ({ times }) => times.map(t => E.expectedSessionDate(new Date(t))),

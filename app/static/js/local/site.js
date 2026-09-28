@@ -132,6 +132,7 @@ export async function newData() {
 // ------------------------------------------------------------------ your own data, in this browser only
 export const emptyBook = () => ({
   v: 1, next_id: 1, trades: [], fills: [], dividends: [], adjustments: [], checklist: {}, settings: {}, meta: {},
+  watchlist: [],
 });
 
 export function validBook(b) {
