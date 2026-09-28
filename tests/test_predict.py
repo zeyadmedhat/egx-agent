@@ -111,6 +111,7 @@ def fast_model(monkeypatch):
     monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: (
         HistGradientBoostingClassifier(max_iter=15, min_samples_leaf=40) if hz == 10
         else LGBMClassifier(n_estimators=15, min_child_samples=40, verbose=-1)))
+    monkeypatch.setattr(macro, "update", lambda conn, provider=None: list(macro.SERIES))   # no downloads in tests
 
 
 def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, fast_model):
@@ -265,10 +266,21 @@ def test_the_20_session_model_uses_egypt_data_and_an_older_design_is_retrained(t
     bundle = predict.load_models(tmp_path / "models")
     assert bundle["features"][10] == predict.FEATURES and "fx_ret63" in bundle["features"][20]
     assert predict.predict_latest(conn, cfg) == 10
-    assert not predict.needs_training(conn, cfg)
+    assert meta["egypt_data"] and not predict.needs_training(conn, cfg)
     meta["version"] = 1                                                     # a model from before this design
     predict.meta_path(tmp_path / "models").write_text(json.dumps(meta))
     assert predict.needs_training(conn, cfg)
+
+
+def test_a_model_trained_without_egypt_data_retrains_once_it_arrives(tmp_path, cfg, fast_model):
+    conn = _market(tmp_path)
+    meta = predict.train(conn, cfg)                     # no scan ran first and the download failed
+    assert meta["egypt_data"] is False and not predict.needs_training(conn, cfg)
+    assert jobs.retrain_if_due(conn, cfg, lambda p, m: None) == ""       # tried the download, still nothing
+    _add_macro(conn, start="2020-12-01")                # the next scan brings it
+    assert predict.needs_training(conn, cfg)
+    assert jobs.retrain_if_due(conn, cfg, lambda p, m: None) == "retrained"
+    assert predict.load_meta(tmp_path / "models")["egypt_data"] is True
 
 
 def test_a_prediction_that_couldnt_be_bought_counts_as_cancelled(tmp_path, cfg):

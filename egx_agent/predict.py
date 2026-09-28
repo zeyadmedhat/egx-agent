@@ -27,7 +27,8 @@ from .data import macro, prices, universe
 from .indicators import add_indicators, ema
 
 HORIZONS = (10, 20)
-MODEL_VERSION = 2             # 2: Egypt data for the 20-session model; untradeable entry days left out of results
+MODEL_VERSION = 3             # 2: Egypt data for the 20-session model, untradeable entry days left out of results;
+                              # 3: the Egypt data is downloaded before training (2 could train without it)
 MIN_TRAIN_YEARS = 3           # the first tested year needs at least this much history before it
 RETRAIN_DAYS = 30
 MODEL_DIR = config.ROOT / "data" / "models"
@@ -399,15 +400,21 @@ def age_days(meta: dict | None, today: date | None = None) -> int | None:
     return ((today or date.today()) - date.fromisoformat(meta["trained_at"][:10])).days
 
 
+def egypt_data_ready(conn: sqlite3.Connection) -> bool:
+    """Every Egypt series has been downloaded (the scan does it; so does training when it's missing)."""
+    return conn.execute("SELECT COUNT(DISTINCT series) FROM macro").fetchone()[0] >= len(macro.SERIES)
+
+
 def needs_training(conn: sqlite3.Connection, cfg: dict, today: date | None = None) -> bool:
-    """True when an existing model is a month old, the trade settings changed, or the model's design changed since
-    (MODEL_VERSION). The first training is yours."""
+    """True when an existing model is a month old, the trade settings changed, the model's design changed since
+    (MODEL_VERSION), or it was trained without the Egypt data and that is here now. The first training is yours."""
     root = model_dir(conn)
     meta = load_meta(root)
     if not meta or not model_path(root).exists():
         return False
     return (age_days(meta, today) >= RETRAIN_DAYS or bool(settings_changed(meta, cfg))
-            or meta.get("version", 1) != MODEL_VERSION)
+            or meta.get("version", 1) != MODEL_VERSION
+            or (not meta.get("egypt_data", True) and egypt_data_ready(conn)))
 
 
 def load_frames(conn: sqlite3.Connection, cfg: dict) -> tuple[dict, pd.DataFrame, pd.Series]:
@@ -453,7 +460,7 @@ def train(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], 
     before = load_meta(root) or {}
     data_to = str(liquid["date"].max().date())
     meta = {
-        "version": MODEL_VERSION,
+        "version": MODEL_VERSION, "egypt_data": egypt_data_ready(conn),
         # the live track record counts predictions from this model design only, not an older one's
         "live_since": before.get("live_since", data_to) if before.get("version") == MODEL_VERSION else data_to,
         "trained_at": datetime.now().isoformat(timespec="seconds"),

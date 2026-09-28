@@ -12,7 +12,7 @@ from typing import Callable
 import pandas as pd
 
 from egx_agent import backtest, config, corporate, db, predict, scan
-from egx_agent.data import prices, shariah, universe
+from egx_agent.data import macro, prices, shariah, universe
 
 from . import accounts, alerts, views
 
@@ -134,8 +134,22 @@ def send_alerts(site: "accounts.Site | None", conn, cfg: dict) -> str:
     return ", ".join(parts)
 
 
+def _egypt_data(conn) -> None:
+    """The 20-session model learns from the Egypt data. A scan downloads it, but training shouldn't go without it
+    when no scan ran first (a run with no new close, or the first training)."""
+    if predict.egypt_data_ready(conn):
+        return
+    try:
+        macro.update(conn)
+    except Exception:  # the model still trains; it retrains by itself once the data is here
+        traceback.print_exc()
+
+
 def retrain_if_due(conn, cfg: dict, say: Progress) -> str:
-    """Retrain the prediction model once a month, or after you change the stop/target settings."""
+    """Retrain the prediction model once a month, after you change the stop/target settings, or when its design
+    changed or the Egypt data it lacked has arrived."""
+    if predict.load_meta(predict.model_dir(conn)):
+        _egypt_data(conn)
     if not predict.needs_training(conn, cfg):
         return ""
     try:
@@ -159,6 +173,7 @@ def train_job(conn, say: Progress) -> dict:
                                                         f"one time only: {d}/{t} ({s})"))
         if res["events"]:
             corporate.apply_paper(conn)
+    _egypt_data(conn)
     return predict.train(conn, cfg, progress=lambda p, m: say(start + (1 - start) * p, m))
 
 
