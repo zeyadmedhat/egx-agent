@@ -12,7 +12,9 @@ fi
 echo "Copying your strategy settings (not your own numbers)…"
 .venv/bin/python -m app.static_site strategy || { echo "Couldn't read your settings."; pause; exit 1; }
 
-git add -A
+# Only the program's own folders and files: anything else you keep in this folder stays on the Mac.
+git add -A app egx_agent tests site .github .gitignore requirements.txt README.md \
+  "Start Trading Agent.command" "Stop Trading Agent.command" "Publish website.command"
 # Safety checks: nothing private may be in what's about to be sent.
 if git diff --cached --name-only | grep -Eq '^(data/|state/|deploy/|config\.yaml$)|\.db$'; then
   echo "Stopped: private files were about to be sent. Nothing was published."
