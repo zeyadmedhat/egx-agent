@@ -4,6 +4,7 @@ pandas>=2.2
 numpy>=1.26
 requests>=2.31
 scikit-learn>=1.5
+lightgbm>=4.3
 beautifulsoup4>=4.12
 pyyaml>=6.0
 cryptography>=42

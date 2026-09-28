@@ -370,7 +370,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     ]
     preds = predictions(d)
     if sym in preds["by_symbol"]:
-        out["prediction"] = {**preds["by_symbol"][sym], **{k: preds[k] for k in ("base", "count", "date")}}
+        out["prediction"] = {**preds["by_symbol"][sym], **{k: preds.get(k) for k in ("base", "count", "date", "top_n")}}
     shown = ind if tail is None else ind.tail(tail)
     out["series"] = {"time": [str(t.date()) for t in shown.index], **{c: column(shown[c]) for c in cols}}
     return out
@@ -546,16 +546,21 @@ def predictions(d: Data) -> dict:
         if lt.empty or not meta:
             return {"by_symbol": {}, "base": None, "count": 0, "date": None}
         base = {hz: (meta["horizons"].get(str(hz), {}).get("all") or {}).get("hit") for hz in predict.HORIZONS}
+        # its top 10% each day: the group its tested results are about, so the only chances worth showing
+        cut = max(1, math.ceil(len(lt) * TOP_SHARE))
         by = {}
         for sym, r in lt.iterrows():
             by[sym] = {f"{k}{hz}": r.get(f"{k}{hz}") for hz in predict.HORIZONS for k in ("p", "rank")}
-        return {"by_symbol": clean(by), "base": clean(base), "count": int(len(lt)), "date": lt["date"].iloc[0]}
+            by[sym].update({f"top{hz}": bool(r.get(f"rank{hz}", cut + 1) <= cut) for hz in predict.HORIZONS})
+        return {"by_symbol": clean(by), "base": clean(base), "count": int(len(lt)), "date": lt["date"].iloc[0],
+                "top_n": cut}
     return d.cache.get(d.version, ("predictions", db.get_meta(d.conn, "prediction_date"),
                                    db.get_meta(d.conn, "prediction_updated")), build)
 
 
 HORIZON_KEYS = ("all", "top", "rule", "rule_agree", "rule_disagree", "auc", "lift", "grade", "verdict", "years",
-                "groups", "from", "to", "train_n", "good_years", "top_share")
+                "groups", "from", "to", "train_n", "good_years", "top_share", "features")
+TOP_SHARE = 0.10   # the model's top picks: its best 10% each day
 
 
 def predict_public(d: Data) -> dict:
@@ -565,17 +570,18 @@ def predict_public(d: Data) -> dict:
     deep = int(db.get_meta(d.conn, "history_years_loaded") or 0) >= prices.DEEP_YEARS
     out: dict = {"model": None, "rows": [], "deep": deep, "deep_years": prices.DEEP_YEARS,
                  "horizons": list(predict.HORIZONS), "retrain_days": predict.RETRAIN_DAYS,
-                 "features": len(predict.FEATURES),
+                 "features": {str(hz): len(f) for hz, f in predict.HORIZON_FEATURES.items()},
                  "levels": {k: d.cfg[k] for k in ("atr_stop_mult", "stop_min_pct", "stop_max_pct", "target_r")}}
     if not meta or not predict.model_path(root).exists():
         return out
     out["model"] = {
         **{k: meta[k] for k in ("trained_at", "data_from", "data_to", "stocks", "rows")},
+        "live_since": meta.get("live_since"),
         "age_days": predict.age_days(meta), "changed": predict.settings_changed(meta, d.cfg),
         "horizons": {hz: {k: r.get(k) for k in HORIZON_KEYS} for hz, r in meta["horizons"].items()},
     }
     preds = predictions(d)
-    out.update(base=preds["base"], date=preds["date"], count=preds["count"])
+    out.update(base=preds["base"], date=preds["date"], count=preds["count"], top_n=preds.get("top_n"))
     lt = predict.latest(d.conn)
     for sym, r in lt.iterrows():
         close = float(r["close"])
@@ -584,7 +590,9 @@ def predict_public(d: Data) -> dict:
             "target": close * (1 + r["target_pct"]), "target_pct": r["target_pct"], "stop_pct": r["stop_pct"],
             **preds["by_symbol"].get(sym, {}),
         })
-    out["live"] = predict.live_record(d.conn)
+    out["live"] = predict.live_record(d.conn, since=meta.get("live_since"))
+    b = breadth_data(d)
+    out["switch"] = breadth.switch(b["above50"]) if b else None
     return out
 
 

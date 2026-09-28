@@ -2,7 +2,7 @@
 import { html, useApi, useState, startJob, fmt, tone, go, stockHref, STATIC } from '../lib.js';
 import {
   Icon, Badges, Kpi, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, Seg, JobProgress,
-  useJob, StatusChip, Chance, Empty,
+  useJob, StatusChip, Chance, Empty, MarketSwitch,
 } from '../ui.js';
 
 const HORIZONS = [{ value: 10, label: '10 sessions (~2 weeks)' }, { value: 20, label: '20 sessions (~1 month)' }];
@@ -36,6 +36,7 @@ export function PredictPage() {
       <button class="linkish" onClick=${train} disabled=${running}>retrain it now</button>.`}<//></div>`}
     <${Callout} tone=${GRADE_TONE[r.grade] || ''}><b>${hz}-session model: ${r.verdict}</b>${' '}
       Tested on ${fmt.date(r.from)} – ${fmt.date(r.to)}, with each year predicted by a version that had never seen it.<//>
+    ${data.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${data.switch} /></div>`}
 
     <div class="row" style="margin:16px 0 12px;justify-content:space-between">
       <${Seg} options=${HORIZONS} value=${hz} onChange=${setHz} />
@@ -56,7 +57,7 @@ export function PredictPage() {
 
     <section class="section">
       <${SectionHead} title="Today's chances" count=${data.rows.length}
-        hint=${`From the ${fmt.date(data.date)} close. Stop and target are the agent's usual plan from that close.`}>
+        hint=${`From the ${fmt.date(data.date)} close, sorted by the model's rank. It gives a chance only for its top ${fmt.int(data.top_n)} stocks (its best 10%): that's the group its tested results are about. Stop and target are the agent's usual plan.`}>
         <${Seg} options=${SHOW} value=${show} onChange=${setShow} /><//>
       <div class="card flush"><${ChanceTable} rows=${rows} hz=${hz} base=${base} /></div>
     </section>
@@ -71,14 +72,14 @@ export function PredictPage() {
     </section>
 
     <section class="section">
-      <${SectionHead} title="Live track record"
-        hint="Predictions made since you trained it, checked against what really happened. This is the real test." />
-      <${Live} live=${live} hz=${hz} />
+      <${SectionHead} title="Since it went live"
+        hint=${`Predictions from this version of the model${m.live_since ? ` (since the ${fmt.date(m.live_since)} close)` : ''}, checked against what really happened, next to its test results. This is the real test.`} />
+      <${Live} live=${live} hz=${hz} r=${r} />
     </section>
 
     <section class="section">
       <${SectionHead} title="About this model" />
-      <${About} m=${m} data=${data} r=${r} onTrain=${train} running=${running} />
+      <${About} m=${m} data=${data} r=${r} hz=${hz} onTrain=${train} running=${running} />
     </section>
 
     <div style="margin-top:18px"><${Callout} tone="warn"><b>Read these numbers with care.</b>${' '}
@@ -103,8 +104,8 @@ function Intro({ data, onTrain, running }) {
     <ul class="reasons">
       <li>${data.deep ? '' : `First a one-time download of ${data.deep_years} years of prices (about 4 minutes). `}It learns from
         about 10 years of every liquid EGX stock: roughly 250,000 past examples.</li>
-      <li>It looks at ${data.features} measures: trend, momentum, volume, volatility, how the stock compares with its sector, and how the
-        whole market is doing.</li>
+      <li>It looks at ${data.features['10']} measures: trend, momentum, volume, volatility, how the stock compares with its sector, and how the
+        whole market is doing. The 1-month model also looks at Egypt-wide numbers: the dollar rate, interest rates and inflation.</li>
       <li>It's tested honestly: each year is predicted by a version trained only on the years before it. Those are the results
         you'll see, and it tells you plainly if it has no edge.</li>
       <li>After that it updates every scan, and retrains itself once a month.</li>
@@ -124,9 +125,9 @@ function ChanceTable({ rows, hz, base }) {
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
     { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
     { key: 'p10', label: '2 weeks', align: 'r', title: 'Chance of target before stop within 10 sessions',
-      render: r => html`<${Chance} p=${r.p10} base=${base[10]} />` },
+      render: r => html`<${Chance} p=${r.p10} base=${base[10]} top=${r.top10} />` },
     { key: 'p20', label: '1 month', align: 'r', title: 'Chance of target before stop within 20 sessions',
-      render: r => html`<${Chance} p=${r.p20} base=${base[20]} />` },
+      render: r => html`<${Chance} p=${r.p20} base=${base[20]} top=${r.top20} />` },
     { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
     { key: 'stop', label: 'Stop', align: 'r', render: r => html`${fmt.price(r.stop)}
       <div class="faint down" style="font-size:11.5px">${fmt.pct(-r.stop_pct, 1)}</div>` },
@@ -166,22 +167,23 @@ function YearsTable({ years }) {
   return html`<${DataTable} columns=${columns} rows=${[...years].reverse()} rowKey=${y => y.year} />`;
 }
 
-function Live({ live, hz }) {
+function Live({ live, hz, r }) {
   if (!live.n) {
     return html`<div class="card"><${Empty} icon="history" title="Nothing to check yet"
-      text=${`A prediction is checked once its ${hz} sessions are over${live.pending_days ? ` (${live.pending_days} day${live.pending_days === 1 ? '' : 's'} of predictions waiting)` : ''}. The first results appear about ${hz === 10 ? 'two weeks' : 'a month'} after you train the model.`} /></div>`;
+      text=${`A prediction is checked once its ${hz} sessions are over${live.pending_days ? ` (${live.pending_days} day${live.pending_days === 1 ? '' : 's'} of predictions waiting)` : ''}. The first results appear about ${hz === 10 ? 'two weeks' : 'a month'} after this version went live. In its tests, its top 10% reached the target first ${fmt.pct(r.top.hit, 0, false)} of the time, averaging ${fmt.pct(r.top.ret, 2)} a trade.`} /></div>`;
   }
   return html`<div class="kpis">
     <${Kpi} label="Its top 10%: target first" value=${fmt.pct(live.top.hit, 0, false)}
-      valueClass=${live.top.hit > live.all.hit ? 'up' : 'down'} sub=${`vs ${fmt.pct(live.all.hit, 0, false)} for all scored stocks`} />
+      valueClass=${live.top.hit > live.all.hit ? 'up' : 'down'}
+      sub=${`tested ${fmt.pct(r.top.hit, 0, false)} · all scored stocks ${fmt.pct(live.all.hit, 0, false)}`} />
     <${Kpi} label="Its top 10%: average result" value=${fmt.pct(live.top.ret, 2)} valueClass=${tone(live.top.ret)}
-      sub=${`vs ${fmt.pct(live.all.ret, 2)} for all scored stocks`} />
+      sub=${`tested ${fmt.pct(r.top.ret, 2)} · all scored stocks ${fmt.pct(live.all.ret, 2)}`} />
     <${Kpi} label="Checked so far" value=${`${fmt.int(live.days)} day${live.days === 1 ? '' : 's'}`}
       sub=${`${fmt.date(live.from)} – ${fmt.date(live.to)} · ${fmt.int(live.n)} predictions`} />
   </div>`;
 }
 
-function About({ m, data, r, onTrain, running }) {
+function About({ m, data, r, hz, onTrain, running }) {
   return html`<div class="card"><div class="grid grid-2" style="align-items:start">
     <div class="stat-list">
       <span class="k">Trained</span><span class="v">${fmt.datetime(m.trained_at)} (${m.age_days === 0 ? 'today' : `${m.age_days} days ago`})</span>
@@ -191,9 +193,12 @@ function About({ m, data, r, onTrain, running }) {
       <span class="k">Scored today</span><span class="v">${fmt.int(data.count)} liquid stocks</span>
     </div>
     <div>
-      <p class="muted" style="font-size:13px">A gradient-boosting model (many small decision trees) for each horizon. It
-        updates its numbers after every scan and retrains itself once every ${data.retrain_days} days, or after you change
-        the stop or target settings. Stocks that aren't liquid enough for the agent's rules are left out.</p>
+      <p class="muted" style="font-size:13px">A gradient-boosting model (many small decision trees) for each horizon, using${' '}
+        ${fmt.int(data.features[String(hz)])} measures.${' '}
+        ${hz === 20 ? 'This one also uses Egypt-wide numbers (the dollar rate, the interbank interest rate, inflation, and small caps vs EGX30), each only from the day it was published. ' : ''}
+        It updates its numbers after every scan and retrains itself once every ${data.retrain_days} days, or after you change
+        the stop or target settings. Stocks that aren't liquid enough for the agent's rules are left out, and so are
+        days a stock couldn't really be bought (no trading, or stuck at one price).</p>
       <button class="btn sm" style="margin-top:12px" onClick=${onTrain} disabled=${running}>
         <${Icon} name="refresh" />Retrain now</button>
     </div>

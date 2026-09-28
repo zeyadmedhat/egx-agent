@@ -143,9 +143,24 @@ the model has seen. The chances are calibrated on those results, so "22%" means 
 The top 10% beat the average stock in all 10 years (AUC 0.59, graded *Useful*). The 20-session model is weaker
 (*Small edge*). Even its best picks usually don't reach the target, so always use the stop.
 
+**Egypt data (20-session model).** Each scan also downloads USD/EGP, the interbank interest rate, inflation and
+EGX70 from TradingView (`egx_agent/data/macro.py`); each is used only from the day it was published. In the
+Sep 2026 tests it lifted the 20-session model's top 10% from +1.03% to +1.18% a trade (and it beat the average stock
+in every year); the 10-session model did no better with it, so it doesn't use it. Also tested and **not** used: a
+model that ranks the day's stocks against each other, one that predicts the return, other stop/target plans, and
+weighting recent years more; none beat the model above. Days a stock couldn't really be bought (no trading, or stuck
+at one price all day) are left out of the tested and live results.
+
+**Market switch.** From breadth (the share of stocks above their 50-day average): below 40% *no new buys*, 40–50%
+*half size*, otherwise *full size*. It's for the model's picks: tested 2016–2026 on its top 5 every two weeks, it
+took them from 27% to 34% a year and cut the worst drop from −62% to −22% (every cut-off from 30% to 50% did about as
+well). It barely changed the BUY rules' backtest, so they keep their own EGX30 rule. Shown on Today, Market, Predict
+and in Telegram.
+
 **After that** it updates its numbers after every scan and retrains by itself once a month (or after you change
-the stop or target settings). The *Live track record* shows how its predictions turned out since you trained it.
-That's the real test. Consider using it as a filter for BUYs only once the live record agrees with the test.
+the stop or target settings, or the model's design changes). It gives a chance only for its top 10% each day: its
+test results are about those. *Since it went live* shows how this version's predictions turned out, next to its
+test results. That's the real test. Consider using it as a filter for BUYs only once the live record agrees with the test.
 
 ## The website for friends (GitHub Pages)
 

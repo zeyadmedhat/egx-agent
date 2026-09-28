@@ -1,6 +1,6 @@
 // Market: breadth (how many stocks rise with the index) and which sectors lead. Context only; the BUY rules don't use it.
 import { html, useApi, fmt, stockHref } from '../lib.js';
-import { Kpi, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, Empty } from '../ui.js';
+import { Kpi, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, Empty, MarketSwitch } from '../ui.js';
 import { BreadthChart } from '../charts.js';
 
 const TONE = { ok: 'ok', warn: 'warn', bad: 'bad' };
@@ -44,6 +44,7 @@ export function MarketPage() {
     <${Callout} tone=${TONE[v.tone]}><b>${v.text}</b>${change != null
       ? ` ${fmt.pct(b.above50, 0, false)} of ${b.stocks} stocks are above their 50-day average, ${change >= 0 ? 'up' : 'down'} ${fmt.int(Math.abs(change * 100))} points in a week.`
       : ''}<//>
+    ${v.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${v.switch} /></div>`}
     <div class="kpis" style="margin-top:14px">
       <${Kpi} label="Above 50-day average" icon="bars" value=${fmt.pct(b.above50, 0, false)}
         valueClass=${b.above50 >= 0.6 ? 'up' : b.above50 < 0.4 ? 'down' : 'warn'}

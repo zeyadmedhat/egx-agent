@@ -18,6 +18,12 @@ MIN_BARS = 50          # a stock needs this many sessions before it counts
 ACTIVE_WITHIN = 10     # ... and must have traded in the last this-many sessions
 SESSIONS = 460         # enough for a 200-day average plus a year of history
 
+# The market switch for the prediction model's picks. Walk-forward 2016–2026 (top 5 picks every 2 weeks): 27% → 34%
+# a year and the worst drop −62% → −22%; every cut-off from 30% to 50% helped about as much, so these aren't tuned.
+# A model-based switch did no better. The BUY rules keep their own EGX30 rule (the switch changed them little).
+SWITCH_OFF_BELOW = 0.40
+SWITCH_HALF_BELOW = 0.50
+
 
 def load_closes(conn: sqlite3.Connection, sessions: int = SESSIONS) -> tuple[pd.DataFrame, pd.Series]:
     """Closes as a table (EGX sessions × stocks) and the EGX30 close, for the last `sessions` sessions."""
@@ -108,4 +114,18 @@ def verdict(b: dict, index_risk_off: bool | None) -> dict:
     elif index_risk_off is True and p >= 0.55:
         text = "Most stocks are holding up better than EGX30, which is below its 50-day average."
     change = None if b.get("above50_week_ago") is None else p - b["above50_week_ago"]
-    return {"tone": tone, "text": text, "change_week": change}
+    return {"tone": tone, "text": text, "change_week": change, "switch": switch(p)}
+
+
+def switch(above50: float | None) -> dict | None:
+    """Full / half / no new buys, from the share of stocks above their 50-day average."""
+    if above50 is None or not np.isfinite(above50):
+        return None
+    if above50 < SWITCH_OFF_BELOW:
+        return {"state": "off", "size": 0.0, "label": "No new buys",
+                "text": f"Fewer than {SWITCH_OFF_BELOW:.0%} of stocks are above their 50-day average."}
+    if above50 < SWITCH_HALF_BELOW:
+        return {"state": "half", "size": 0.5, "label": "Half size",
+                "text": f"Only {SWITCH_OFF_BELOW:.0%}–{SWITCH_HALF_BELOW:.0%} of stocks are above their 50-day average."}
+    return {"state": "full", "size": 1.0, "label": "Full size",
+            "text": f"At least {SWITCH_HALF_BELOW:.0%} of stocks are above their 50-day average."}

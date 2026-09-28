@@ -5,9 +5,11 @@ set from the signal day's close, exactly like a BUY card. "Target before stop" m
 sessions (one model per horizon). If both levels are touched on the same day it counts as a loss.
 
 One gradient-boosting model per horizon learns from every liquid EGX stock's history (price, volume, trend,
-momentum, the stock's sector and the whole market's breadth). It is tested walk-forward: every year is
-predicted by a model trained only on the years before it, with a gap so no test trade overlaps a training
-trade. Those out-of-sample results are what the dashboard shows, never results on data the model has seen.
+momentum, the stock's sector and the whole market's breadth); the 20-session one also sees Egypt-wide numbers
+(the pound, interest rates, inflation: data/macro.py). It is tested walk-forward: every year is predicted by a
+model trained only on the years before it, with a gap so no test trade overlaps a training trade. Those
+out-of-sample results are what the dashboard shows, never results on data the model has seen. Trades whose entry
+day couldn't really be traded (no volume, or locked at one price) are left out of them.
 """
 from __future__ import annotations
 
@@ -21,10 +23,11 @@ import numpy as np
 import pandas as pd
 
 from . import config, db, strategy
-from .data import prices, universe
+from .data import macro, prices, universe
 from .indicators import add_indicators, ema
 
 HORIZONS = (10, 20)
+MODEL_VERSION = 2             # 2: Egypt data for the 20-session model; untradeable entry days left out of results
 MIN_TRAIN_YEARS = 3           # the first tested year needs at least this much history before it
 RETRAIN_DAYS = 30
 MODEL_DIR = config.ROOT / "data" / "models"
@@ -46,6 +49,10 @@ FEATURES = [
     # the whole market
     "breadth20", "breadth50", "breadth200", "mkt_ret5", "mkt_ret21", "idx_ret5", "idx_ret21", "idx_dist_ema50",
 ]
+# Walk-forward in 2026-09: Egypt data lifted the 20-session model's top picks (and in more years); the 10-session
+# model did no better with it, so it keeps the stock features only.
+HORIZON_FEATURES = {10: FEATURES, 20: FEATURES + macro.FEATURES}
+ALL_FEATURES = FEATURES + macro.FEATURES
 
 
 # ------------------------------------------------------------------ features and labels
@@ -171,11 +178,13 @@ def _index_features(index_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, sectors: pd.Series, cfg: dict,
-                  labels: bool = True, progress: Callable[[float, str], None] | None = None) -> pd.DataFrame:
+                  labels: bool = True, progress: Callable[[float, str], None] | None = None,
+                  macro_raw: pd.DataFrame | None = None) -> pd.DataFrame:
     """One row per stock per day with every feature (and the trade outcomes when labels=True).
 
     frames: OHLCV per symbol. Rows are marked `liquid` when the stock passed the liquidity/price/history rules
-    that day: those are the only rows the model trains on or predicts for.
+    that day: those are the only rows the model trains on or predicts for. macro_raw: db.load_macro (the Egypt
+    features are empty without it).
     """
     say = progress or (lambda p, m: None)
     index_close = index_df["close"] if len(index_df) else None
@@ -203,6 +212,8 @@ def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
                 out = trade_outcomes(ind, cfg, hz)
                 f[f"hit{hz}"] = out["hit"]
                 f[f"ret{hz}_trade"] = out["ret"]
+            # the entry day (the next session) had no volume or one price all day: an order couldn't have filled
+            f["entry_locked"] = ((ind["high"] == ind["low"]) | (ind["volume"] <= 0)).shift(-1).astype(float)
         parts.append(f)
     if not parts:
         return pd.DataFrame()
@@ -213,13 +224,17 @@ def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
         ds = ds.join(_index_features(index_df), on="date")
     else:
         ds = ds.assign(idx_ret5=np.nan, idx_ret21=np.nan, idx_dist_ema50=np.nan, idx_risk_off=np.nan)
+    days = pd.DatetimeIndex(np.sort(ds["date"].unique()))
+    index_close = index_df["close"] if len(index_df) else pd.Series(dtype=float)
+    raw = macro_raw if macro_raw is not None else pd.DataFrame()
+    ds = ds.join(macro.features(raw, index_close, days), on="date")
     # the rules' own BUY decision on each day, to compare the model with
     ds["rule_rank"] = ds["ret63"].where(ds["liquid"]).groupby(ds["date"]).rank(pct=True).fillna(0)
     ds["rule_score"] = np.clip(ds["rule_base"] + ds["rule_rank"] * 25, 0, 100)
     risk_off = ds["idx_risk_off"].fillna(0).astype(bool)
     thr = np.where(risk_off, strategy.buy_threshold(cfg, True), strategy.buy_threshold(cfg, False))
     ds["rule_buy"] = ds["liquid"] & ds["rule_eligible"] & ds["setup_on"] & (ds["rule_score"] >= thr)
-    ds[FEATURES] = ds[FEATURES].astype("float32")
+    ds[ALL_FEATURES] = ds[ALL_FEATURES].astype("float32")
     return ds
 
 
@@ -229,13 +244,21 @@ RANK_GROUPS = ((0.9, 1.0, "Top 10%"), (0.7, 0.9, "Next 20%"), (0.5, 0.7, "Middle
 AGREE_RANK = 0.8   # "the model agrees" with a rule BUY when it ranks the stock in that day's top 20%
 
 
-def new_model(n_rows: int = 200_000):
+def new_model(n_rows: int = 200_000, hz: int = 10):
     """Cautious settings (small trees, big leaves, strong regularisation): market data is noisy, and a model that
-    fits the past closely is over-confident about the future. Tested against looser settings walk-forward."""
+    fits the past closely is over-confident about the future. Tested against looser settings walk-forward.
+
+    The 20-session model is LightGBM: the same kind of model, but it copes with a feature that is empty for a whole
+    training period (EGX70 only starts in 2017), which scikit-learn's version can't."""
+    leaf = int(np.clip(n_rows // 100, 200, 1500))
+    if hz == 20:
+        from lightgbm import LGBMClassifier
+        return LGBMClassifier(learning_rate=0.03, n_estimators=300, num_leaves=15, min_child_samples=leaf,
+                              reg_lambda=5.0, subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
+                              random_state=7, verbose=-1)
     from sklearn.ensemble import HistGradientBoostingClassifier
     return HistGradientBoostingClassifier(learning_rate=0.03, max_iter=200, max_leaf_nodes=15,
-                                          min_samples_leaf=int(np.clip(n_rows // 100, 200, 1500)),
-                                          l2_regularization=5.0, random_state=7)
+                                          min_samples_leaf=leaf, l2_regularization=5.0, random_state=7)
 
 
 def _auc(y: np.ndarray, p: np.ndarray) -> float | None:
@@ -269,13 +292,16 @@ def walk_forward(ds: pd.DataFrame, hz: int,
         cutoff = days[max(pos - hz - 1, 0)]          # every training trade is over before testing starts
         train = data[data["date"] <= cutoff]
         test = data[(data["date"] >= days[pos]) & (data["date"].dt.year == year)]
+        if "entry_locked" in test:
+            test = test[test["entry_locked"] != 1]   # an order couldn't have filled: not a real trade to score
         if len(test) < 200 or train[y_col].nunique() < 2:
             continue
         say(k / len(test_years), f"{hz}-session model: testing {year} with a model trained on "
                                  f"{pd.Timestamp(days[0]).year}–{pd.Timestamp(cutoff).year} only…")
-        m = new_model(len(train)).fit(train[FEATURES], train[y_col])
+        feats = HORIZON_FEATURES[hz]
+        m = new_model(len(train), hz).fit(train[feats], train[y_col])
         t = test[["date", "symbol", y_col, f"ret{hz}_trade", "rule_buy"]].copy()
-        t["prob"] = m.predict_proba(test[FEATURES])[:, 1]
+        t["prob"] = m.predict_proba(test[feats])[:, 1]
         oos.append(t)
         folds.append({"year": int(year), "train_from": str(pd.Timestamp(days[0]).date()),
                       "train_to": str(pd.Timestamp(cutoff).date()), "train_n": int(len(train))})
@@ -374,12 +400,14 @@ def age_days(meta: dict | None, today: date | None = None) -> int | None:
 
 
 def needs_training(conn: sqlite3.Connection, cfg: dict, today: date | None = None) -> bool:
-    """True when an existing model is a month old or the trade settings changed. The first training is yours."""
+    """True when an existing model is a month old, the trade settings changed, or the model's design changed since
+    (MODEL_VERSION). The first training is yours."""
     root = model_dir(conn)
     meta = load_meta(root)
     if not meta or not model_path(root).exists():
         return False
-    return age_days(meta, today) >= RETRAIN_DAYS or bool(settings_changed(meta, cfg))
+    return (age_days(meta, today) >= RETRAIN_DAYS or bool(settings_changed(meta, cfg))
+            or meta.get("version", 1) != MODEL_VERSION)
 
 
 def load_frames(conn: sqlite3.Connection, cfg: dict) -> tuple[dict, pd.DataFrame, pd.Series]:
@@ -398,7 +426,8 @@ def train(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], 
     say = progress or (lambda p, m: None)
     say(0.01, "Loading price history…")
     frames, index_df, sectors = load_frames(conn, cfg)
-    ds = build_dataset(frames, index_df, sectors, cfg, progress=lambda p, m: say(0.02 + 0.13 * p, m))
+    ds = build_dataset(frames, index_df, sectors, cfg, progress=lambda p, m: say(0.02 + 0.13 * p, m),
+                       macro_raw=db.load_macro(conn))
     if ds.empty or not ds["liquid"].any():
         raise RuntimeError("Not enough price history to train on. Run a scan first.")
     liquid = ds[ds["liquid"]]
@@ -414,16 +443,21 @@ def train(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], 
         calibrators[hz] = calibrator(oos, hz)
         say(base + 0.36, f"{hz}-session model: training the final version on all the history…")
         rows = liquid[liquid[f"hit{hz}"].notna()]
-        models[hz] = new_model(len(rows)).fit(rows[FEATURES], rows[f"hit{hz}"])
-        results[str(hz)]["train_n"] = int(len(rows))
+        models[hz] = new_model(len(rows), hz).fit(rows[HORIZON_FEATURES[hz]], rows[f"hit{hz}"])
+        results[str(hz)].update(train_n=int(len(rows)), features=len(HORIZON_FEATURES[hz]))
     root.mkdir(parents=True, exist_ok=True)
     tmp = model_path(root).with_suffix(".tmp")
-    joblib.dump({"models": models, "calibrators": calibrators, "features": FEATURES, "sklearn": sklearn.__version__},
-                tmp)
+    joblib.dump({"models": models, "calibrators": calibrators, "features": dict(HORIZON_FEATURES),
+                 "sklearn": sklearn.__version__}, tmp)
     tmp.replace(model_path(root))
+    before = load_meta(root) or {}
+    data_to = str(liquid["date"].max().date())
     meta = {
+        "version": MODEL_VERSION,
+        # the live track record counts predictions from this model design only, not an older one's
+        "live_since": before.get("live_since", data_to) if before.get("version") == MODEL_VERSION else data_to,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
-        "data_from": str(liquid["date"].min().date()), "data_to": str(liquid["date"].max().date()),
+        "data_from": str(liquid["date"].min().date()), "data_to": data_to,
         "stocks": int(liquid["symbol"].nunique()), "rows": int(len(liquid)), "sklearn": sklearn.__version__,
         "settings": {k: cfg[k] for k in LEVEL_KEYS}, "horizons": results,
     }
@@ -441,7 +475,7 @@ def predict_latest(conn: sqlite3.Connection, cfg: dict, root: Path | None = None
         return 0
     if ds is None:
         frames, index_df, sectors = load_frames(conn, cfg)
-        ds = build_dataset(frames, index_df, sectors, cfg, labels=False)
+        ds = build_dataset(frames, index_df, sectors, cfg, labels=False, macro_raw=db.load_macro(conn))
     if ds.empty:
         return 0
     day = ds["date"].max()
@@ -450,7 +484,9 @@ def predict_latest(conn: sqlite3.Connection, cfg: dict, root: Path | None = None
         return 0
     raw, chance = {}, {}
     for hz, m in bundle["models"].items():
-        raw[hz] = m.predict_proba(rows[bundle["features"]])[:, 1]
+        feats = bundle["features"]
+        feats = feats[hz] if isinstance(feats, dict) else feats   # models saved before version 2 had one list
+        raw[hz] = m.predict_proba(rows[feats])[:, 1]
         cal = bundle.get("calibrators", {}).get(hz)
         chance[hz] = cal.predict(raw[hz]) if cal is not None else raw[hz]
     day_s = str(day.date())
@@ -503,9 +539,11 @@ def resolve(conn: sqlite3.Connection, cfg: dict) -> int:
             if after.empty:
                 continue
             stop, target = base * (1 - r.stop_pct), base * (1 + r.target_pct)
-            entry = float(after["open"].iloc[0])
-            if entry <= stop:
-                hit, ret, status = None, None, "cancelled"   # the order would not have been placed
+            first = after.iloc[0]
+            entry = float(first["open"])
+            if entry <= stop or first["high"] == first["low"] or first["volume"] <= 0:
+                # the order would not have been placed, or couldn't have filled (no trading, or locked all day)
+                hit, ret, status = None, None, "cancelled"
             else:
                 res = _replay(after, entry, stop, target, int(r.horizon), fee)
                 if res is None:
@@ -536,9 +574,11 @@ def latest(conn: sqlite3.Connection) -> pd.DataFrame:
     return out
 
 
-def live_record(conn: sqlite3.Connection, top: float = 0.10) -> dict:
-    """How predictions made since the model went live turned out. A day counts once all its trades are decided."""
-    df = pd.read_sql_query("SELECT date, symbol, horizon, raw, hit, ret, resolved FROM predictions", conn)
+def live_record(conn: sqlite3.Connection, top: float = 0.10, since: str | None = None) -> dict:
+    """How predictions made since the model went live turned out (from `since`: this model design's first day).
+    A day counts once all its trades are decided."""
+    df = pd.read_sql_query("SELECT date, symbol, horizon, raw, hit, ret, resolved FROM predictions WHERE date >= ?",
+                           conn, params=(since or "",))
     out = {}
     for hz in HORIZONS:
         g = df[df["horizon"] == hz]

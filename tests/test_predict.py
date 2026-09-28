@@ -8,8 +8,8 @@ import pandas as pd
 import pytest
 
 from app import jobs
-from egx_agent import config, db, predict
-from egx_agent.data import prices
+from egx_agent import breadth, config, db, predict
+from egx_agent.data import macro, prices
 from tests.conftest import make_ohlcv
 from tests.test_api import H
 from tests.test_prices import FakeProvider
@@ -61,7 +61,7 @@ def test_liquidity_is_judged_in_the_money_of_its_time():
 
 def test_walk_forward_never_trains_on_the_future(monkeypatch):
     from sklearn.ensemble import HistGradientBoostingClassifier
-    monkeypatch.setattr(predict, "new_model", lambda n=0: HistGradientBoostingClassifier(max_iter=5))
+    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: HistGradientBoostingClassifier(max_iter=5))
     rng = np.random.default_rng(1)
     days = pd.bdate_range("2015-01-01", "2020-12-31")
     ds = pd.DataFrame({"date": days.repeat(3), "symbol": ["A", "B", "C"] * len(days)})
@@ -71,7 +71,9 @@ def test_walk_forward_never_trains_on_the_future(monkeypatch):
     ds["hit10"] = (ds["ret5"] + rng.normal(size=len(ds)) > 1).astype(float)
     ds["ret10_trade"] = ds["hit10"] * 0.1 - 0.02
     ds["rule_buy"] = False
+    ds["entry_locked"] = (ds["symbol"] == "C").astype(float)     # C never trades the next day: no real trades
     oos, folds = predict.walk_forward(ds, 10)
+    assert "C" not in set(oos["symbol"])
     assert [f["year"] for f in folds] == [2018, 2019, 2020]
     for f in folds:
         first_test = oos[oos["date"].dt.year == f["year"]]["date"].min()
@@ -104,9 +106,11 @@ def _market(tmp_path, n=1300, stocks=10):
 
 @pytest.fixture
 def fast_model(monkeypatch):
+    from lightgbm import LGBMClassifier
     from sklearn.ensemble import HistGradientBoostingClassifier
-    monkeypatch.setattr(predict, "new_model",
-                        lambda n=0: HistGradientBoostingClassifier(max_iter=15, min_samples_leaf=40))
+    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: (
+        HistGradientBoostingClassifier(max_iter=15, min_samples_leaf=40) if hz == 10
+        else LGBMClassifier(n_estimators=15, min_child_samples=40, verbose=-1)))
 
 
 def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, fast_model):
@@ -156,7 +160,8 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
     _market(tmp_path).close()
     with TestClient(create_app(tmp_path / "egx.db", autoscan=False)) as c:
         page = c.get("/api/predict").json()
-        assert page["model"] is None and page["deep"] is True and page["features"] == len(predict.FEATURES)
+        assert page["model"] is None and page["deep"] is True
+        assert page["features"] == {"10": len(predict.FEATURES), "20": len(predict.FEATURES) + len(macro.FEATURES)}
         assert c.post("/api/predict/train").status_code == 403           # only the dashboard can start it
         assert c.post("/api/predict/train", headers=H).status_code == 200
         for _ in range(600):
@@ -171,6 +176,8 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
         row = page["rows"][0]
         assert {"p10", "p20", "rank10", "rank20", "stop", "target", "info"} <= set(row)
         assert page["base"]["10"] is not None
+        assert page["top_n"] == 1 and sum(r["top10"] for r in page["rows"]) == 1   # its best 10% of 10 stocks
+        assert page["model"]["live_since"] == page["model"]["data_to"]
         stock = c.get(f"/api/stock/{row['symbol']}").json()
         assert stock["prediction"]["count"] == 10 and stock["prediction"]["p10"] == row["p10"]
         assert c.get("/api/today").status_code == 200
@@ -200,3 +207,86 @@ def test_deeper_history_adds_older_bars_and_fixes_bad_ones(tmp_path):
     assert len(px) == 60 and px["close"].iloc[40] == pytest.approx(full["close"].iloc[40])
     assert db.get_meta(conn, "history_years_loaded") == "10"
     assert prices.rebase_info(conn, "OLD", full) is None
+
+
+def _add_macro(conn, start="2020-06-01", n=1600):
+    days = pd.bdate_range(start, periods=n).strftime("%Y-%m-%d")
+    for i, (name, base) in enumerate((("usdegp", 15.7), ("interbank", 9.0), ("inflation", 5.0), ("egx70", 3000.0))):
+        vals = base * np.exp(np.cumsum(np.random.default_rng(i).normal(0, 0.003, n)))
+        db.upsert_macro(conn, name, pd.DataFrame({"date": days, "close": vals}))
+
+
+def test_egypt_numbers_are_only_used_once_they_were_known():
+    days = pd.bdate_range("2024-01-01", "2024-06-28")
+    raw = pd.DataFrame({"inflation": [30.0, 20.0], "interbank": [20.0, 25.0]},
+                       index=pd.to_datetime(["2024-01-31", "2024-02-29"]))
+    f = macro.features(raw, pd.Series(np.linspace(100, 120, len(days)), index=days), days)
+    assert list(f.columns) == macro.FEATURES
+    assert f.at[pd.Timestamp("2024-02-29"), "rate"] == 20 and f.at[pd.Timestamp("2024-03-01"), "rate"] == 25
+    # February's inflation (dated the 29th) is published in March: used from the 25th on
+    assert f.at[pd.Timestamp("2024-03-22"), "infl"] == 30 and f.at[pd.Timestamp("2024-03-25"), "infl"] == 20
+    assert f.at[pd.Timestamp("2024-03-25"), "real_rate"] == 5
+    assert f["fx_ret21"].isna().all() and f["e70_rel21"].isna().all()      # series not downloaded: left empty
+    assert f["idx_ret63"].notna().any()
+
+
+class MacroProvider:
+    def __init__(self):
+        self.calls = []
+
+    def fetch(self, symbol, n_bars, exchange="EGX"):
+        self.calls.append((symbol, exchange, n_bars))
+        if symbol == "EGIRYY":
+            return None
+        return pd.DataFrame({"date": ["2026-09-24", "2026-09-25"], "close": [1.0, 2.0]})
+
+
+def test_egypt_download_takes_everything_once_then_only_new_values(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    p = MacroProvider()
+    assert macro.update(conn, p) == ["inflation"]                          # the old values stay; it's retried
+    assert {(s, e) for s, e, _ in p.calls} == {(v[0], v[1]) for v in macro.SERIES.values()}
+    assert {n for _, _, n in p.calls} == {macro.FULL_BARS}
+    p.calls.clear()
+    macro.update(conn, p)
+    assert dict((s, n) for s, _, n in p.calls) == {"USDEGP": macro.UPDATE_BARS, "EGINBR": macro.UPDATE_BARS,
+                                                   "EGIRYY": macro.FULL_BARS, "EGX70EWI": macro.UPDATE_BARS}
+    raw = db.load_macro(conn)
+    assert set(raw.columns) == {"usdegp", "interbank", "egx70"} and raw["usdegp"].iloc[-1] == 2.0
+
+
+def test_the_20_session_model_uses_egypt_data_and_an_older_design_is_retrained(tmp_path, cfg, fast_model):
+    conn = _market(tmp_path)
+    _add_macro(conn, start="2020-12-01")
+    meta = predict.train(conn, cfg)
+    assert meta["version"] == predict.MODEL_VERSION
+    assert meta["horizons"]["10"]["features"] == len(predict.FEATURES)
+    assert meta["horizons"]["20"]["features"] == len(predict.FEATURES) + len(macro.FEATURES)
+    bundle = predict.load_models(tmp_path / "models")
+    assert bundle["features"][10] == predict.FEATURES and "fx_ret63" in bundle["features"][20]
+    assert predict.predict_latest(conn, cfg) == 10
+    assert not predict.needs_training(conn, cfg)
+    meta["version"] = 1                                                     # a model from before this design
+    predict.meta_path(tmp_path / "models").write_text(json.dumps(meta))
+    assert predict.needs_training(conn, cfg)
+
+
+def test_a_prediction_that_couldnt_be_bought_counts_as_cancelled(tmp_path, cfg):
+    conn = db.connect(tmp_path / "t.db")
+    df = make_ohlcv(np.linspace(20, 21, 30), start="2025-01-05").rename_axis("date").reset_index()
+    df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+    df.loc[df.index[-1], "volume"] = 0                                       # the next session: no trading at all
+    db.upsert_prices(conn, "S00", df)
+    day = df["date"].iloc[-2]
+    conn.execute("INSERT INTO predictions(date, symbol, horizon, prob, raw, close, stop_pct, target_pct) "
+                 "VALUES (?, 'S00', 10, 0.2, 0.2, ?, 0.05, 0.1)", (day, float(df["close"].iloc[-2])))
+    assert predict.resolve(conn, cfg) == 1
+    assert conn.execute("SELECT resolved FROM predictions").fetchone()[0] == "cancelled"
+
+
+def test_market_switch_from_breadth():
+    assert breadth.switch(None) is None
+    assert breadth.switch(0.39)["state"] == "off" and breadth.switch(0.39)["size"] == 0
+    assert breadth.switch(0.40)["state"] == "half" and breadth.switch(0.499)["size"] == 0.5
+    assert breadth.switch(0.50)["state"] == "full"
+    assert breadth.verdict({"above50": 0.45}, False)["switch"]["label"] == "Half size"

@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from . import corporate, db, portfolio, predict, risk, strategy
-from .data import prices, shariah, universe
+from .data import macro, prices, shariah, universe
 from .indicators import add_indicators
 
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -126,6 +126,13 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         if res["failed"]:
             warnings.append(f"No price data from TradingView for: {', '.join(res['failed'])}")
         events = res.get("events", [])
+        say(0.81, "Downloading the dollar rate, interest rates and inflation…")
+        try:
+            missed = macro.update(conn)
+        except Exception as exc:  # the prediction model uses the last values it has
+            missed = [str(exc)]
+        if missed:
+            warnings.append(f"Egypt data not updated (the model uses the last values): {', '.join(missed)}")
 
     say(0.82, "Calculating indicators…")
     stocks = universe.stock_table(conn, cfg.get("egx33_extra"))

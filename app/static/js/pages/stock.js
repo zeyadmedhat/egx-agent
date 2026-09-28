@@ -107,12 +107,14 @@ function PredictionPanel({ p }) {
     <p class="muted" style="font-size:13px;margin-bottom:12px">Chance that buying at the next open with the usual stop and
       target reaches the target first.</p>
     <div class="stat-list">
-      <span class="k">Within 2 weeks</span><span class="v"><${Chance} p=${p.p10} base=${p.base[10]} />
-        <span class="faint" style="font-weight:500"> avg ${fmt.pct(p.base[10], 0, false)}</span></span>
-      <span class="k">Within 1 month</span><span class="v"><${Chance} p=${p.p20} base=${p.base[20]} />
-        <span class="faint" style="font-weight:500"> avg ${fmt.pct(p.base[20], 0, false)}</span></span>
-      <span class="k">Rank today (2 weeks)</span><span class="v">#${fmt.int(p.rank10)} of ${fmt.int(p.count)}</span>
+      <span class="k">Within 2 weeks</span><span class="v"><${Chance} p=${p.p10} base=${p.base[10]} top=${p.top10} />
+        <span class="faint" style="font-weight:500"> #${fmt.int(p.rank10)} of ${fmt.int(p.count)}</span></span>
+      <span class="k">Within 1 month</span><span class="v"><${Chance} p=${p.p20} base=${p.base[20]} top=${p.top20} />
+        <span class="faint" style="font-weight:500"> #${fmt.int(p.rank20)} of ${fmt.int(p.count)}</span></span>
+      <span class="k">Average stock</span><span class="v">${fmt.pct(p.base[10], 0, false)} / ${fmt.pct(p.base[20], 0, false)}</span>
     </div>
+    ${p.top_n && html`<p class="faint" style="font-size:12px;margin-top:10px">It gives a chance only for its top${' '}
+      ${fmt.int(p.top_n)} stocks each day (its best 10%): its test results are about those.</p>`}
     <a class="btn sm block" style="margin-top:14px" href="#/predict">How reliable is it?</a></div>`;
 }
 

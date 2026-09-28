@@ -166,11 +166,34 @@ export function PageLoading({ error }) {
 }
 
 // The prediction model's chance, coloured against the average stock's chance (base).
-export function Chance({ p, base }) {
+// The model's chance, shown only for its top picks (top = false): its tested results are about its best 10% each
+// day, so a number for the rest would look more reliable than it is.
+export function Chance({ p, base, top }) {
   if (p == null) return html`<span class="faint">–</span>`;
+  if (top === false) {
+    return html`<span class="chance-off" title="Not in the model's top 10% today. Its test results are about its top picks, so it doesn't give a chance for the rest.">not a top pick</span>`;
+  }
   const ratio = base ? p / base : 1;
   return html`<span class=${cls('chance', ratio >= 1.3 ? 'up' : ratio <= 0.8 ? 'low' : '')}
     title=${base ? `The average liquid stock: ${fmt.pct(base, 0, false)}` : ''}>${fmt.pct(p, 0, false)}</span>`;
+}
+
+// The market switch for the model's picks: full size, half size or no new buys, from breadth.
+const SWITCH_TONE = { full: 'ok', half: 'warn', off: 'bad' };
+const SWITCH_DO = {
+  full: "The model's top picks can be bought at your usual size.",
+  half: "Buy the model's top picks at half your usual size.",
+  off: "Don't buy the model's picks until more stocks are back above their average.",
+};
+export function MarketSwitch({ sw, compact }) {
+  if (!sw) return null;
+  if (compact) {
+    return html`<a class=${cls('switch-pill', sw.state)} href="#/market" title=${`${sw.text} ${SWITCH_DO[sw.state]}`}>
+      <span class="dot"></span>Model picks: ${sw.label}</a>`;
+  }
+  return html`<${Callout} tone=${SWITCH_TONE[sw.state]}><b>Market switch: ${sw.label}.</b>${' '}${sw.text}${' '}
+    ${SWITCH_DO[sw.state]}${' '}<span class="faint">Tested 2016–2026, it cut the worst drop of the model's top picks from
+    −62% to −22%. Your BUY rules keep their own EGX30 rule.</span><//>`;
 }
 
 export function Change({ value, digits = 2 }) {

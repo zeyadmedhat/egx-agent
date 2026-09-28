@@ -117,6 +117,14 @@ def _shariah(info: dict) -> str:
     return f"{egx} · Kashif {KASHIF.get(info.get('kashif_status'), '–')}"
 
 
+SWITCH_ICON = {"full": "🟢", "half": "🟡", "off": "🔴"}
+
+
+def _switch_line(v: dict) -> str:
+    sw = v.get("switch")
+    return f"Market switch: {SWITCH_ICON[sw['state']]} {sw['label']} (for the model's picks)" if sw else ""
+
+
 def build_message(d: views.Data) -> tuple[str, bool]:
     """The scan summary as Telegram HTML, and whether it asks you to do anything."""
     m = views.market_info(d.conn)
@@ -133,6 +141,7 @@ def build_message(d: views.Data) -> tuple[str, bool]:
         v = breadth.verdict(b, m.get("risk_off"))
         week = f" ({v['change_week'] * 100:+.0f} pts in a week)" if v["change_week"] is not None else ""
         head.append(f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
+        head.append(_switch_line(v))
 
     preds = views.predictions(d)
     body = ["", f"<b>Orders for {views.nice_date(o['session'], True)}</b>"]
@@ -144,7 +153,8 @@ def build_message(d: views.Data) -> tuple[str, bool]:
             pr = preds["by_symbol"].get(it["symbol"])
             if pr and pr.get("p10") is not None and preds["base"].get(10):
                 body.append(f"      Model: {pr['p10']:.0%} chance of target before stop in 2 weeks "
-                            f"(average stock {preds['base'][10]:.0%})")
+                            f"(average stock {preds['base'][10]:.0%})" if pr.get("top10") else
+                            "      Model: not one of its top picks today")
     if not o["items"]:
         body.append("Nothing to do. " + ("No new buys while EGX30 is below its 50-day average." if o["blocked"]
                                          else "No BUY signals at this close."))
@@ -185,6 +195,7 @@ def build_site_message(d: views.Data, site_url: str = "") -> str:
         v = breadth.verdict(b, m.get("risk_off"))
         week = f" ({v['change_week'] * 100:+.0f} pts in a week)" if v["change_week"] is not None else ""
         lines.append(f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
+        lines.append(_switch_line(v))
     preds = views.predictions(d)
     lines += ["", f"<b>BUY signals for {views.nice_date(session, True)}</b>" if buys else "<b>No BUY signals</b> at this close."]
     for r in buys:
@@ -193,7 +204,8 @@ def build_site_message(d: views.Data, site_url: str = "") -> str:
         extra = [f"score {r['score']:.0f}", _shariah(d.info(r["symbol"]))]
         pr = preds["by_symbol"].get(r["symbol"])
         if pr and pr.get("p10") is not None and preds["base"].get(10):
-            extra.append(f"model {pr['p10']:.0%} (avg {preds['base'][10]:.0%})")
+            extra.append(f"model top pick {pr['p10']:.0%} (avg {preds['base'][10]:.0%})" if pr.get("top10")
+                         else "not a model top pick")
         lines.append("      " + " · ".join(extra))
     watch = len(rows) - len(buys)
     if watch:

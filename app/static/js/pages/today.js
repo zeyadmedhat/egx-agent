@@ -2,7 +2,7 @@
 import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, STATIC } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, ScoreRing, ScoreBar, DayBar, Empty, Callout, PageHead, SectionHead,
-  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance,
+  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch,
 } from '../ui.js';
 import { Sparkline } from '../charts.js';
 
@@ -81,6 +81,7 @@ function MarketCard({ m, spark, blocked, b }) {
         <b class=${tone(gap)}> ${fmt.pct(Math.abs(gap), 1, false)} ${gap >= 0 ? 'above' : 'below'}</b> it</div>
       <p class="market-text">${text}</p>
       ${b && html`<p class="market-text" style="margin-top:2px">${b.text} <a href="#/market">Market breadth →</a></p>`}
+      ${b && b.switch && html`<div style="margin-top:8px"><${MarketSwitch} sw=${b.switch} compact /></div>`}
     </div>
     <div class="market-spark">
       <div class="spark-legend">
@@ -234,8 +235,10 @@ function SignalCard({ s, model }) {
     <details class="why"><summary><${Icon} name="chevron" />Why this signal</summary>
       <ul class="reasons">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${r}</li>`)}</ul></details>
     ${model && s.pred && html`<div class="model-line"><${Icon} name="target" size=${14} />
-      <a href="#/predict">Model: <${Chance} p=${s.pred.p10} base=${model.base[10]} /> chance of target before stop in 2 weeks</a>
-      <span class="faint">(average stock ${fmt.pct(model.base[10], 0, false)})</span></div>`}
+      ${s.pred.top10 === false
+        ? html`<a href="#/predict">Model: not one of its top picks today</a>`
+        : html`<a href="#/predict">Model: <${Chance} p=${s.pred.p10} base=${model.base[10]} /> chance of target before stop in 2 weeks</a>
+      <span class="faint">(average stock ${fmt.pct(model.base[10], 0, false)})</span>`}</div>`}
     <div class="faint" style="font-size:12px">Sizing: ${s.size_note} · hold at most until <b class="muted">${fmt.date(s.sell_by)}</b></div>
     <div class="sig-foot">
       <a class="btn sm" href=${stockHref(s.symbol)}><${Icon} name="chart" />Chart</a>
@@ -258,7 +261,7 @@ function Watchlist({ rows, model }) {
   if (model) {
     columns.push({ key: 'model', label: 'Model (2 wk)', align: 'r', sortValue: r => (r.pred ? r.pred.p10 : -1),
       title: 'Prediction model: chance of target before stop within 10 sessions',
-      render: r => html`<${Chance} p=${r.pred && r.pred.p10} base=${model.base[10]} />` });
+      render: r => html`<${Chance} p=${r.pred && r.pred.p10} base=${model.base[10]} top=${r.pred && r.pred.top10} />` });
   }
   return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol} sort=${{ key: 'score', dir: 'desc' }}
     onRowClick=${r => go(stockHref(r.symbol))} empty="No stocks on the watchlist at the last close." />`;

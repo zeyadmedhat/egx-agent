@@ -74,8 +74,14 @@ CREATE TABLE IF NOT EXISTS predictions (
     created TEXT,
     hit INTEGER,                    -- filled in later: 1 target first, 0 stop first or time ran out
     ret REAL,                       -- the trade's result after fees
-    resolved TEXT,                  -- 'done' or 'cancelled' (opened below the stop)
+    resolved TEXT,                  -- 'done' or 'cancelled' (opened below the stop, or couldn't be bought that day)
     PRIMARY KEY (date, symbol, horizon)
+);
+CREATE TABLE IF NOT EXISTS macro (
+    series TEXT NOT NULL,           -- usdegp | interbank | inflation | egx70 (see data/macro.py)
+    date   TEXT NOT NULL,           -- YYYY-MM-DD, as the source dates it
+    value  REAL NOT NULL,
+    PRIMARY KEY (series, date)
 );
 """
 
@@ -275,6 +281,24 @@ def load_prices(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
 def last_price_date(conn: sqlite3.Connection, symbol: str) -> str | None:
     row = conn.execute("SELECT MAX(date) AS d FROM prices WHERE symbol=?", (symbol,)).fetchone()
     return row["d"] if row else None
+
+
+def upsert_macro(conn: sqlite3.Connection, series: str, df: pd.DataFrame) -> int:
+    """df: columns date (YYYY-MM-DD) and close."""
+    rows = [(series, d, float(v)) for d, v in zip(df["date"], df["close"])]
+    conn.executemany("INSERT OR REPLACE INTO macro(series, date, value) VALUES (?,?,?)", rows)
+    conn.commit()
+    return len(rows)
+
+
+def load_macro(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Every Egypt series as a column, by date (empty when nothing was downloaded yet)."""
+    df = pd.read_sql_query("SELECT series, date, value FROM macro", conn)
+    if df.empty:
+        return pd.DataFrame()
+    wide = df.pivot(index="date", columns="series", values="value")
+    wide.index = pd.to_datetime(wide.index)
+    return wide.sort_index()
 
 
 def stocks_df(conn: sqlite3.Connection) -> pd.DataFrame:

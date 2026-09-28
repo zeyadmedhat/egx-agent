@@ -54,13 +54,14 @@ class TvProvider:
             self._local.tv = TvDatafeed()
         return self._local.tv
 
-    def fetch(self, symbol: str, n_bars: int) -> pd.DataFrame | None:
+    def fetch(self, symbol: str, n_bars: int, exchange: str = "EGX") -> pd.DataFrame | None:
         from tvDatafeed import Interval
 
-        tv_symbol = self.aliases.get(symbol, symbol)
+        tv_symbol = self.aliases.get(symbol, symbol) if exchange == "EGX" else symbol
         for attempt in range(self.retries):
             try:
-                raw = self._client().get_hist(symbol=tv_symbol, exchange="EGX", interval=Interval.in_daily, n_bars=n_bars)
+                raw = self._client().get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily,
+                                              n_bars=n_bars)
             except Exception as exc:  # network errors inside the library
                 log.debug("fetch %s failed: %s", symbol, exc)
                 raw = None
