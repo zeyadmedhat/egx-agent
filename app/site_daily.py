@@ -119,6 +119,9 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                 report["model"] = "trained"
             else:
                 report["model"] = jobs.retrain_if_due(conn, cfg, _progress("Retraining")) or "up to date"
+            meta = predict.load_meta(predict.model_dir(conn))
+            if meta:
+                report["model"] += " (with Egypt data)" if meta.get("egypt_data") else " (without Egypt data yet)"
         except Exception as exc:  # the site still works without the model
             traceback.print_exc()
             report["model"] = f"failed ({type(exc).__name__})"

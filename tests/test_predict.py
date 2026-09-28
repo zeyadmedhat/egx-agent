@@ -182,6 +182,12 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
         stock = c.get(f"/api/stock/{row['symbol']}").json()
         assert stock["prediction"]["count"] == 10 and stock["prediction"]["p10"] == row["p10"]
         assert c.get("/api/today").status_code == 200
+        screen = c.get("/api/screener").json()
+        assert len(screen["rows"]) == 10 and sum(r["top10"] for r in screen["rows"]) == 1
+        assert {"vs_ema20", "from_high", "rsi", "action", "held"} <= set(screen["rows"][0])
+        calc = c.get("/api/calc").json()
+        assert calc["equity"] > 0 and calc["positions"] == [] and calc["cfg"]["risk_per_trade_pct"] > 0
+        assert stock["plan"]["stop"] < stock["stats"]["close"] < stock["plan"]["target"]
 
 
 def test_monthly_retrain_runs_after_a_scan_only_when_due(tmp_path, cfg, fast_model):

@@ -242,6 +242,7 @@ function SignalCard({ s, model }) {
     <div class="faint" style="font-size:12px">Sizing: ${s.size_note} · hold at most until <b class="muted">${fmt.date(s.sell_by)}</b></div>
     <div class="sig-foot">
       <a class="btn sm" href=${stockHref(s.symbol)}><${Icon} name="chart" />Chart</a>
+      <a class="btn sm" href=${`#/calc/${encodeURIComponent(s.symbol)}`}><${Icon} name="coins" />Size it</a>
       <a class="btn sm primary" href=${logHref}><${Icon} name="plus" />Log buy</a>
     </div>
   </article>`;

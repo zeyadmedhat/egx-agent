@@ -288,6 +288,29 @@ async function predictView(c) {
   return out;
 }
 
+// The screener (views.screener_view): everyone's numbers, plus your Shariah filter's signals and what you hold.
+async function screenerView(c) {
+  const out = await load('screener');
+  if (!out) return { date: null, min_value: c.cfg.min_avg_value_egp, rows: [] };
+  const [, rows] = signals(c);
+  const action = Object.fromEntries(rows.map(r => [r.symbol, r.action]));
+  const held = new Set(E.trades(c.book, 'real', ['open']).map(t => t.symbol));
+  return { ...out, rows: out.rows.map(r => ({ ...r, action: action[r.symbol] ?? null, held: held.has(r.symbol) })) };
+}
+
+// The size calculator's side (views.calc_view): your account, your limits and the market's state.
+const CALC_KEYS = ['capital', 'risk_per_trade_pct', 'max_position_pct', 'max_open_risk_pct', 'max_positions',
+  'max_per_sector', 'max_pct_of_adv', 'fee_pct_per_side', 'target_r', 'stop_min_pct', 'stop_max_pct'];
+function calcView(c) {
+  const real = E.accountSummary(c.book, 'real', c.cfg, closes(c), c.core.events);
+  const b = c.core.breadth_today;
+  return {
+    equity: real.equity, cash: real.cash, positions: E.positionsForAllocation(c.book, 'real', ['open']),
+    cfg: Object.fromEntries(CALC_KEYS.map(k => [k, c.cfg[k]])),
+    risk_off: !!(c.core.market && c.core.market.risk_off), switch: (b && b.switch) || null,
+  };
+}
+
 function settingsView(c) {
   const keys = c.core.sections.flatMap(s => s.fields.map(f => f.key));
   return {
@@ -496,6 +519,8 @@ export async function localApi(path, { method = 'GET', body } = {}) {
       case 'today': return today(c);
       case 'stock': return stockDetail(c, decodeURIComponent(b || ''));
       case 'portfolio': return portfolioView(c);
+      case 'calc': return calcView(c);
+      case 'screener': return screenerView(c);
       case 'market': return load('market');
       case 'predict': return predictView(c);
       case 'settings': return settingsView(c);

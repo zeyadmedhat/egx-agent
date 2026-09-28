@@ -133,7 +133,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,
         "scan_url": scan_url,
     }
-    out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d)}
+    out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
+                              "screener": views.screener(d)}
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
     for sym in d.table.index:
         if sym in with_prices:

@@ -446,6 +446,20 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .checklist .ok { color: var(--up); }
 .checklist .no { color: var(--text-3); }
 .checklist svg.icon { width: 16px; height: 16px; margin-top: 2px; }
+.checklist .bad { color: var(--down); }
+
+/* ------------------------------------------------------------------ screener */
+.trend-dots { display: inline-flex; gap: 4px; }
+.trend-dot { font-size: 10.5px; font-weight: 700; padding: 1px 5px; border-radius: 5px; font-variant-numeric: tabular-nums; }
+.trend-dot.up { background: var(--up-soft); color: var(--up); }
+.trend-dot.down { background: var(--down-soft); color: var(--down); }
+.trend-dot.faint { background: var(--panel-3); }
+
+/* ------------------------------------------------------------------ size calculator */
+.calc-grid { align-items: start; }
+.calc-shares { font-size: 34px; font-weight: 800; letter-spacing: -.02em; line-height: 1.15; margin: 2px 0 4px; }
+.calc-shares span { font-size: 15px; font-weight: 600; color: var(--text-2); }
+.card-title .sym { font-weight: 800; color: var(--text); }
 
 /* ------------------------------------------------------------------ portfolio */
 .pos-detail { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; padding-top: 6px; }

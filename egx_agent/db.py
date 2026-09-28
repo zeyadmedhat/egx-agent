@@ -83,6 +83,19 @@ CREATE TABLE IF NOT EXISTS macro (
     value  REAL NOT NULL,
     PRIMARY KEY (series, date)
 );
+CREATE TABLE IF NOT EXISTS cash_dividends (
+    symbol TEXT NOT NULL,           -- every company's cash dividends, from TradingView (data/dividends.py)
+    ex_date TEXT NOT NULL,          -- buy before this day to get it
+    pay_date TEXT,
+    amount REAL,                    -- EGP per share
+    first_seen TEXT,
+    PRIMARY KEY (symbol, ex_date)
+);
+CREATE TABLE IF NOT EXISTS dividend_yield (
+    symbol TEXT PRIMARY KEY,
+    yield_pct REAL,                 -- the last 12 months' cash dividends ÷ the price (%), TradingView's figure
+    updated TEXT
+);
 """
 
 # One person's own data: their trades, paper account, dividends, orders checklist and settings.

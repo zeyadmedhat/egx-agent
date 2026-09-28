@@ -11,6 +11,8 @@ import { TodayPage } from './pages/today.js';
 import { MarketPage } from './pages/market.js';
 import { PredictPage } from './pages/predict.js';
 import { StockPage } from './pages/stock.js';
+import { CalcPage } from './pages/calc.js';
+import { ScreenerPage } from './pages/screener.js';
 import { PortfolioPage } from './pages/portfolio.js';
 import { PaperPage } from './pages/paper.js';
 import { BacktestPage } from './pages/backtest.js';
@@ -18,11 +20,12 @@ import { SettingsPage } from './pages/settings.js';
 
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
 const PAGES = Object.fromEntries(Object.entries({
-  today: TodayPage, market: MarketPage, predict: PredictPage, stock: StockPage, portfolio: PortfolioPage, paper: PaperPage,
+  today: TodayPage, market: MarketPage, predict: PredictPage, screener: ScreenerPage, stock: StockPage, calc: CalcPage, portfolio: PortfolioPage, paper: PaperPage,
   backtest: BacktestPage, settings: SettingsPage, admin: AdminPage,
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
 const NAV = [
-  ['today', 'Today', 'activity'], ['market', 'Market', 'bars'], ['predict', 'Predict', 'target'], ['stock', 'Stock', 'chart'], ['portfolio', 'My Portfolio', 'briefcase'],
+  ['today', 'Today', 'activity'], ['market', 'Market', 'bars'], ['predict', 'Predict', 'target'], ['screener', 'Screener', 'search'], ['stock', 'Stock', 'chart'], ['calc', 'Calculator', 'coins'],
+  ['portfolio', 'My Portfolio', 'briefcase'],
   ['paper', 'Paper Trading', 'flask'], ['backtest', 'Backtest', 'history'], ['settings', 'Settings', 'sliders'],
 ].filter(([id]) => id in PAGES);
 

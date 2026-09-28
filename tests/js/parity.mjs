@@ -3,6 +3,7 @@
 //   node tests/js/parity.mjs < cases.json
 import * as E from '../../app/static/js/local/engine.js';
 import { readBackup } from '../../app/static/js/local/site.js';
+import { planTrade } from '../../app/static/js/sizing.js';
 
 const input = JSON.parse(await new Promise(resolve => {
   let s = '';
@@ -37,6 +38,7 @@ const OPS = {
       trades: E.trades(book, 'real'), fills: book.fills, dividends: E.dividendsByTrade(book, 'real'),
       settings: book.settings, next_id: E.nextId(book) };
   },
+  plan: args => planTrade(args),
   describe: ({ factors }) => factors.map(f => E.describe(f)),
   sessionsAfter: ({ pairs }) => pairs.map(([d, n]) => E.sessionsAfter(d, n)),
   expected: ({ times }) => times.map(t => E.expectedSessionDate(new Date(t))),

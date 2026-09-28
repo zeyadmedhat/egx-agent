@@ -66,9 +66,11 @@ export function StockPage({ route }) {
           <${PriceChart} series=${data.series} levels=${data.levels} fills=${data.fills} bars=${bars} show=${show} />
         </div>
         <aside class="stack">
+          <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />Size a buy with your rules</a>
           ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} />`}
           <${SignalPanel} data=${data} />
           ${data.prediction && html`<${PredictionPanel} p=${data.prediction} />`}
+          ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
         </aside>
       </div>`}
@@ -99,6 +101,24 @@ function SignalPanel({ data }) {
       href=${`#/portfolio?buy=${encodeURIComponent(data.symbol)}&price=${s.entry_high.toFixed(2)}&shares=${s.shares || ''}`}>
       <${Icon} name="plus" />Log this buy</a>`}
   </div>`;
+}
+
+// Cash dividends (TradingView: the latest and the next announced; kept as they're seen) and bonus shares/splits.
+function CorporatePanel({ c }) {
+  const cash = c.dividends || [];
+  const bonus = c.bonus || [];
+  return html`<div class="card"><div class="card-title"><${Icon} name="coins" size=${15} />Dividends & bonus shares
+      ${c.yield != null && html`<span class="right faint">Yield ${fmt.pct(c.yield, 1, false)} a year</span>`}</div>
+    ${cash.length ? html`<div class="stat-list">${cash.slice(0, 6).map(r => html`
+      <span class="k">${fmt.date(r.ex_date)}${r.upcoming ? html` <span class="tag">coming</span>` : ''}</span>
+      <span class="v">${fmt.num(r.amount, r.amount < 1 ? 3 : 2)} EGP
+        <span class="faint" style="font-weight:500"> ${fmt.pct(r.pct, 1, false)}${r.pay_date ? ` · paid ${fmt.date(r.pay_date)}` : ''}</span></span>`)}
+      </div>` : html`<p class="muted" style="font-size:13px">No cash dividend seen for it yet.</p>`}
+    ${bonus.length > 0 && html`<div class="stat-list" style="margin-top:12px">${bonus.map(b => html`
+      <span class="k">${fmt.date(b.ex_date)}</span><span class="v" style="font-weight:500">${b.text}</span>`)}</div>`}
+    <p class="faint" style="font-size:12px;margin-top:10px">Dates are ex-dates: buy before that day to get the
+      dividend. Amounts per share, % of today's price. From TradingView, which gives the latest dividend and the next
+      one once announced, so the list grows over time.</p></div>`;
 }
 
 function PredictionPanel({ p }) {

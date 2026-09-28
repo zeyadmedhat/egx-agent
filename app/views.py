@@ -335,6 +335,21 @@ def today(d: Data) -> dict:
     })
 
 
+def corporate_history(conn: sqlite3.Connection, sym: str, close: float) -> dict:
+    """A stock's cash dividends (as far back as the agent has seen them), its yield, and its bonus shares/splits."""
+    today = date.today().isoformat()
+    cash = [{"ex_date": r["ex_date"], "pay_date": r["pay_date"], "amount": r["amount"],
+             "pct": r["amount"] / close if close else None, "upcoming": r["ex_date"] >= today}
+            for r in conn.execute("SELECT ex_date, pay_date, amount FROM cash_dividends WHERE symbol=? "
+                                  "ORDER BY ex_date DESC", (sym,))]
+    y = conn.execute("SELECT yield_pct FROM dividend_yield WHERE symbol=?", (sym,)).fetchone()
+    bonus = [{"ex_date": r["ex_date"], "factor": r["factor"], "text": corporate.describe(r["factor"])}
+             for r in conn.execute("SELECT ex_date, factor FROM price_events WHERE symbol=? ORDER BY ex_date DESC",
+                                   (sym,))]
+    return {"dividends": cash, "yield": y["yield_pct"] / 100 if y and y["yield_pct"] is not None else None,
+            "bonus": bonus}
+
+
 def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail: int | None = None) -> dict:
     """The parts of a stock's page that are the same for everyone: facts, chart, rule checklist, the model.
 
@@ -359,6 +374,8 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
         "high52": year["high"].max(), "low52": year["low"].min(), "volume": last.volume, "vol_ratio": last.vol_ratio,
     }
     sf = strategy.signal_frame(ind, cfg).iloc[-1]
+    # the agent's usual plan if bought at the next open: what the size calculator starts from
+    out["plan"] = {"stop": sf.stop, "target": sf.target, "atr": last.atr14}
     out["checklist"] = [   # shown when the stock has no signal today
         {"ok": sf.eligible, "text": f"Liquid & clean data (≥ {cfg['min_avg_value_egp'] / 1e6:g}M EGP/day, "
                                      f"≥ {cfg['min_history_bars']} days of history)"},
@@ -371,9 +388,71 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     preds = predictions(d)
     if sym in preds["by_symbol"]:
         out["prediction"] = {**preds["by_symbol"][sym], **{k: preds.get(k) for k in ("base", "count", "date", "top_n")}}
+    out["corporate"] = corporate_history(d.conn, sym, last.close)
     shown = ind if tail is None else ind.tail(tail)
     out["series"] = {"time": [str(t.date()) for t in shown.index], **{c: column(shown[c]) for c in cols}}
     return out
+
+
+def screener(d: Data) -> dict:
+    """Every stock's numbers for the screener, the same for everyone: the site publishes this, and your own marks
+    (your Shariah filter's effect on signals, what you hold) are added where you look (screener_view)."""
+    def build():
+        preds = predictions(d)["by_symbol"]
+        yields = {r["symbol"]: r["yield_pct"] for r in d.conn.execute("SELECT symbol, yield_pct FROM dividend_yield")}
+        _, df = current_scan(d.conn)
+        action = {r["symbol"]: r["action"] for r in records(df)}
+        rows = []
+        for sym in d.table.index:
+            ind = d.indicators(sym)
+            if len(ind) < 30:
+                continue
+            last, c, year = ind.iloc[-1], ind["close"], ind.tail(250)
+            ema200 = c.ewm(span=200, adjust=False).mean().iloc[-1] if len(c) >= 200 else np.nan
+            p = preds.get(sym) or {}
+            y = yields.get(sym)
+            rows.append({
+                "symbol": sym, "date": str(ind.index[-1].date()), "close": last.close,
+                "chg1": c.iloc[-1] / c.iloc[-2] - 1, "ret21": c.iloc[-1] / c.iloc[-22] - 1 if len(c) > 21 else None,
+                "ret63": last.ret63, "rsi": last.rsi14, "adx": last.adx14, "vol_ratio": last.vol_ratio,
+                "value": last.value_avg20, "atr_pct": last.atr14 / last.close,
+                "vs_ema20": last.close / last.ema20 - 1, "vs_ema50": last.close / last.ema50 - 1,
+                "vs_ema200": last.close / ema200 - 1, "from_high": last.close / year["high"].max() - 1,
+                "from_low": last.close / year["low"].min() - 1,
+                **{k: p.get(k) for k in ("p10", "p20", "top10", "top20")},
+                "yield": y / 100 if y is not None else None, "action": action.get(sym),
+            })
+        return clean({"date": str(d.indicators(prices.INDEX_SYMBOL).index[-1].date()) if rows else None,
+                      "min_value": d.cfg["min_avg_value_egp"], "rows": rows})
+    return d.cache.get(d.version, ("screener",), build)
+
+
+def screener_view(d: Data) -> dict:
+    out = dict(screener(d))
+    _, sig_rows = signals(d)
+    action = {r["symbol"]: r["action"] for r in sig_rows}
+    held = {p["symbol"] for p in open_positions(d)}
+    out["rows"] = [{**r, "action": action.get(r["symbol"]), "held": r["symbol"] in held} for r in out["rows"]]
+    return out
+
+
+CALC_KEYS = ("capital", "risk_per_trade_pct", "max_position_pct", "max_open_risk_pct", "max_positions", "max_per_sector",
+             "max_pct_of_adv", "fee_pct_per_side", "target_r", "stop_min_pct", "stop_max_pct")
+
+
+def calc_view(d: Data) -> dict:
+    """The size calculator's side of things: your account, your limits and the market's state. The stock's own numbers
+    come from its page (stock_detail), and the calculator sizes with the same rule as the BUY signals (risk.py)."""
+    real = portfolio.account_summary(d.conn, "real", d.cfg, d.closes())
+    m = market_info(d.conn)
+    b = breadth_data(d)
+    return clean({
+        "equity": real["equity"], "cash": real["cash"],
+        "positions": portfolio.positions_for_allocation(d.conn, "real", ("open",)),
+        "cfg": {k: d.cfg[k] for k in CALC_KEYS},
+        "risk_off": bool(m.get("risk_off")) if m else False,
+        "switch": breadth.switch(b["above50"]) if b else None,
+    })
 
 
 def stock_detail(d: Data, symbol: str) -> dict:

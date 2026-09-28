@@ -438,6 +438,14 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def stock(symbol: str, d: views.Data = Depends(get_data)):
         return JSON(views.stock_detail(d, symbol))
 
+    @app.get("/api/screener")
+    def screener_page(d: views.Data = Depends(get_data)):
+        return JSON(views.screener_view(d))
+
+    @app.get("/api/calc")
+    def calc(d: views.Data = Depends(get_data)):
+        return JSON(views.calc_view(d))
+
     @app.get("/api/portfolio")
     def portfolio_page(d: views.Data = Depends(get_data)):
         return JSON(views.portfolio_view(d))

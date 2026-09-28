@@ -270,6 +270,11 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
     assert "capital" in fields and not fields & {"paper_capital", "auto_paper"}
     assert not {"paper_capital", "auto_paper"} & set(core["personal_defaults"])
     assert "atr14" in files["stock/AAA.bin"]["series"]
+    assert files["stock/AAA.bin"]["plan"]["stop"] < files["stock/AAA.bin"]["stats"]["close"]   # for the calculator
+    assert {"dividends", "yield", "bonus"} <= set(files["stock/AAA.bin"]["corporate"])
+    screen = files["screener.bin"]
+    assert {r["symbol"] for r in screen["rows"]} == {"AAA", "BBB"} and "held" not in screen["rows"][0]   # yours: in the browser
+    assert {"vs_ema50", "from_high", "rsi", "yield", "top10"} <= set(screen["rows"][0])
     with pytest.raises(InvalidTag):
         static_site.unseal((out / "data" / "core.bin").read_bytes(),
                            static_site.derive_key("not the password", static_site.salt_for("me/egx")))
@@ -452,3 +457,28 @@ def test_a_scan_during_the_session_does_not_hold_back_the_one_after_the_close(tm
     db.set_meta(conn, "scan_attempted", (due + timedelta(minutes=5)).isoformat())
     assert not scan.scan_is_stale(conn)      # tried at 15:35 with no new data yet: wait a while
     conn.close()
+
+
+@needs_node
+def test_size_calculator_uses_the_signals_own_sizing_rule():
+    from app import views
+    cfg = {k: config.DEFAULTS[k] for k in views.CALC_KEYS}
+    held = [{"symbol": "AAA", "sector": "Banks", "entry_price": 50.0, "stop": 46.0, "shares": 300},
+            {"symbol": "CCC", "sector": "Banks", "entry_price": 10.0, "stop": 9.2, "shares": 1000}]
+    base = dict(symbol="BBB", sector="Real Estate", entry=20.0, stop=18.6, equity=100_000.0, cash=60_000.0,
+                avgValue=5e6, positions=held, cfg=cfg, riskOff=False)
+    full, half, banks, off, wide, bad_stop = run_js(
+        {"op": "plan", "args": base}, {"op": "plan", "args": {**base, "half": True}},
+        {"op": "plan", "args": {**base, "sector": "Banks"}}, {"op": "plan", "args": {**base, "riskOff": True, "positions": held * 2}},
+        {"op": "plan", "args": {**base, "stop": 15.0}}, {"op": "plan", "args": {**base, "stop": 21.0}})
+    want = risk.size_position(20.0, 18.6, 100_000.0, 60_000.0, 5e6, risk.open_risk(held), cfg)
+    assert full["shares"] == want["shares"] > 0 and full["size_note"] == want["size_note"]
+    assert full["amount"] == pytest.approx(want["amount"]) and full["target"] == pytest.approx(20 + 2 * 1.4)
+    assert full["loss_at_stop"] == pytest.approx(want["risk_egp"] + want["amount"] * 0.0025 + want["shares"] * 18.6 * 0.0025)
+    assert half["shares"] == want["shares"] // 2 and half["size_note"].startswith("half of")
+    levels = lambda r: {c["level"] for c in r["checks"]}                           # noqa: E731
+    assert levels(full) == {"ok"}
+    assert any("2 positions in Banks" in c["text"] and c["level"] == "bad" for c in banks["checks"])
+    assert off["max_positions"] == 2 and any("portfolio is full" in c["text"] for c in off["checks"])
+    assert any(c["level"] == "warn" and "usual stop is 4–12%" in c["text"] for c in wide["checks"])
+    assert bad_stop == {"ok": False, "error": "The stop must be below the entry price."}

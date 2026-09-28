@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from . import corporate, db, portfolio, predict, risk, strategy
-from .data import macro, prices, shariah, universe
+from .data import dividends, macro, prices, shariah, universe
 from .indicators import add_indicators
 
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -133,6 +133,10 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             missed = [str(exc)]
         if missed:
             warnings.append(f"Egypt data not updated (the model uses the last values): {', '.join(missed)}")
+        try:
+            dividends.update(conn)
+        except Exception as exc:  # the dividend pages show what was downloaded before
+            warnings.append(f"Dividend data not updated ({type(exc).__name__})")
 
     say(0.82, "Calculating indicators…")
     stocks = universe.stock_table(conn, cfg.get("egx33_extra"))
