@@ -30,3 +30,13 @@ def bar(date, o, h, l, c, ema50=0.0, atr14=1.0) -> pd.Series:
 @pytest.fixture
 def cfg():
     return dict(DEFAULTS)
+
+
+@pytest.fixture(autouse=True)
+def _no_news_downloads(monkeypatch):
+    """Tests never reach Mubasher, TradingView's news or the RSS feeds (news tests pass their own fetcher)."""
+    from egx_agent.data import news
+
+    def offline(self, url, polite=True, **kw):
+        raise ConnectionError("no downloads in tests")
+    monkeypatch.setattr(news.Fetcher, "get", offline)

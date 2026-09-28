@@ -43,7 +43,8 @@ If macOS says the file can't be opened, right-click it → **Open** → **Open**
 | **Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/unwatch COMI` and `/list`, checked after each close |
 | **Stock** | TradingView-style chart with averages, volume, RSI, MACD, your levels and your buys/sells marked; why a stock does or doesn't qualify; the model's chance and rank; cash dividends, yield and bonus shares; Shariah details |
 | **Calculator** | How many shares to buy with your own risk rules (the same sizing as the BUY signals): amount, fees, loss at the stop, gain at the target, and a check against your portfolio limits. Full or half size |
-| **Dividends** | Every EGX company's cash dividends from TradingView: coming up (ex-dates), the highest yields, recent payouts, your own stocks, and the last year's bonus shares and splits |
+| **News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month. Each stock's page shows its own news and anything to know now (an ex-dividend date within a month, bonus shares, bad news) |
+| **Dividends** | Every EGX company's cash dividends from TradingView: coming up (ex-dates), the highest yields, recent payouts, your own stocks, the last year's bonus shares and splits, and the bonus shares, rights issues and splits announced on Mubasher |
 | **My Portfolio** | Three tabs. **Positions**: log real buys and sells. Click a position to sell some or all of it, record a cash dividend, see its transactions, or delete it if it was logged by mistake. Buying more of a stock you hold joins it at the average price. See status, days held (of 20) and P&L after fees and dividends. **Health**: your account against EGX30 since your first buy, money by sector, what you'd lose if every stop were hit, and how closely your stocks move together. **Journal**: win rate, average win and loss, profit factor, results by signal setup, exit reason and month, and your profit after Egypt's inflation |
 | **Paper Trading** | A virtual 100k account the agent trades by itself. Watch it for 3–4 weeks before using real money |
 | **Backtest** | Replays the exact rules on 1–4 years of history and compares with EGX30. The last result is kept |
@@ -147,13 +148,32 @@ the model has seen. The chances are calibrated on those results, so "22%" means 
 The top 10% beat the average stock in all 10 years (AUC 0.59, graded *Useful*). The 20-session model is weaker
 (*Small edge*). Even its best picks usually don't reach the target, so always use the stop.
 
-**Egypt data (20-session model).** Each scan also downloads USD/EGP, the interbank interest rate, inflation and
+**Egypt data.** Each scan also downloads USD/EGP, the interbank interest rate, inflation and
 EGX70 from TradingView (`egx_agent/data/macro.py`); each is used only from the day it was published. In the
 Sep 2026 tests it lifted the 20-session model's top 10% from +1.03% to +1.18% a trade (and it beat the average stock
-in every year); the 10-session model did no better with it, so it doesn't use it. Also tested and **not** used: a
+in every year). The 10-session model did no better with it alone, but did with the dividend events below, so since
+Sep 2026 both use it. Also tested and **not** used: a
 model that ranks the day's stocks against each other, one that predicts the return, other stop/target plans, and
 weighting recent years more; none beat the model above. Days a stock couldn't really be bought (no trading, or stuck
 at one price all day) are left out of the tested and live results.
+
+**Dividends, bonus shares and rights issues (both models).** Each scan also reads Mubasher's list of corporate
+actions, taken from the exchange's filings: every EGX company's cash dividends, bonus shares, rights issues and
+buybacks since 2005, with the day each was announced and its ex-date (`egx_agent/data/news.py`). The model sees how
+many days until the next announced ex-date and since the last announcement, each only from the day after it was
+announced. In the Sep 2026 tests (several random seeds) it lifted the 20-session model's top 10% from +1.21% to
++1.41% a trade (better than the average stock in 10 of 11 years, from 8), and the 10-session model's, now with the
+Egypt data and the same LightGBM model, from +0.90% to +1.04% (10 of 11 years, from 9). Buying shortly before an
+ex-dividend date is the clearest pattern: the price drops by the dividend that morning, so rule BUYs with an ex-date
+inside the month reached the target 22% of the time against 36%. The BUY rules themselves don't skip them (you still
+get the dividend, and the backtest can't count it), but every such signal carries a warning.
+
+**News.** Headlines from Mubasher (each stock's page, Arabic and English, and the latest Egypt news), Reuters and
+Zawya (through TradingView, tagged to the stock), Al Borsa News and Daily News Egypt. Only headlines, dates and links
+are kept. Each gets topics and a good/bad tone from keyword rules. Bad news this week shows as a caution on signals,
+positions and the stock page. The tone isn't in the model yet: there's only about a year of history, too little to
+test fairly, so it's being recorded to test later. Mubasher asks for 5 seconds between pages, so each run reads the
+day's signals and your stocks first, then the others in turn (every stock every few days).
 
 **Market switch.** From breadth (the share of stocks above their 50-day average): below 40% *no new buys*, 40–50%
 *half size*, otherwise *full size*. It's for the model's picks: tested 2016–2026 on its top 5 every two weeks, it

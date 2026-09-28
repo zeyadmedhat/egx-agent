@@ -100,6 +100,31 @@ CREATE TABLE IF NOT EXISTS watch_alerts (
     fired TEXT,                     -- the close a buy alert was last sent for
     PRIMARY KEY (chat_id, symbol, kind)
 );
+CREATE TABLE IF NOT EXISTS news (
+    id TEXT NOT NULL,               -- the source's own id (data/news.py)
+    symbol TEXT NOT NULL DEFAULT '',-- the stock it's about ('' = market news)
+    source TEXT NOT NULL,           -- mubasher | reuters | zawya | dow-jones | alborsa | dne
+    lang TEXT,                      -- ar | en
+    published TEXT NOT NULL,        -- YYYY-MM-DDTHH:MM, Cairo time
+    title TEXT NOT NULL,
+    url TEXT,
+    tags TEXT,                      -- comma-separated topics (dividend, results, legal, …), from keyword rules
+    tone INTEGER,                   -- 1 good, -1 bad, 0 neutral (keyword rules: a guide only)
+    first_seen TEXT,
+    PRIMARY KEY (id, symbol)
+);
+CREATE INDEX IF NOT EXISTS news_by_symbol ON news(symbol, published);
+CREATE INDEX IF NOT EXISTS news_by_date ON news(published);
+CREATE TABLE IF NOT EXISTS corp_actions (
+    symbol TEXT NOT NULL,           -- Mubasher's corporate actions, from the exchange's filings (data/news.py)
+    kind TEXT NOT NULL,             -- dividend | bonus | split | rights | placement | treasury_buy | … | other
+    type TEXT NOT NULL,             -- Mubasher's own name for it
+    announced TEXT NOT NULL,        -- YYYY-MM-DD, '' if unknown
+    effective TEXT NOT NULL,        -- the ex-date (end of rights), '' if none yet
+    note TEXT,
+    first_seen TEXT,
+    PRIMARY KEY (symbol, type, announced, effective)
+);
 CREATE TABLE IF NOT EXISTS dividend_yield (
     symbol TEXT PRIMARY KEY,
     yield_pct REAL,                 -- the last 12 months' cash dividends ÷ the price (%), TradingView's figure

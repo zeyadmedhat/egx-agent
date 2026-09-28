@@ -2,7 +2,7 @@
 import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, STATIC } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, ScoreRing, ScoreBar, DayBar, Empty, Callout, PageHead, SectionHead,
-  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch,
+  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch, Cautions,
 } from '../ui.js';
 import { Sparkline } from '../charts.js';
 
@@ -108,7 +108,8 @@ function Positions({ positions, cfg, alerts }) {
       <div><a class="sym-big" style="font-size:15px" href=${stockHref(p.symbol)}>${p.symbol}</a>
         <div class="faint" style="font-size:12px">${fmt.int(p.shares)} sh · <span class=${tone(p.pnl_pct)}>${fmt.pct(p.pnl_pct)}</span></div></div>
       <div><${StatusChip} status=${p.status} /></div>
-      <div class="reason">${p.reason}</div>
+      <div class="reason">${p.reason}${p.cautions && p.cautions.length > 0 && html`<div style="margin-top:4px">
+        <${Cautions} items=${p.cautions} compact /></div>`}</div>
       <${DayBar} day=${p.day} max=${cfg.max_hold_days} review=${cfg.review_day} />
     </div>`)}</div></section>`;
 }
@@ -217,6 +218,11 @@ function SignalCard({ s, model }) {
       <${ScoreRing} score=${s.score} />
     </div>
     <${Badges} info=${i} />
+    <${Cautions} items=${s.cautions} compact />
+    ${(s.cautions || []).some(c => c.kind === 'ex_dividend') && html`<p class="caution-note">
+      <${Icon} name="alert" size=${13} />It goes ex-dividend before this trade would end. The price drops by the
+      dividend that morning, which can hit the stop. In 10 years of tests, BUY signals this close to an ex-date reached
+      the target within a month 22% of the time, against 36% for the others. You still get the dividend if you hold.</p>`}
     <div class="levels">
       <${Level} label="Last close" value=${fmt.price(s.close)} />
       <${Level} label="Buy up to" value=${fmt.price(s.entry_high)} sub=${fmt.pct(s.entry_high / s.close - 1)} subCls="faint" />
@@ -258,6 +264,7 @@ function Watchlist({ rows, model }) {
     { key: 'trigger', label: 'Breakout above', align: 'r', fmt: v => html`<b>${fmt.price(v)}</b>` },
     { key: 'to_trigger', label: 'Distance', align: 'r', fmt: v => html`<span class="muted">${fmt.pct(v)}</span>`,
       title: 'How far the price must rise to break out' },
+    { key: 'cautions', label: 'Good to know', sortable: false, render: r => html`<${Cautions} items=${r.cautions} compact />` },
   ];
   if (model) {
     columns.push({ key: 'model', label: 'Model (2 wk)', align: 'r', sortValue: r => (r.pred ? r.pred.p10 : -1),

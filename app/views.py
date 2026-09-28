@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from egx_agent import breadth, config, corporate, db, portfolio, predict, risk, scan, strategy
-from egx_agent.data import prices, shariah, universe
+from egx_agent.data import news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
 EGX_DAY = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
@@ -300,9 +300,11 @@ def today(d: Data) -> dict:
     scan_date, rows = signals(d)
     buys, watch = [], []
     preds = predictions(d)
+    warn = cautions_map(d)
     for r in [dict(x) for x in rows]:
         r["info"] = d.info(r["symbol"])
         r["pred"] = preds["by_symbol"].get(r["symbol"])
+        r["cautions"] = warn.get(r["symbol"], [])
         if r["action"] == "BUY":
             r["sell_by"] = sessions_after(scan_date, cfg["max_hold_days"])
             buys.append(r)
@@ -319,7 +321,7 @@ def today(d: Data) -> dict:
         spark = {"time": [str(t.date()) for t in tail.index], "close": column(tail["close"], 2),
                  "ema50": column(tail["ema50"], 2)}
     paper = portfolio.account_summary(d.conn, "paper", cfg, d.closes())
-    positions = open_positions(d)
+    positions = [{**p, "cautions": warn.get(p["symbol"], [])} for p in open_positions(d)]
     b = breadth_data(d)
     paper_scan = db.get_user_meta(d.conn, "paper_last_scan")
     return clean({
@@ -346,8 +348,57 @@ def corporate_history(conn: sqlite3.Connection, sym: str, close: float) -> dict:
     bonus = [{"ex_date": r["ex_date"], "factor": r["factor"], "text": corporate.describe(r["factor"])}
              for r in conn.execute("SELECT ex_date, factor FROM price_events WHERE symbol=? ORDER BY ex_date DESC",
                                    (sym,))]
+    five_years = (date.today() - pd.Timedelta(days=5 * 365)).isoformat()
+    actions = [a for a in news.actions(conn, sym, since=five_years, kinds=EVENT_KINDS)]
     return {"dividends": cash, "yield": y["yield_pct"] / 100 if y and y["yield_pct"] is not None else None,
-            "bonus": bonus}
+            "bonus": bonus, "actions": actions}
+
+
+EVENT_KINDS = ("dividend", "bonus", "split", "rights", "placement", "treasury_buy", "consolidation", "reduction")
+HOLD_CALENDAR_DAYS = 30       # about 20 sessions: the longest a trade is held
+
+
+def cautions_map(d: Data) -> dict[str, list[dict]]:
+    """For every stock with something a buyer or holder should know now (an ex-dividend date within a month, bonus
+    shares or a rights issue coming, bad news this week): its cautions (data/news.py). The same for everyone."""
+    def build():
+        today = db.get_meta(d.conn, "scan_data_date") or date.today().isoformat()
+        nxt = {r["symbol"]: {"ex_date": r["ex_date"], "amount": r["amount"]} for r in d.conn.execute(
+            "SELECT symbol, MIN(ex_date) AS ex_date, amount FROM cash_dividends WHERE ex_date > ? GROUP BY symbol",
+            (today,))}
+        since = (date.fromisoformat(today) - pd.Timedelta(days=7)).isoformat()
+        maybe = {r[0] for r in d.conn.execute(
+            "SELECT symbol FROM corp_actions WHERE effective > ? UNION SELECT symbol FROM news "
+            "WHERE symbol != '' AND tone < 0 AND published >= ?", (today, since))} | set(nxt)
+        out = {}
+        for sym in sorted(maybe & set(d.table.index)):
+            c = news.cautions(d.conn, sym, today, HOLD_CALENDAR_DAYS, div=nxt.get(sym))
+            if c:
+                out[sym] = c
+        return out
+    return d.cache.get(d.version, ("cautions",), build)
+
+
+def news_feed(d: Data) -> dict:
+    """The News page, the same for everyone: the last month's headlines from every source, the dividends, bonus
+    shares and rights issues coming, and the ones announced lately. Your own stocks are marked where you look."""
+    def build():
+        today = date.today().isoformat()
+        month_ago = (date.today() - pd.Timedelta(days=30)).isoformat()
+        known = set(d.table.index)
+        coming = [a for a in news.actions(d.conn, since=today, kinds=EVENT_KINDS)
+                  if a["symbol"] in known and a["effective"]]
+        announced = [a for a in news.actions(d.conn, kinds=EVENT_KINDS)[:400]
+                     if a["symbol"] in known and a["announced"] >= month_ago and not (a["effective"] >= today)]
+        items = [n for n in news.recent_news(d.conn, days=30) if not n["symbol"] or n["symbol"] in known]
+        return clean({"today": today, "updated": db.get_meta(d.conn, "news_updated"), "items": items,
+                      "coming": sorted(coming, key=lambda a: a["effective"]), "announced": announced,
+                      "sources": news.SOURCES, "tags": list(news.TAGS)})
+    return d.cache.get(d.version, ("news",), build)
+
+
+def news_view(d: Data) -> dict:
+    return {**news_feed(d), "held": sorted({p["symbol"] for p in open_positions(d)}), "watchlist": watchlist(d)}
 
 
 def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail: int | None = None) -> dict:
@@ -389,6 +440,8 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     if sym in preds["by_symbol"]:
         out["prediction"] = {**preds["by_symbol"][sym], **{k: preds.get(k) for k in ("base", "count", "date", "top_n")}}
     out["corporate"] = corporate_history(d.conn, sym, last.close)
+    out["news"] = news.stock_news(d.conn, sym, 30)
+    out["cautions"] = cautions_map(d).get(sym, [])
     shown = ind if tail is None else ind.tail(tail)
     out["series"] = {"time": [str(t.date()) for t in shown.index], **{c: column(shown[c]) for c in cols}}
     return out
@@ -453,9 +506,19 @@ def dividend_calendar(d: Data) -> dict:
                  for r in d.conn.execute("SELECT symbol, ex_date, factor FROM price_events WHERE ex_date >= ? "
                                          "ORDER BY ex_date DESC", (year_ago,))]
         updated = d.conn.execute("SELECT MAX(updated) FROM dividend_yield").fetchone()[0]
+        have = {(r["symbol"], r["ex_date"]) for r in cash}
+        coming = [a for a in news.actions(d.conn, since=today, kinds=("dividend", "bonus", "split", "rights"))
+                  if a["symbol"] in d.table.index and a["effective"]
+                  and not (a["kind"] == "dividend" and _near(have, a["symbol"], a["effective"]))]
         return clean({"today": today, "updated": updated, "min_value": d.cfg["min_avg_value_egp"], "dividends": cash,
-                      "yields": yields, "bonus": bonus})
+                      "yields": yields, "bonus": bonus, "coming": sorted(coming, key=lambda a: a["effective"])})
     return d.cache.get(d.version, ("dividends",), build)
+
+
+def _near(have: set, sym: str, day: str, days: int = 3) -> bool:
+    """TradingView already lists this dividend (its date can differ from Mubasher's by a day or two)."""
+    d0 = date.fromisoformat(day)
+    return any((sym, (d0 + pd.Timedelta(days=k)).isoformat()) in have for k in range(-days, days + 1))
 
 
 def dividends_view(d: Data) -> dict:

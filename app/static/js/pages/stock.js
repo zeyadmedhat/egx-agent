@@ -1,7 +1,8 @@
 // Stock: TradingView-style chart with your levels, why it does or doesn't qualify, your position, Shariah details.
-import { html, useApi, useState, useEffect, useMemo, fmt, tone, cls, go, stockHref, remember } from '../lib.js';
+import { html, useApi, useState, useEffect, useMemo, fmt, tone, cls, go, stockHref, remember, todayISO } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, StockPicker, Seg, Disclaimer, DayBar, Chance, WatchStar,
+  Cautions, NewsList,
 } from '../ui.js';
 import { PriceChart } from '../charts.js';
 
@@ -58,6 +59,7 @@ export function StockPage({ route }) {
         <${Kpi} compact label="1-year range" value=${`${fmt.price(st.low52)} – ${fmt.price(st.high52)}`} />
       </div>
       <div class="stock-layout">
+        <div class="stack" style="min-width:0">
         <div class="card chart-card">
           <div class="chart-toolbar">
             <${Seg} options=${RANGES} value=${bars} onChange=${pickRange} />
@@ -66,8 +68,17 @@ export function StockPage({ route }) {
           </div>
           <${PriceChart} series=${data.series} levels=${data.levels} fills=${data.fills} bars=${bars} show=${show} />
         </div>
+        ${data.news && html`<div class="card stock-news"><div class="card-title"><${Icon} name="news" size=${15} />News
+            <span class="right faint">Mubasher, Reuters, Zawya</span></div>
+          <${NewsList} items=${data.news} sources=${SOURCES} limit=${8}
+            empty="No headlines for this stock yet. The agent reads a few stocks' news pages each run, so it can take a couple of days to reach every stock." />
+          <p class="faint" style="font-size:12px;margin-top:10px">Headlines link to the publisher. The green/red dot is a
+            rough guess from keywords, not a reading of the article.</p></div>`}
+        </div>
         <aside class="stack">
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />Size a buy with your rules</a>
+          ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
+            <${Icon} name="alert" size=${15} />Good to know now</div><${Cautions} items=${data.cautions} /></div>`}
           ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} />`}
           <${SignalPanel} data=${data} />
           ${data.prediction && html`<${PredictionPanel} p=${data.prediction} />`}
@@ -104,10 +115,15 @@ function SignalPanel({ data }) {
   </div>`;
 }
 
-// Cash dividends (TradingView: the latest and the next announced; kept as they're seen) and bonus shares/splits.
+const SOURCES = { mubasher: 'Mubasher', reuters: 'Reuters', zawya: 'Zawya', 'dow-jones': 'Dow Jones', lse: 'LSE filings',
+  alborsa: 'Al Borsa News', dne: 'Daily News Egypt' };
+
+// Cash dividends (TradingView: the latest and the next announced; kept as they're seen), bonus shares/splits, and
+// Mubasher's list of the company's corporate actions (announced → ex-date) from the exchange's filings.
 function CorporatePanel({ c }) {
   const cash = c.dividends || [];
   const bonus = c.bonus || [];
+  const acts = c.actions || [];
   return html`<div class="card"><div class="card-title"><${Icon} name="coins" size=${15} />Dividends & bonus shares
       ${c.yield != null && html`<span class="right faint">Yield ${fmt.pct(c.yield, 1, false)} a year</span>`}</div>
     ${cash.length ? html`<div class="stat-list">${cash.slice(0, 6).map(r => html`
@@ -117,9 +133,13 @@ function CorporatePanel({ c }) {
       </div>` : html`<p class="muted" style="font-size:13px">No cash dividend seen for it yet.</p>`}
     ${bonus.length > 0 && html`<div class="stat-list" style="margin-top:12px">${bonus.map(b => html`
       <span class="k">${fmt.date(b.ex_date)}</span><span class="v" style="font-weight:500">${b.text}</span>`)}</div>`}
+    ${acts.length > 0 && html`<div class="card-sub" style="margin-top:14px;font-weight:650;font-size:13px">Announcements (Mubasher)</div>
+      <div class="stat-list" style="margin-top:6px">${acts.slice(0, 8).map(a => html`
+        <span class="k">${a.effective ? fmt.date(a.effective) : '–'}${a.effective > todayISO() ? html` <span class="tag">coming</span>` : ''}</span>
+        <span class="v" style="font-weight:500">${a.label}<span class="faint"> · announced ${fmt.date(a.announced)}</span></span>`)}</div>`}
     <p class="faint" style="font-size:12px;margin-top:10px">Dates are ex-dates: buy before that day to get the
-      dividend. Amounts per share, % of today's price. From TradingView, which gives the latest dividend and the next
-      one once announced, so the list grows over time.</p></div>`;
+      dividend. Amounts per share, % of today's price, from TradingView. The announcements come from Mubasher's
+      list of the exchange's filings.</p></div>`;
 }
 
 function PredictionPanel({ p }) {

@@ -15,6 +15,7 @@ import { CalcPage } from './pages/calc.js';
 import { ScreenerPage } from './pages/screener.js';
 import { DividendsPage } from './pages/dividends.js';
 import { WatchlistPage } from './pages/watchlist.js';
+import { NewsPage } from './pages/news.js';
 import { PortfolioPage } from './pages/portfolio.js';
 import { PaperPage } from './pages/paper.js';
 import { BacktestPage } from './pages/backtest.js';
@@ -22,11 +23,11 @@ import { SettingsPage } from './pages/settings.js';
 
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
 const PAGES = Object.fromEntries(Object.entries({
-  today: TodayPage, market: MarketPage, predict: PredictPage, screener: ScreenerPage, watchlist: WatchlistPage, stock: StockPage, calc: CalcPage, dividends: DividendsPage, portfolio: PortfolioPage, paper: PaperPage,
+  today: TodayPage, market: MarketPage, predict: PredictPage, screener: ScreenerPage, watchlist: WatchlistPage, news: NewsPage, stock: StockPage, calc: CalcPage, dividends: DividendsPage, portfolio: PortfolioPage, paper: PaperPage,
   backtest: BacktestPage, settings: SettingsPage, admin: AdminPage,
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
 const NAV = [
-  ['today', 'Today', 'activity'], ['market', 'Market', 'bars'], ['predict', 'Predict', 'target'], ['screener', 'Screener', 'search'], ['watchlist', 'Watchlist', 'eye'], ['stock', 'Stock', 'chart'], ['calc', 'Calculator', 'coins'], ['dividends', 'Dividends', 'percent'],
+  ['today', 'Today', 'activity'], ['market', 'Market', 'bars'], ['predict', 'Predict', 'target'], ['screener', 'Screener', 'search'], ['watchlist', 'Watchlist', 'eye'], ['news', 'News', 'news'], ['stock', 'Stock', 'chart'], ['calc', 'Calculator', 'coins'], ['dividends', 'Dividends', 'percent'],
   ['portfolio', 'My Portfolio', 'briefcase'],
   ['paper', 'Paper Trading', 'flask'], ['backtest', 'Backtest', 'history'], ['settings', 'Settings', 'sliders'],
 ].filter(([id]) => id in PAGES);

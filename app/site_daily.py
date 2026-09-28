@@ -7,6 +7,9 @@
 3. Connects the friends who pressed "Connect Telegram" on the site (if the TELEGRAM_TOKEN secret is set).
 4. Builds the encrypted site into --out, then sends each connected friend the day's signals, once per close.
 
+The scan also reads the news, dividends and bonus shares (egx_agent/data/news.py); a run without a new close reads
+them on its own, so the site's News page keeps moving on quiet days and weekends.
+
 It also runs every few hours on quiet days, only to connect new friends: the site is then published again only
 if something changed (a scheduled run with the same data isn't republished).
 
@@ -27,9 +30,12 @@ from pathlib import Path
 import requests
 
 from egx_agent import config, db, predict, scan
-from egx_agent.data import prices
+from egx_agent.data import news, prices
 
 from . import alerts, jobs, static_site, views
+
+
+NEWS_BUDGET_S = 120   # runs without a new close read the news too, a little less of it
 
 
 def log(msg: str) -> None:
@@ -103,6 +109,14 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             report["scan"] = f"re-scored with the new strategy: {market['buys']} BUY"
         else:
             report["scan"] = "no new close yet"
+        if not report["scan"][:4].isdigit():      # no download this run: the news still moves (weekends too)
+            try:
+                got = news.update(conn, first=list(db.latest_scan(conn)[1].get("symbol", [])),
+                                  budget_s=NEWS_BUDGET_S)
+                report["news"] = f"{got['new']} new headlines, {got['actions']} new dividends/bonus shares" + (
+                    f" ({len(got['failed'])} sources didn't answer)" if got["failed"] else "")
+            except Exception as exc:  # the site still builds with the news it has
+                report["news"] = f"not updated ({type(exc).__name__})"
         db.set_meta(conn, "site_strategy", strategy)
         data_date = db.get_meta(conn, "scan_data_date")
         final = scan.scan_is_final(conn)

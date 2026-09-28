@@ -1,6 +1,7 @@
 // Dividends: every EGX company's cash dividends (coming up and recent), the highest yields, your own stocks, and
 // the bonus shares and splits of the last year. From TradingView, which gives each company's latest dividend and the
-// next one once announced, so the history grows from the first download on.
+// next one once announced (so the history grows from the first download on), and Mubasher's list of announced
+// bonus shares, rights issues and splits.
 import { html, useApi, useState, useMemo, useStore, fmt, go, stockHref } from '../lib.js';
 import { Icon, PageHead, PageLoading, SectionHead, DataTable, StockCell, Seg, Disclaimer, Callout } from '../ui.js';
 
@@ -21,6 +22,7 @@ export function DividendsPage() {
   const yields = data.yields.filter(r => (show === 'mine' ? held.has(r.symbol) : r.value >= data.min_value))
     .slice(0, show === 'mine' ? 100 : 25).map(withInfo);
   const bonus = data.bonus.filter(mine).map(withInfo);
+  const actions = (data.coming || []).filter(mine).map(withInfo);
 
   const stock = { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info}
     sub=${r.held ? html`<span class="tag"><${Icon} name="briefcase" size=${11} />You hold it</span>` : undefined} />` };
@@ -41,6 +43,13 @@ export function DividendsPage() {
     { key: 'ex_date', label: 'Date', fmt: v => fmt.date(v) }, stock,
     { key: 'text', label: 'What happened', render: r => html`<span class="muted">${r.text}</span>` },
   ];
+  const actionCols = [
+    { key: 'effective', label: 'Ex-date', title: 'The price adjusts at the open that day', fmt: v => html`<b>${fmt.date(v)}</b>` },
+    stock,
+    { key: 'label', label: 'What', render: r => html`${r.label}${r.kind === 'dividend'
+      ? html`<span class="faint"> · amount not in yet</span>` : ''}` },
+    { key: 'announced', label: 'Announced', fmt: v => (v ? fmt.date(v) : '–') },
+  ];
   const open = r => go(stockHref(r.symbol));
 
   return html`<${PageHead} title="Dividends"
@@ -55,6 +64,12 @@ export function DividendsPage() {
         hint="Announced dividends. On the ex-date the price usually drops by about the dividend, so it isn't free money: it's part of the return." />
       <div class="card flush"><${DataTable} columns=${cashCols} rows=${coming} rowKey=${r => r.symbol + r.ex_date}
         onRowClick=${open} empty="No dividend announced for the coming weeks yet." /></div>
+    </section>
+    <section class="section">
+      <${SectionHead} title="Also announced: bonus shares, rights issues and more" count=${actions.length}
+        hint="From Mubasher's list of the exchange's filings. Bonus shares and splits re-base the price (you get more shares); a rights issue usually adjusts it. Cash dividends here don't have an amount on TradingView yet." />
+      <div class="card flush"><${DataTable} columns=${actionCols} rows=${actions} rowKey=${r => r.symbol + r.type + r.effective}
+        onRowClick=${open} empty="Nothing else announced for the coming weeks." /></div>
     </section>
     <section class="section">
       <${SectionHead} title=${show === 'mine' ? 'Yields of your stocks' : 'Highest yields'}

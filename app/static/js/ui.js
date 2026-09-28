@@ -41,6 +41,7 @@ const ICONS = {
   target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
   bars: '<path d="M3 3v18h18"/><path d="M7 16v-4M12 16V8M17 16v-7"/>',
   copy: '<rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  news: '<path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/>',
   percent: '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
   coins: '<circle cx="8" cy="8" r="6"/><path d="M18.1 10.4A6 6 0 1 1 10.3 18"/><path d="M7 6h1v4"/>',
   listCheck: '<path d="M11 6h10M11 12h10M11 18h10"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
@@ -186,6 +187,44 @@ export function WatchStar({ symbol, label }) {
   return html`<button type="button" class=${cls('star-btn', on && 'on', label && 'labelled')}
     title=${on ? 'On your watchlist: click to remove it' : 'Add to your watchlist'} aria-pressed=${on}
     onClick=${e => { e.stopPropagation(); toggleWatch(symbol); }}>${on ? '★' : '☆'}${label ? html`<span>${on ? 'Watching' : 'Watch'}</span>` : ''}</button>`;
+}
+
+// What a buyer or holder should know now (data/news.py cautions): an ex-dividend date within a month, bonus
+// shares or a rights issue coming, bad news this week. compact: one chip each.
+const CAUTION_SHORT = { ex_dividend: 'Ex-dividend', bonus: 'Bonus shares', split: 'Split', rights: 'Rights issue',
+  bad_news: 'Bad news?' };
+export function Cautions({ items, compact }) {
+  if (!items || !items.length) return null;
+  if (compact) {
+    return html`<span class="cautions">${items.map(c => html`<span class=${cls('caution-chip', c.level)} title=${c.text}>
+      <${Icon} name=${c.level === 'warn' ? 'alert' : 'info'} size=${12} />${CAUTION_SHORT[c.kind] || c.kind}${
+        c.kind !== 'bad_news' ? ` ${fmt.date(c.date)}` : ''}</span>`)}</span>`;
+  }
+  return html`<ul class="caution-list">${items.map(c => html`<li class=${c.level}>
+    <${Icon} name=${c.level === 'warn' ? 'alert' : 'info'} size=${14} />
+    <span dir="auto">${c.url ? html`<a href=${c.url} target="_blank" rel="noopener noreferrer">${c.text}</a>` : c.text}</span></li>`)}</ul>`;
+}
+
+// Headlines (data/news.py): date, source, a good/bad dot from keyword rules, the title linking to the article.
+export const TAG_LABELS = { dividend: 'Dividend', bonus: 'Bonus shares', results: 'Results', capital: 'Capital',
+  deal: 'Deal', financing: 'Financing', legal: 'Legal', meeting: 'Meeting', buyback: 'Buyback', analysis: 'Analysis' };
+export function NewsList({ items, sources = {}, showSymbol, limit, empty = 'No news yet.' }) {
+  const [all, setAll] = useState(false);
+  if (!items || !items.length) return html`<p class="muted" style="font-size:13px">${empty}</p>`;
+  const shown = limit && !all ? items.slice(0, limit) : items;
+  return html`<ul class="news-list">${shown.map(n => html`<li key=${`${n.id}|${n.symbol || ''}`}>
+      <span class=${cls('tone-dot', n.tone > 0 ? 'up' : n.tone < 0 ? 'down' : '')}
+        title=${n.tone > 0 ? 'Sounds like good news (keyword rules)' : n.tone < 0 ? 'Sounds like bad news (keyword rules)' : 'Neutral'}></span>
+      <div class="news-body">
+        <a class="news-title" dir="auto" href=${n.url} target="_blank" rel="noopener noreferrer">${n.title}</a>
+        <div class="news-meta">
+          ${showSymbol && n.symbol && html`<a class="sym-link" href=${stockHref(n.symbol)}>${n.symbol}</a>`}
+          <span>${sources[n.source] || n.source}</span><span>${fmt.date(n.published.slice(0, 10))} ${n.published.slice(11, 16)}</span>
+          ${(n.tags || []).map(t => html`<span class="tag">${TAG_LABELS[t] || t}</span>`)}
+        </div>
+      </div></li>`)}</ul>
+    ${limit && items.length > limit && html`<button class="linkish" style="margin-top:8px" onClick=${() => setAll(!all)}>
+      ${all ? 'Show fewer' : `Show all ${items.length}`}</button>`}`;
 }
 
 // The market switch for the model's picks: full size, half size or no new buys, from breadth.

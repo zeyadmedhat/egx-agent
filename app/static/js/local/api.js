@@ -190,15 +190,16 @@ async function today(c) {
   const [scanDate, rows] = signals(c);
   const preds = core.predictions;
   const buys = [], watch = [];
+  const warn = core.cautions || {};
   for (const x of rows) {
-    const r = { ...x, info: info(c, x.symbol), pred: preds.by_symbol[x.symbol] ?? null };
+    const r = { ...x, info: info(c, x.symbol), pred: preds.by_symbol[x.symbol] ?? null, cautions: warn[x.symbol] || [] };
     if (r.action === 'BUY') {
       delete r.trigger; delete r.to_trigger;
       r.sell_by = E.sessionsAfter(scanDate, cfg.max_hold_days);
       buys.push(r);
     } else watch.push(r);
   }
-  const positions = await openPositions(c);
+  const positions = (await openPositions(c)).map(p => ({ ...p, cautions: warn[p.symbol] || [] }));
   const early = core.final === false
     ? ["These signals use prices from during today's session. The site scans again after the close, from about 4 pm."] : [];
   return {
@@ -292,8 +293,16 @@ async function predictView(c) {
 // The dividend calendar (views.dividends_view): everyone's dividends, plus which of them you hold.
 async function dividendsView(c) {
   const out = (await load('dividends').catch(() => null))
-    || { today: null, dividends: [], yields: [], bonus: [], min_value: c.cfg.min_avg_value_egp };
+    || { today: null, dividends: [], yields: [], bonus: [], coming: [], min_value: c.cfg.min_avg_value_egp };
   return { ...out, held: [...new Set(E.trades(c.book, 'real', ['open']).map(t => t.symbol))].sort() };
+}
+
+// The News page (views.news_view): everyone's headlines and coming dividends, plus your stocks.
+async function newsView(c) {
+  const out = (await load('news').catch(() => null))
+    || { today: null, items: [], coming: [], announced: [], sources: {}, tags: [] };
+  return { ...out, held: [...new Set(E.trades(c.book, 'real', ['open']).map(t => t.symbol))].sort(),
+    watchlist: c.book.watchlist || [] };
 }
 
 // The screener (views.screener_view): everyone's numbers, plus your Shariah filter's signals and what you hold.
@@ -557,6 +566,7 @@ export async function localApi(path, { method = 'GET', body } = {}) {
       case 'calc': return calcView(c);
       case 'screener': return screenerView(c);
       case 'dividends': return dividendsView(c);
+      case 'news': return newsView(c);
       case 'watchlist': return { symbols: c.book.watchlist || [] };
       case 'market': return load('market');
       case 'predict': return predictView(c);

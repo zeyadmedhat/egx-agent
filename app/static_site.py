@@ -131,11 +131,11 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "sections": site_sections(),
         "events": events, "data_status": views.settings_view(d)["data"],
         "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,
-        "scan_url": scan_url,
+        "scan_url": scan_url, "cautions": views.cautions_map(d),
     }
     out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
                               "screener": views.screener(d), "history": views.history_data(d),
-                              "dividends": views.dividend_calendar(d)}
+                              "dividends": views.dividend_calendar(d), "news": views.news_feed(d)}
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
     for sym in d.table.index:
         if sym in with_prices:

@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from . import corporate, db, portfolio, predict, risk, strategy
-from .data import dividends, macro, prices, shariah, universe
+from .data import dividends, macro, news, prices, shariah, universe
 from .indicators import add_indicators
 
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -137,6 +137,19 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             dividends.update(conn)
         except Exception as exc:  # the dividend pages show what was downloaded before
             warnings.append(f"Dividend data not updated ({type(exc).__name__})")
+        say(0.815, "Downloading news, dividends and bonus shares…")
+        try:
+            first = list(db.latest_scan(conn)[1].get("symbol", []))
+            try:        # on your Mac, the stocks you hold come first too
+                first = [r[0] for r in conn.execute("SELECT symbol FROM trades WHERE status = 'open'")] + first
+            except sqlite3.OperationalError:
+                pass
+            got = news.update(conn, first=first,
+                              progress=lambda msg: say(0.815, msg))
+            if got["failed"]:
+                warnings.append(f"Some news sources didn't answer (the others were read): {', '.join(got['failed'])}")
+        except Exception as exc:  # the news pages show what was downloaded before
+            warnings.append(f"News not updated ({type(exc).__name__})")
 
     say(0.82, "Calculating indicators…")
     stocks = universe.stock_table(conn, cfg.get("egx33_extra"))

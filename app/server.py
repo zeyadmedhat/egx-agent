@@ -454,6 +454,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def dividends_page(d: views.Data = Depends(get_data)):
         return JSON(views.dividends_view(d))
 
+    @app.get("/api/news")
+    def news_page(d: views.Data = Depends(get_data)):
+        return JSON(views.news_view(d))
+
     @app.get("/api/screener")
     def screener_page(d: views.Data = Depends(get_data)):
         return JSON(views.screener_view(d))

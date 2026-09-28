@@ -105,7 +105,8 @@ function Intro({ data, onTrain, running }) {
       <li>${data.deep ? '' : `First a one-time download of ${data.deep_years} years of prices (about 4 minutes). `}It learns from
         about 10 years of every liquid EGX stock: roughly 250,000 past examples.</li>
       <li>It looks at ${data.features['10']} measures: trend, momentum, volume, volatility, how the stock compares with its sector, and how the
-        whole market is doing. The 1-month model also looks at Egypt-wide numbers: the dollar rate, interest rates and inflation.</li>
+        whole market is doing, Egypt-wide numbers (the dollar rate, interest rates and inflation), and each company's
+        dividends, bonus shares and rights issues: when the next ex-date is, and when the last one was announced.</li>
       <li>It's tested honestly: each year is predicted by a version trained only on the years before it. Those are the results
         you'll see, and it tells you plainly if it has no edge.</li>
       <li>After that it updates every scan, and retrains itself once a month.</li>
@@ -195,7 +196,9 @@ function About({ m, data, r, hz, onTrain, running }) {
     <div>
       <p class="muted" style="font-size:13px">A gradient-boosting model (many small decision trees) for each horizon, using${' '}
         ${fmt.int(data.features[String(hz)])} measures.${' '}
-        ${hz === 20 ? 'This one also uses Egypt-wide numbers (the dollar rate, the interbank interest rate, inflation, and small caps vs EGX30), each only from the day it was published. ' : ''}
+        They include Egypt-wide numbers (the dollar rate, the interbank interest rate, inflation, and small caps vs EGX30)
+        and the company's dividends, bonus shares and rights issues from Mubasher's list of the exchange's filings, each
+        only from the day it was published.${' '}
         It updates its numbers after every scan and retrains itself once every ${data.retrain_days} days, or after you change
         the stop or target settings. Stocks that aren't liquid enough for the agent's rules are left out, and so are
         days a stock couldn't really be bought (no trading, or stuck at one price).</p>

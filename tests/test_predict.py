@@ -9,7 +9,7 @@ import pytest
 
 from app import jobs
 from egx_agent import breadth, config, db, predict
-from egx_agent.data import macro, prices
+from egx_agent.data import macro, news, prices
 from tests.conftest import make_ohlcv
 from tests.test_api import H
 from tests.test_prices import FakeProvider
@@ -60,12 +60,12 @@ def test_liquidity_is_judged_in_the_money_of_its_time():
 
 
 def test_walk_forward_never_trains_on_the_future(monkeypatch):
-    from sklearn.ensemble import HistGradientBoostingClassifier
-    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: HistGradientBoostingClassifier(max_iter=5))
+    from lightgbm import LGBMClassifier
+    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: LGBMClassifier(n_estimators=5, verbose=-1))
     rng = np.random.default_rng(1)
     days = pd.bdate_range("2015-01-01", "2020-12-31")
     ds = pd.DataFrame({"date": days.repeat(3), "symbol": ["A", "B", "C"] * len(days)})
-    for f in predict.FEATURES:
+    for f in predict.HORIZON_FEATURES[10]:
         ds[f] = rng.normal(size=len(ds)).astype("float32")
     ds["liquid"] = True
     ds["hit10"] = (ds["ret5"] + rng.normal(size=len(ds)) > 1).astype(float)
@@ -107,10 +107,8 @@ def _market(tmp_path, n=1300, stocks=10):
 @pytest.fixture
 def fast_model(monkeypatch):
     from lightgbm import LGBMClassifier
-    from sklearn.ensemble import HistGradientBoostingClassifier
-    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: (
-        HistGradientBoostingClassifier(max_iter=15, min_samples_leaf=40) if hz == 10
-        else LGBMClassifier(n_estimators=15, min_child_samples=40, verbose=-1)))
+    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: LGBMClassifier(n_estimators=15, min_child_samples=40,
+                                                                               verbose=-1))
     monkeypatch.setattr(macro, "update", lambda conn, provider=None: list(macro.SERIES))   # no downloads in tests
 
 
@@ -162,7 +160,7 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
     with TestClient(create_app(tmp_path / "egx.db", autoscan=False)) as c:
         page = c.get("/api/predict").json()
         assert page["model"] is None and page["deep"] is True
-        assert page["features"] == {"10": len(predict.FEATURES), "20": len(predict.FEATURES) + len(macro.FEATURES)}
+        assert page["features"] == {hz: len(predict.ALL_FEATURES) for hz in ("10", "20")}
         assert c.post("/api/predict/train").status_code == 403           # only the dashboard can start it
         assert c.post("/api/predict/train", headers=H).status_code == 200
         for _ in range(600):
@@ -276,10 +274,10 @@ def test_the_20_session_model_uses_egypt_data_and_an_older_design_is_retrained(t
     _add_macro(conn, start="2020-12-01")
     meta = predict.train(conn, cfg)
     assert meta["version"] == predict.MODEL_VERSION
-    assert meta["horizons"]["10"]["features"] == len(predict.FEATURES)
-    assert meta["horizons"]["20"]["features"] == len(predict.FEATURES) + len(macro.FEATURES)
+    both = len(predict.FEATURES) + len(macro.FEATURES) + len(news.EVENT_FEATURES)
+    assert meta["horizons"]["10"]["features"] == meta["horizons"]["20"]["features"] == both
     bundle = predict.load_models(tmp_path / "models")
-    assert bundle["features"][10] == predict.FEATURES and "fx_ret63" in bundle["features"][20]
+    assert all("fx_ret63" in bundle["features"][hz] and "div_ex_ahead" in bundle["features"][hz] for hz in (10, 20))
     assert predict.predict_latest(conn, cfg) == 10
     assert meta["egypt_data"] and not predict.needs_training(conn, cfg)
     meta["version"] = 1                                                     # a model from before this design

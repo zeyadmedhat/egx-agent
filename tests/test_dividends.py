@@ -41,4 +41,4 @@ def test_a_stocks_dividend_and_bonus_share_history(tmp_path):
     assert [(r["ex_date"], r["upcoming"]) for r in h["dividends"]] == [(soon, True), ("2025-04-01", False)]
     assert h["dividends"][1]["pct"] == pytest.approx(0.03) and h["yield"] == pytest.approx(0.035)
     assert h["bonus"] == [{"ex_date": "2024-06-02", "factor": 1.25, "text": "1 free share for every 4 you hold"}]
-    assert views.corporate_history(conn, "XYZ", 10.0) == {"dividends": [], "yield": None, "bonus": []}
+    assert views.corporate_history(conn, "XYZ", 10.0) == {"dividends": [], "yield": None, "bonus": [], "actions": []}

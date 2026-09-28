@@ -15,9 +15,11 @@ import secrets
 import sqlite3
 from datetime import datetime
 
+import pandas as pd
 import requests
 
 from egx_agent import breadth, config, db, portfolio, scan
+from egx_agent.data import news
 
 from . import views
 
@@ -125,6 +127,34 @@ def _switch_line(v: dict) -> str:
     return f"Market switch: {SWITCH_ICON[sw['state']]} {sw['label']} (for the model's picks)" if sw else ""
 
 
+def _caution_lines(items: list[dict], indent: str = "      ") -> list[str]:
+    """A signal's or position's cautions (views.cautions_map), one short line each."""
+    out = []
+    for c in items or []:
+        day = views.nice_date(c["date"]) if c.get("date") else ""
+        if c["kind"] == "ex_dividend":
+            amt = f" ({c['amount']:g} EGP)" if c.get("amount") else ""
+            out.append(f"{indent}⚠️ Ex-dividend {day}{amt}: the price drops by the dividend that morning (it can hit the stop)")
+        elif c["kind"] == "bad_news":
+            out.append(f"{indent}⚠️ News: {_e(c['title'])} ({_e(c['source'])})")
+        elif c["kind"] in ("bonus", "split"):
+            out.append(f"{indent}ℹ️ {'Bonus shares' if c['kind'] == 'bonus' else 'Split'} {day}: the price is re-based that day")
+        elif c["kind"] == "rights":
+            out.append(f"{indent}ℹ️ Rights issue, ex-date {day}")
+    return out
+
+
+def _held_news(d: views.Data, symbols: list[str], since: str, limit: int = 5) -> list[str]:
+    """New headlines about the stocks you hold (newest first)."""
+    rows = []
+    for sym in symbols:
+        rows += [{**n, "symbol": sym} for n in news.stock_news(d.conn, sym, 5) if n["published"] >= since]
+    rows.sort(key=lambda n: n["published"], reverse=True)
+    dot = {1: "🟢", -1: "🔴"}
+    return [f"{dot.get(n['tone'], '⚪')} <b>{_e(n['symbol'])}</b>: {_e(n['title'])} "
+            f"({_e(news.SOURCES.get(n['source'], n['source']))})" for n in rows[:limit]]
+
+
 def build_message(d: views.Data) -> tuple[str, bool]:
     """The scan summary as Telegram HTML, and whether it asks you to do anything."""
     m = views.market_info(d.conn)
@@ -144,12 +174,14 @@ def build_message(d: views.Data) -> tuple[str, bool]:
         head.append(_switch_line(v))
 
     preds = views.predictions(d)
+    warn = views.cautions_map(d)
     body = ["", f"<b>Orders for {views.nice_date(o['session'], True)}</b>"]
     for it in o["items"]:
         body.append(f"{ICON[it['kind']]} <b>{_e(it['title'])}</b>")
         body.append(f"      {_e(it['detail'])}")
         if it["kind"] == "buy":
             body.append(f"      {_shariah(it['info'])}")
+            body += _caution_lines(warn.get(it["symbol"]))
             pr = preds["by_symbol"].get(it["symbol"])
             if pr and pr.get("p10") is not None and preds["base"].get(10):
                 body.append(f"      Model: {pr['p10']:.0%} chance of target before stop in 2 weeks "
@@ -163,6 +195,13 @@ def build_message(d: views.Data) -> tuple[str, bool]:
         tail.append("Holding: " + ", ".join(f"{h['symbol']} (stop {views.px(h['stop'])})" for h in o["holds"]))
     if o["skipped"]:
         tail.append("Not bought: " + ", ".join(f"{s['symbol']} ({_e(s['note'])})" for s in o["skipped"]))
+    held = sorted({p["symbol"] for p in views.open_positions(d)})
+    held_warn = [ln for sym in held for ln in _caution_lines(warn.get(sym), f"<b>{_e(sym)}</b> ")
+                 if "Ex-dividend" in ln or "re-based" in ln or "Rights" in ln]
+    since = (datetime.fromisoformat(o["scan_date"]) - pd.Timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+    held_news = _held_news(d, held, since)
+    if held_warn or held_news:
+        tail += ["", "<b>Your stocks</b>"] + held_warn + held_news
     paper = portfolio.account_summary(d.conn, "paper", d.cfg, d.closes())
     if paper["open_count"] or paper["realized"]:
         tail.append(f"Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%})")
@@ -197,6 +236,7 @@ def build_site_message(d: views.Data, site_url: str = "") -> str:
         lines.append(f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
         lines.append(_switch_line(v))
     preds = views.predictions(d)
+    warn = views.cautions_map(d)
     lines += ["", f"<b>BUY signals for {views.nice_date(session, True)}</b>" if buys else "<b>No BUY signals</b> at this close."]
     for r in buys:
         lines.append(f"🟢 <b>{_e(r['symbol'])}</b>: buy up to {views.px(r['entry_high'])} · stop {views.px(r['stop'])} · "
@@ -207,6 +247,7 @@ def build_site_message(d: views.Data, site_url: str = "") -> str:
             extra.append(f"model top pick {pr['p10']:.0%} (avg {preds['base'][10]:.0%})" if pr.get("top10")
                          else "not a model top pick")
         lines.append("      " + " · ".join(extra))
+        lines += _caution_lines(warn.get(r["symbol"]))
     watch = len(rows) - len(buys)
     if watch:
         lines.append(f"Watchlist: {watch} stock{'s' if watch != 1 else ''} could trigger next.")
