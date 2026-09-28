@@ -160,6 +160,43 @@ def test_your_trades_bonus_shares_and_dividends_match(tmp_path, cfg):
 
 
 @needs_node
+def test_mac_portfolio_backup_restores_on_the_site(tmp_path, cfg):
+    """Your Mac portfolio, saved as a site backup: the site shows the same positions, cash and pending bonus shares."""
+    conn = db.connect(tmp_path / "mac.db")
+    conn.execute("INSERT INTO trades(account, status, symbol, entry_date, entry_price, shares, stop, target) "
+                 "VALUES ('paper', 'open', 'ZZZ', '2026-01-02', 5, 10, 4, 6)")      # paper trades stay on the Mac
+    t1 = portfolio.add_real_buy(conn, cfg, "AAA", "2026-01-05", 10.0, 100, 0.5, "Banks")
+    portfolio.add_real_buy(conn, cfg, "AAA", "2026-01-07", 11.0, 50, 0.6, "Banks", notes="more")
+    t2 = portfolio.add_real_buy(conn, cfg, "BBB", "2026-01-08", 20.0, 40, 0.9, "Real estate", stop=18.5)
+    portfolio.sell_real(conn, cfg, t1, "2026-01-12", 12.0, 60, "Taking partial profit")
+    corporate.add_dividend(conn, t2, "2026-01-15", 30.0)
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('AAA', '2026-01-20', 1.25, 'x')")
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('BBB', '2026-01-22', 2.0, 'x')")
+    conn.commit()
+    pend = corporate.pending(conn, "real")
+    corporate.apply(conn, t1, pend[t1]["event_id"], pend[t1]["shares_expected"])      # AAA done, BBB still to do
+    closes = {"AAA": 9.9, "BBB": 21.0}
+    summary = portfolio.account_summary(conn, "real", cfg, closes)
+    trades = portfolio.trades_df(conn, "real").to_dict("records")
+    mine = {**cfg, "capital": 123456.0, "paper_capital": 5000.0, "telegram_token": "123:abc"}
+
+    backup = static_site.portfolio_backup(conn, mine)
+    text = json.dumps(backup)
+    assert "ZZZ" not in text and "123:abc" not in text and "paper_capital" not in text
+    events = [{"id": f"{r['symbol']}:{r['ex_date']}", "symbol": r["symbol"], "ex_date": r["ex_date"],
+               "factor": r["factor"]} for r in conn.execute("SELECT * FROM price_events ORDER BY id")]
+    (js,) = run_js({"op": "backup", "args": {"text": text, "cfg": cfg, "closes": closes, "events": events}})
+    assert len(js["trades"]) == len(trades)
+    for a, b in zip(trades, js["trades"]):
+        assert_same(a, b, TRADE_KEYS + ("notes",))
+    assert_same(summary, js["summary"], ("cash", "equity", "realized", "dividends", "unrealized", "open_risk"))
+    assert list(js["pending"].values())[0]["symbol"] == "BBB" and len(js["pending"]) == 1
+    assert len(js["fills"]) == conn.execute("SELECT COUNT(*) FROM fills").fetchone()[0]
+    assert js["settings"]["capital"] == 123456.0 and js["next_id"] > max(t["id"] for t in js["trades"])
+    conn.close()
+
+
+@needs_node
 def test_dates_and_words_match():
     from app import views
     pairs = [("2026-09-24", 1), ("2026-09-25", 1), ("2026-09-26", 3), ("2026-09-27", 20), ("2026-10-01", 0)]

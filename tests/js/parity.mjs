@@ -2,6 +2,7 @@
 // the results as JSON, so the test can check they match the Python rules exactly.
 //   node tests/js/parity.mjs < cases.json
 import * as E from '../../app/static/js/local/engine.js';
+import { readBackup } from '../../app/static/js/local/site.js';
 
 const input = JSON.parse(await new Promise(resolve => {
   let s = '';
@@ -28,6 +29,13 @@ const OPS = {
     }
     return { out, trades: E.trades(book, 'real'), fills: book.fills,
       summary: E.accountSummary(book, 'real', cfg, steps.at(-1).closes || {}, events) };
+  },
+  // A backup file made from the Mac's portfolio, restored the way Settings → Restore from a backup does it.
+  backup: ({ text, cfg, closes, events }) => {
+    const book = readBackup(text);
+    return { summary: E.accountSummary(book, 'real', cfg, closes, events), pending: E.pending(book, events, 'real'),
+      trades: E.trades(book, 'real'), fills: book.fills, dividends: E.dividendsByTrade(book, 'real'),
+      settings: book.settings, next_id: E.nextId(book) };
   },
   describe: ({ factors }) => factors.map(f => E.describe(f)),
   sessionsAfter: ({ pairs }) => pairs.map(([d, n]) => E.sessionsAfter(d, n)),

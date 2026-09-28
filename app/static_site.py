@@ -3,6 +3,7 @@ each person's portfolio stays in their own browser (app/static/js/local/).
 
     python -m app.static_site build --db data/egx.db --out _site     (group password from EGX_SITE_PASSWORD)
     python -m app.static_site strategy                                (site/strategy.yaml from your config.yaml)
+    python -m app.static_site portfolio-backup --out FILE              (your Mac portfolio, for Restore on the site)
 
 Every file under data/ is gzip + AES-256-GCM with a key made from the group password (PBKDF2-SHA256), so only people
 you gave the password can read the signals. Nothing personal goes in: no portfolio, no Telegram token.
@@ -89,6 +90,11 @@ def site_sections() -> list[dict]:
     return out
 
 
+def personal_keys() -> list[str]:
+    """Each friend's own numbers on the site (capital, fees, risk limits, Shariah filter)."""
+    return [k for k in config.PERSONAL_KEYS if not k.startswith("telegram_") and k not in MAC_ONLY_KEYS]
+
+
 def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | None = None) -> dict[str, object]:
     """Every file the site publishes, by name: core, market, predict and stock/<SYMBOL>."""
     d = views.Data(conn, cfg, views.Cache(), is_admin=False, multi_user=True)
@@ -113,7 +119,6 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
     b = views.breadth_data(d)
     events = [{"id": f"{r['symbol']}:{r['ex_date']}", "symbol": r["symbol"], "ex_date": r["ex_date"], "factor": r["factor"]}
               for r in conn.execute("SELECT symbol, ex_date, factor FROM price_events ORDER BY ex_date, id")]
-    personal_keys = [k for k in config.PERSONAL_KEYS if not k.startswith("telegram_") and k not in MAC_ONLY_KEYS]
     core = {
         "v": 1, "built": datetime.now().isoformat(timespec="seconds"), "scan_date": scan_date, "market": m or None,
         "final": scan.scan_is_final(conn),     # False: scanned during the session, again after the close
@@ -122,7 +127,7 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "breadth_today": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
                           **breadth.verdict(b, m.get("risk_off") if m else None)} if b else None,
         "strategy": strategy_settings(cfg),
-        "personal_defaults": {k: config.DEFAULTS[k] for k in personal_keys},
+        "personal_defaults": {k: config.DEFAULTS[k] for k in personal_keys()},
         "sections": site_sections(),
         "events": events, "data_status": views.settings_view(d)["data"],
         "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,
@@ -200,6 +205,38 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
             "bytes": sum(p.stat().st_size for p in (out / "data").rglob("*.bin"))}
 
 
+# ------------------------------------------------------------------ your Mac portfolio, for the site
+def portfolio_backup(conn, cfg: dict) -> dict:
+    """Your Mac portfolio (real trades, transactions, dividends, bonus-share updates and your own numbers) as a site
+    backup file: Settings → Restore from a backup on the site loads it into that browser. It's written on this
+    computer only; nothing here is published. Paper trades stay on the Mac."""
+    count = 0
+
+    def new_id() -> int:          # the site numbers everything in a book from one counter
+        nonlocal count
+        count += 1
+        return count
+
+    ids: dict[int, int] = {}
+    trades = []
+    for r in conn.execute("SELECT * FROM trades WHERE account = 'real' ORDER BY id"):
+        ids[r["id"]] = new_id()
+        trades.append({**dict(r), "id": ids[r["id"]]})
+    fills = [{**dict(r), "id": new_id(), "trade_id": ids[r["trade_id"]]}
+             for r in conn.execute("SELECT * FROM fills ORDER BY id") if r["trade_id"] in ids]
+    dividends = [{**dict(r), "id": new_id(), "trade_id": ids[r["trade_id"]]}
+                 for r in conn.execute("SELECT * FROM dividends ORDER BY id") if r["trade_id"] in ids]
+    events = {r["id"]: f"{r['symbol']}:{r['ex_date']}" for r in conn.execute("SELECT id, symbol, ex_date FROM price_events")}
+    adjustments = [{**dict(r), "event_id": events[r["event_id"]], "trade_id": ids[r["trade_id"]]}
+                   for r in conn.execute("SELECT * FROM position_adjustments ORDER BY date")
+                   if r["trade_id"] in ids and r["event_id"] in events]
+    book = {"v": 1, "next_id": count + 1, "trades": trades, "fills": fills, "dividends": dividends,
+            "adjustments": adjustments, "checklist": {}, "settings": {k: cfg[k] for k in personal_keys() if k in cfg},
+            "meta": {}}
+    return {"app": "egx-trading-agent", "kind": "portfolio-backup",
+            "exported": datetime.now().isoformat(timespec="seconds"), "book": book}
+
+
 # ------------------------------------------------------------------ the strategy the site uses
 def strategy_settings(cfg: dict) -> dict:
     """The rules everyone on the site shares: your settings without your own numbers or the Telegram token."""
@@ -226,9 +263,22 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--telegram-bot", help="the bot's @username, to show the Connect Telegram button")
     b.add_argument("--github-repo", help="OWNER/REPO, to show the owner's Run scan button (it opens the scan there)")
     sub.add_parser("strategy", help="copy the strategy from config.yaml to site/strategy.yaml")
+    pb = sub.add_parser("portfolio-backup", help="save your Mac portfolio as a file the site can restore")
+    pb.add_argument("--db", default=str(config.DB_PATH))
+    pb.add_argument("--out", required=True)
     a = p.parse_args(argv)
     if a.cmd == "strategy":
         print(f"Wrote {export_strategy(config.load_config())}")
+        return 0
+    if a.cmd == "portfolio-backup":
+        conn = db.connect(a.db)
+        try:
+            backup = portfolio_backup(conn, config.load_config())
+        finally:
+            conn.close()
+        Path(a.out).write_text(json.dumps(backup, ensure_ascii=False, indent=1), encoding="utf-8")
+        n = sum(1 for t in backup["book"]["trades"] if t["status"] == "open")
+        print(f"Wrote {a.out}: {n} open position{'' if n == 1 else 's'}, {len(backup['book']['trades'])} trades in all")
         return 0
     if a.config:
         config.CONFIG_PATH = Path(a.config)

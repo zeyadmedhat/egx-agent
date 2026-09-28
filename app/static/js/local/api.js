@@ -273,7 +273,7 @@ async function portfolioView(c) {
     summary: s, positions: await openPositions(c), closed: rows, closed_stats: stats,
     signals: sig.filter(r => r.action === 'BUY').map(r => ({ symbol: r.symbol, entry_high: r.entry_high, shares: r.shares })),
     fee_pct: cfg.fee_pct_per_side, sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
-    review_day: cfg.review_day,
+    review_day: cfg.review_day, nothing_saved: !book.trades.some(t => t.account === 'real'),
   };
 }
 

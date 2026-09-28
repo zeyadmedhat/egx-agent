@@ -4,7 +4,7 @@ import {
 } from '../lib.js';
 import {
   Icon, StatusChip, Kpi, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, DayBar, Field,
-  StockPicker, Confirm,
+  StockPicker, Confirm, Callout,
 } from '../ui.js';
 
 export function PortfolioPage({ route }) {
@@ -46,6 +46,10 @@ export function PortfolioPage({ route }) {
     <${PageHead} title="My Portfolio"
       sub="Log the trades you place with your broker. After each close the agent checks every position against the exit rules.">
       <button class="btn primary" onClick=${scrollToBuy}><${Icon} name="plus" />Log a buy</button><//>
+    ${data.nothing_saved && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>Nothing is saved in this
+      browser yet.</b> Your portfolio is kept only in the browser where you entered it, and links opened from Telegram
+      or another app can open a different browser. Open the site there, or bring your portfolio here with${' '}
+      <a href="#/settings">Settings → Restore from a backup</a>.<//></div>`}
     <div class="kpis">
       <${Kpi} label="Account value" icon="wallet" value=${fmt.short(s.equity)} sub=${`${fmt.pct(s.return_pct)} since start`} subClass=${tone(s.return_pct)} />
       <${Kpi} label="Cash" value=${fmt.short(s.cash)} valueClass=${s.cash < 0 ? 'down' : ''}
