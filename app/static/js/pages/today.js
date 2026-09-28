@@ -32,8 +32,8 @@ export function TodayPage() {
       <${Kpi} label="Your open positions" icon="briefcase" value=${data.positions.length}
         sub=${data.positions.length ? (alerts ? `${alerts} need${alerts === 1 ? 's' : ''} action` : 'all on hold') : 'none'}
         subClass=${alerts ? 'warn' : ''} />
-      <${Kpi} label="Paper account" icon="flask" value=${fmt.short(data.paper.equity)}
-        sub=${`${fmt.pct(data.paper.return_pct)} · ${data.paper.open} open`} subClass=${tone(data.paper.return_pct)} />
+      ${data.paper && html`<${Kpi} label="Paper account" icon="flask" value=${fmt.short(data.paper.equity)}
+        sub=${`${fmt.pct(data.paper.return_pct)} · ${data.paper.open} open`} subClass=${tone(data.paper.return_pct)} />`}
     </div>
 
     ${data.orders && html`<${OrdersCard} o=${data.orders} />`}
@@ -56,7 +56,7 @@ export function TodayPage() {
       <div class="card flush"><${Watchlist} rows=${data.watch} model=${data.model} /></div>
     </section>
 
-    ${cfg.auto_paper && data.paper.last_scan && html`<p class="faint" style="margin-top:14px;font-size:12.5px">
+    ${cfg.auto_paper && data.paper && data.paper.last_scan && html`<p class="faint" style="margin-top:14px;font-size:12.5px">
       Paper trading at this scan: ${data.paper.last_scan.filled || 0} filled, ${data.paper.last_scan.closed || 0} closed,${' '}
       ${data.paper.last_scan.cancelled || 0} skipped, ${data.paper.last_scan.new_orders || 0} new orders for the next session.</p>`}
     <${Disclaimer} />`;

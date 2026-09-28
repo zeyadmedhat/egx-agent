@@ -10,12 +10,12 @@ on:
     - cron: "20 16 * * 0-4"
     - cron: "20 19 * * 0-4"
     - cron: "40 */3 * * *"      # every 3 hours, every day: connects friends who pressed Start in Telegram
-  workflow_dispatch:
+  workflow_dispatch:            # "Run workflow": the Run scan button on the site opens this page for the owner
     inputs:
       force_scan:
-        description: "Download prices and scan even if nothing new is due"
+        description: "Download the latest prices and scan now (untick to only rebuild the site)"
         type: boolean
-        default: false
+        default: true
   push:
     branches: [main]
     paths: ["app/**", "egx_agent/**", "site/**", "requirements.txt", ".github/workflows/site.yml"]

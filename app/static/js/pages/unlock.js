@@ -43,7 +43,7 @@ export function UnlockScreen({ onDone, error: bootError }) {
     ${first && html`<div class="terms">
       <p><b>Before you start.</b> This site shows rules-based buy and sell signals for EGX stocks, shared in a private
         group. It is not investment advice: you decide and place every order yourself, and you can lose money.</p>
-      <p>Your portfolio, paper account and settings are saved <b>only in this browser, on this device</b>. Nobody else
+      <p>Your portfolio and settings are saved <b>only in this browser, on this device</b>. Nobody else
         sees them, not even the person who runs the site. Download a backup from Settings now and then.</p>
       <label class="check"><input type="checkbox" checked=${agreed} onChange=${e => setAgreed(e.target.checked)} />
         I understand</label></div>`}

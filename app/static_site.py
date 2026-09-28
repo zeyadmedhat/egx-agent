@@ -6,6 +6,7 @@ each person's portfolio stays in their own browser (app/static/js/local/).
 
 Every file under data/ is gzip + AES-256-GCM with a key made from the group password (PBKDF2-SHA256), so only people
 you gave the password can read the signals. Nothing personal goes in: no portfolio, no Telegram token.
+The site has no paper trading and no backtest: those stay on the Mac.
 """
 from __future__ import annotations
 
@@ -35,8 +36,9 @@ STATIC = Path(__file__).resolve().parent / "static"
 STRATEGY_PATH = config.ROOT / "site" / "strategy.yaml"
 ITERATIONS = 600_000        # PBKDF2 rounds: each guess costs about a second on a phone, so passwords can't be tried fast
 SERIES_TAIL = 750           # about 3 years of daily bars per stock page
-PAPER_SESSIONS = 60         # the last 60 sessions of BUY signals, so paper accounts can catch up after a break
 MIN_PASSWORD = 10
+MAC_ONLY_KEYS = ("paper_capital", "auto_paper")     # settings for the Mac's paper account
+WORKFLOW = "site.yml"       # the GitHub job that scans and publishes the site (.github/workflows/)
 STOCK_COLS = views.SERIES_COLS + ("atr14",)   # the exit rules in the browser need the ATR too
 
 
@@ -70,28 +72,25 @@ def telegram_code(password: str, site_id: str) -> str:
     return base64.urlsafe_b64encode(hmac.new(key, b"telegram link", hashlib.sha256).digest()).decode()[:24]
 
 
+def scan_page(repo: str) -> str | None:
+    """The scan's page on GitHub, for the owner's Run scan button: only someone signed in with access to the
+    repository can press Run workflow there."""
+    return f"https://github.com/{repo}/actions/workflows/{WORKFLOW}" if re.fullmatch(r"[\w.-]+/[\w.-]+", repo) else None
+
+
 # ------------------------------------------------------------------ what the site shows
-def _scan_history(conn, index_ind, stocks, sessions: int = PAPER_SESSIONS) -> list[dict]:
-    """Each recent session with that day's BUY signals and market mood, oldest first (paper trading replays it)."""
-    tail = index_ind.tail(sessions)
-    if tail.empty:
-        return []
-    rows = conn.execute(
-        """SELECT scan_date, symbol, score, setup, close, entry_high, stop, target, avg_value FROM scans
-           WHERE action='BUY' AND scan_date >= ? ORDER BY scan_date, score DESC""", (str(tail.index[0].date()),))
-    buys: dict[str, list] = {}
-    for r in rows:
-        sector = stocks.loc[r["symbol"], "sector"] if r["symbol"] in stocks.index else None
-        buys.setdefault(r["scan_date"], []).append({
-            "symbol": r["symbol"], "sector": sector or "Other", "score": r["score"], "setup": r["setup"] or "",
-            "close": r["close"], "entry_high": r["entry_high"], "entry_limit": r["entry_high"], "stop": r["stop"],
-            "target": r["target"], "avg_value": r["avg_value"]})
-    return [{"date": str(ts.date()), "risk_off": bool(row["close"] < row["ema50"]), "buys": buys.get(str(ts.date()), [])}
-            for ts, row in tail.iterrows()]
+def site_sections() -> list[dict]:
+    """The settings each friend has: your personal sections, without the paper account's."""
+    out = []
+    for s in views.SETTINGS_SECTIONS:
+        fields = [f for f in s["fields"] if f["key"] not in MAC_ONLY_KEYS]
+        if s["scope"] == "personal" and fields:
+            out.append({**s, "fields": fields})
+    return out
 
 
-def public_data(conn, cfg: dict, backtest: Path | None = None, telegram: dict | None = None) -> dict[str, object]:
-    """Every file the site publishes, by name: core, market, predict, backtest and stock/<SYMBOL>."""
+def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | None = None) -> dict[str, object]:
+    """Every file the site publishes, by name: core, market, predict and stock/<SYMBOL>."""
     d = views.Data(conn, cfg, views.Cache(), is_admin=False, multi_user=True)
     scan_date, df = views.current_scan(conn)
     signals = views.records(df)
@@ -114,7 +113,7 @@ def public_data(conn, cfg: dict, backtest: Path | None = None, telegram: dict | 
     b = views.breadth_data(d)
     events = [{"id": f"{r['symbol']}:{r['ex_date']}", "symbol": r["symbol"], "ex_date": r["ex_date"], "factor": r["factor"]}
               for r in conn.execute("SELECT symbol, ex_date, factor FROM price_events ORDER BY ex_date, id")]
-    personal_keys = [k for k in config.PERSONAL_KEYS if not k.startswith("telegram_")]
+    personal_keys = [k for k in config.PERSONAL_KEYS if not k.startswith("telegram_") and k not in MAC_ONLY_KEYS]
     core = {
         "v": 1, "built": datetime.now().isoformat(timespec="seconds"), "scan_date": scan_date, "market": m or None,
         "final": scan.scan_is_final(conn),     # False: scanned during the session, again after the close
@@ -124,14 +123,12 @@ def public_data(conn, cfg: dict, backtest: Path | None = None, telegram: dict | 
                           **breadth.verdict(b, m.get("risk_off") if m else None)} if b else None,
         "strategy": strategy_settings(cfg),
         "personal_defaults": {k: config.DEFAULTS[k] for k in personal_keys},
-        "sections": [s for s in views.SETTINGS_SECTIONS if s["scope"] == "personal"],
+        "sections": site_sections(),
         "events": events, "data_status": views.settings_view(d)["data"],
-        "scans": _scan_history(conn, index_ind, d.table),
         "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,
+        "scan_url": scan_url,
     }
     out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d)}
-    if backtest and backtest.exists():
-        out["backtest"] = json.loads(backtest.read_text(encoding="utf-8"))
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
     for sym in d.table.index:
         if sym in with_prices:
@@ -168,10 +165,10 @@ MANIFEST = {"name": "EGX Trading Agent", "short_name": "EGX Agent", "start_url":
             "icons": [{"src": "static/favicon.svg", "sizes": "any", "type": "image/svg+xml"}]}
 
 
-def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", backtest: Path | None = None,
-          telegram: dict | None = None) -> dict:
+def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", telegram: dict | None = None,
+          scan_url: str | None = None) -> dict:
     """Write the whole site to `out` (emptied first). `telegram` is {"bot", "link"} when friends can connect
-    Telegram. Returns what was published."""
+    Telegram; `scan_url` is the scan's page on GitHub, for the owner's Run scan button. Returns what was published."""
     if len(password or "") < MIN_PASSWORD:
         raise SystemExit(f"The group password must be at least {MIN_PASSWORD} characters.")
     out = Path(out)
@@ -183,7 +180,7 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", bac
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
 
-    files = public_data(conn, cfg, backtest, telegram)
+    files = public_data(conn, cfg, telegram, scan_url)
     plain = {name: to_json(obj) for name, obj in files.items() if name != "core"}
     # The stamp changes only when the content does, so browsers reload only after a real update.
     stamp = hashlib.sha256(b"".join(n.encode() + b"\0" + p for n, p in sorted(plain.items()))
@@ -225,9 +222,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--db", default=str(config.DB_PATH))
     b.add_argument("--config", help="settings file (default: config.yaml)")
     b.add_argument("--out", required=True)
-    b.add_argument("--backtest", help="a backtest result to show (JSON)")
     b.add_argument("--site-id", default=os.environ.get("GITHUB_REPOSITORY", "local"))
     b.add_argument("--telegram-bot", help="the bot's @username, to show the Connect Telegram button")
+    b.add_argument("--github-repo", help="OWNER/REPO, to show the owner's Run scan button (it opens the scan there)")
     sub.add_parser("strategy", help="copy the strategy from config.yaml to site/strategy.yaml")
     a = p.parse_args(argv)
     if a.cmd == "strategy":
@@ -242,8 +239,8 @@ def main(argv: list[str] | None = None) -> int:
                     "link": f"https://t.me/{a.telegram_bot}?start={telegram_code(password, a.site_id)}"}
     conn = db.connect(a.db)
     try:
-        res = build(conn, config.load_config(), Path(a.out), password, a.site_id,
-                    Path(a.backtest) if a.backtest else None, telegram)
+        res = build(conn, config.load_config(), Path(a.out), password, a.site_id, telegram,
+                    scan_page(a.github_repo) if a.github_repo else None)
     finally:
         conn.close()
     print(f"Built the site: {res['files']} files ({res['stocks']} stocks), {res['bytes'] / 1e6:.1f} MB, "

@@ -1,6 +1,6 @@
 // The GitHub Pages site has no server: this answers the dashboard's /api/... requests in the browser, with the same
 // shapes app/views.py and app/server.py give on your Mac. The shared parts come from the scan's published files;
-// your portfolio, paper account and settings come from this browser (site.js).
+// your portfolio and settings come from this browser (site.js). Paper trading and the backtest are only on the Mac.
 import * as E from './engine.js';
 import { load, loadBook, saveBook } from './site.js';
 
@@ -11,7 +11,7 @@ const fail = (status, message, extra) => { throw new LocalError(message, status,
 
 const STATUS_ORDER = { ADJUST: 0, EXIT: 1, REVIEW: 2, 'TIGHTEN STOP': 3, HOLD: 4, 'NO DATA': 5 };
 const ACTION_STATUSES = ['ADJUST', 'EXIT', 'REVIEW', 'TIGHTEN STOP'];
-const KEEP_ON_RESET = ['capital', 'paper_capital', 'fee_pct_per_side'];
+const KEEP_ON_RESET = ['capital', 'fee_pct_per_side'];
 
 const localToday = () => {
   const d = new Date();
@@ -24,9 +24,7 @@ async function context() {
   const book = loadBook();
   const cfg = { ...core.strategy, ...core.personal_defaults };
   for (const [k, v] of Object.entries(book.settings || {})) if (k in core.personal_defaults) cfg[k] = v;
-  const c = { core, book, cfg, stocks: new Map(core.stocks.map(s => [s.symbol, s])), bars: {} };
-  await catchUpPaper(c);
-  return c;
+  return { core, book, cfg, stocks: new Map(core.stocks.map(s => [s.symbol, s])), bars: {} };
 }
 
 const info = (c, sym) => c.stocks.get(sym)
@@ -47,25 +45,6 @@ async function barsFor(c, symbols) {
     c.bars[sym] = bars;
   }));
   return c.bars;
-}
-
-// Your paper account catches up with every scan since you last opened the site, the way the Mac's scan does it:
-// bonus-share updates, fills at the next open, exits, then the new orders from that day's BUY signals.
-async function catchUpPaper(c) {
-  const { core, book, cfg } = c;
-  // A scan during the session used unfinished prices: paper trading waits for the one after the close.
-  const scans = (core.scans || []).filter(s => core.final !== false || s.date < core.scan_date);
-  if (!scans.length) return;
-  const last = book.meta.paper_last_scan && book.meta.paper_last_scan.date;
-  const todo = last ? scans.filter(s => s.date > last) : scans.slice(-1);
-  if (!todo.length) return;
-  const syms = [...E.trades(book, 'paper', ['pending', 'open']).map(t => t.symbol),
-    ...todo.flatMap(s => s.buys.map(b => b.symbol))];
-  const bars = await barsFor(c, syms);
-  let stats = null;
-  for (const day of todo) stats = E.paperDay(book, cfg, bars, core.events, day, c.stocks, localToday());
-  book.meta.paper_last_scan = stats;
-  saveBook(book);
 }
 
 // ------------------------------------------------------------------ views (app/views.py)
@@ -153,6 +132,7 @@ function status(c, positions) {
     alerts: positions.filter(p => ACTION_STATUSES.includes(p.status)).length,
     positions: positions.length,
     job: null,
+    scan_url: c.core.scan_url || null,
   };
 }
 
@@ -219,17 +199,14 @@ async function today(c) {
     } else watch.push(r);
   }
   const positions = await openPositions(c);
-  const paper = E.accountSummary(c.book, 'paper', cfg, closes(c), core.events);
   const early = core.final === false
     ? ["These signals use prices from during today's session. The site scans again after the close, from about 4 pm."] : [];
   return {
     market: core.market ? { ...core.market, buys: buys.length, warnings: [...early, ...(core.market.warnings || [])] } : null,
     scan_date: scanDate, buys, watch, positions,
-    spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today,
-    paper: { equity: paper.equity, return_pct: paper.return_pct, open: paper.open_count,
-      last_scan: c.book.meta.paper_last_scan || null },
+    spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today, paper: null,
     model: Object.keys(preds.by_symbol).length ? { base: preds.base, count: preds.count, date: preds.date } : null,
-    cfg: Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'auto_paper', 'buy_score',
+    cfg: Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
       'shariah_filter'].map(k => [k, cfg[k]])),
   };
 }
@@ -300,47 +277,6 @@ async function portfolioView(c) {
   };
 }
 
-async function paperView(c) {
-  const { book, cfg, core } = c;
-  const px = closes(c);
-  const s = E.accountSummary(book, 'paper', cfg, px, core.events);
-  const pick = (t, keys) => Object.fromEntries(keys.map(k => [k, t[k] ?? null]));
-  const closedT = E.trades(book, 'paper', ['closed']).map(t => {
-    const pnl = (t.exit_price - t.entry_price) * t.shares - (t.fees || 0);
-    return { ...t, pnl, return_pct: pnl / (t.entry_price * t.shares) };
-  });
-  const winRate = closedT.length ? closedT.filter(t => t.pnl > 0).length / closedT.length : null;
-  closedT.sort((a, b) => (a.exit_date < b.exit_date ? 1 : a.exit_date > b.exit_date ? -1 : b.id - a.id));
-  const open = E.trades(book, 'paper', ['open']).map(t => ({ ...t, last: px[t.symbol] ?? null,
-    pnl_pct: px[t.symbol] != null ? px[t.symbol] / t.entry_price - 1 : null }));
-
-  let curve = [], bench = [];
-  const traded = [...new Set(E.trades(book, 'paper', ['open', 'closed']).map(t => t.symbol))];
-  const bars = await barsFor(c, traded);
-  const series = {};
-  for (const sym of traded) {
-    if (bars[sym] && bars[sym].length) series[sym] = { time: bars[sym].map(b => b.date), close: bars[sym].map(b => b.close) };
-  }
-  const idx = core.index;
-  const eq = E.equityCurve(book, 'paper', cfg, series, idx.time);
-  if (eq.length >= 2) {
-    const first = E.closeOn(idx, eq[0][0]);
-    curve = eq.map(([time, value]) => ({ time, value }));
-    bench = eq.map(([time]) => ({ time, value: cfg.paper_capital * E.closeOn(idx, time) / first }));
-  }
-  return {
-    summary: s, win_rate: winRate, auto_paper: cfg.auto_paper, paper_capital: cfg.paper_capital,
-    open: open.map(t => pick(t, ['symbol', 'entry_date', 'entry_price', 'shares', 'last', 'pnl_pct', 'stop', 'target',
-      'days_held'])),
-    pending: E.trades(book, 'paper', ['pending']).map(t => pick(t, ['symbol', 'signal_date', 'shares', 'entry_limit',
-      'stop', 'target'])),
-    closed: closedT.map(t => pick(t, ['symbol', 'entry_date', 'entry_price', 'exit_date', 'exit_price', 'shares',
-      'days_held', 'pnl', 'return_pct', 'exit_reason'])),
-    cancelled: E.trades(book, 'paper', ['cancelled']).map(t => pick(t, ['symbol', 'signal_date', 'exit_reason'])),
-    curve, benchmark: bench,
-  };
-}
-
 async function predictView(c) {
   const out = await load('predict');
   if (out && out.model) {
@@ -358,7 +294,7 @@ function settingsView(c) {
     values: Object.fromEntries(keys.map(k => [k, c.cfg[k]])),
     defaults: Object.fromEntries(keys.map(k => [k, c.core.personal_defaults[k]])),
     sections: c.core.sections, multi_user: true, is_admin: false, static: true, data: c.core.data_status,
-    telegram: c.core.telegram || null,
+    telegram: c.core.telegram || null, scan_url: c.core.scan_url || null,
   };
 }
 
@@ -510,17 +446,6 @@ function deletePosition(c, id) {
   return { message: `Deleted the ${row.symbol} position and its transactions.` };
 }
 
-function paperReset(c) {
-  const ids = new Set(c.book.trades.filter(t => t.account === 'paper').map(t => t.id));
-  c.book.trades = c.book.trades.filter(t => !ids.has(t.id));
-  c.book.adjustments = c.book.adjustments.filter(a => !ids.has(a.trade_id));
-  const scans = c.core.scans || [];
-  c.book.meta.paper_last_scan = scans.length
-    ? { filled: 0, cancelled: 0, closed: 0, new_orders: 0, date: scans[scans.length - 1].date } : null;
-  saveBook(c.book);
-  return { message: 'Paper account reset. New paper trades start after the next scan.' };
-}
-
 function saveSettings(c, values) {
   const [next, errors] = parseSettings(values || {}, c.cfg, c.core.sections);
   if (Object.keys(errors).length) fail(400, 'Some settings need fixing.', { errors });
@@ -571,10 +496,8 @@ export async function localApi(path, { method = 'GET', body } = {}) {
       case 'today': return today(c);
       case 'stock': return stockDetail(c, decodeURIComponent(b || ''));
       case 'portfolio': return portfolioView(c);
-      case 'paper': return paperView(c);
       case 'market': return load('market');
       case 'predict': return predictView(c);
-      case 'backtest': return load('backtest');
       case 'settings': return settingsView(c);
       case 'alerts': return { telegram: { connected: false, token_set: false, can_set_bot: false }, static: true };
       default: break;
@@ -588,7 +511,6 @@ export async function localApi(path, { method = 'GET', body } = {}) {
   if (method === 'POST' && a === 'portfolio' && x === 'dividend') return dividend(c, id, body || {});
   if (method === 'DELETE' && a === 'portfolio' && b && !x) return deletePosition(c, id);
   if (method === 'DELETE' && a === 'dividends') return deleteDividend(c, id);
-  if (method === 'POST' && a === 'paper' && b === 'reset') return paperReset(c);
   if (method === 'PUT' && a === 'settings') return saveSettings(c, body);
   if (method === 'POST' && a === 'settings' && b === 'defaults') return resetSettings(c);
   return fail(404, "That isn't available on this site. Scans run by themselves after every close.");

@@ -153,17 +153,18 @@ The agent also runs as a free, private website on GitHub Pages, so friends can u
 without a server and without your Mac being on.
 
 - **Every trading day** GitHub runs the scan by itself after the close (`.github/workflows/site.yml` →
-  `app/site_daily.py`): new prices, signals, the prediction model (monthly), a weekly backtest, then it publishes
-  the site. Nothing to do on your side. The run's page on GitHub shows a one-line summary (counts only).
-  A scan during trading hours is redone after the close; paper trading and Telegram wait for that one.
+  `app/site_daily.py`): new prices, signals and the prediction model (monthly), then it publishes the site.
+  Nothing to do on your side. The run's page on GitHub shows a one-line summary (counts only).
+  A scan during trading hours is redone after the close; Telegram waits for that one.
+  The site has no Paper Trading or Backtest pages: those stay in the Mac app.
 - **One group password.** Everything the scan publishes is encrypted with it (AES-256, key from the password with
   600,000 PBKDF2 rounds), so the link alone shows nothing. Friends type it once per device. To remove someone,
   change the `SITE_PASSWORD` secret and give the new one to the others.
-- **Each friend's portfolio stays in their own browser**: buys, sells, dividends, bonus-share updates, the paper
-  account and their own numbers (capital, risk, Shariah filter). Nobody else sees it, not even you. It doesn't
+- **Each friend's portfolio stays in their own browser**: buys, sells, dividends, bonus-share updates and
+  their own numbers (capital, risk, Shariah filter). Nobody else sees it, not even you. It doesn't
   sync between devices: *Settings → Download a backup* / *Restore from a backup* moves it. On iPhone, use the
   site from its Home Screen icon (Safari can delete a website's data after 7 days without a visit).
-- **Same rules as the Mac.** The browser runs a copy of the exit, sizing and paper-trading rules
+- **Same rules as the Mac.** The browser runs a copy of the exit and sizing rules
   (`app/static/js/local/`), and `tests/test_static_site.py` checks it gives exactly the same answers.
 - **Telegram, to each friend:** with the `TELEGRAM_TOKEN` secret set (your bot's token), each friend presses
   *Settings → Connect Telegram* on the site, then Start. The job checks for new people every 3 hours, answers

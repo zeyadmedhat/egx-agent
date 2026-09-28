@@ -84,19 +84,6 @@ function stopLabel(p) {
   return 'Stop-loss';
 }
 
-// Fill a next-day buy order at the open, unless the open already broke the plan.
-export function fillOrder(order, bar) {
-  const o = bar.open;
-  if (o <= order.stop) return [null, `cancelled: opened at ${f2(o)}, below the stop ${f2(order.stop)}`];
-  if (o > order.entry_limit) {
-    return [null, `cancelled: gapped up to ${f2(o)}, above the entry limit ${f2(order.entry_limit)} (not chasing)`];
-  }
-  return [position({
-    symbol: order.symbol, entry_date: bar.date, entry_price: o, shares: order.shares, initial_stop: order.stop,
-    stop: order.stop, target: order.target, highest_close: o, sector: order.sector || '',
-  }), 'filled'];
-}
-
 // Advance a position through one daily bar. Returns [exit price, reason] when it exits.
 export function processBar(p, bar, cfg) {
   if (p.exit_next_open) return [bar.open, p.exit_next_open];
@@ -315,16 +302,6 @@ function setAdjustment(book, eventId, tradeId, action, ratio, date) {
   book.adjustments.push({ event_id: eventId, trade_id: tradeId, action, ratio, date });
 }
 
-// Paper trades follow the re-based prices by themselves.
-export function applyPaper(book, events, today) {
-  let n = 0;
-  for (const [id, ev] of Object.entries(pending(book, events, 'paper'))) {
-    applyEvent(book, +id, events.find(e => e.id === ev.event_id), ev.shares_expected, today);
-    n += 1;
-  }
-  return n;
-}
-
 export function dividendsByTrade(book, account = 'real') {
   const accountOf = new Map(book.trades.map(t => [t.id, t.account]));
   const out = {};
@@ -453,124 +430,4 @@ export function positionsForAllocation(book, account, statuses = ['open', 'pendi
     symbol: t.symbol, sector: t.sector, entry_price: +(t.entry_price ?? t.entry_limit), stop: +t.stop,
     shares: Math.trunc(t.shares),
   }));
-}
-
-// ------------------------------------------------------------------ paper trading
-export function createPaperOrders(book, orders, signalDate) {
-  let n = 0;
-  for (const o of orders) {
-    if (!(o.shares > 0)) continue;
-    book.trades.push({ id: nextId(book), account: 'paper', status: 'pending', symbol: o.symbol, sector: o.sector ?? null,
-      signal_date: signalDate, entry_date: null, entry_price: null, shares: Math.trunc(o.shares), initial_stop: +o.stop,
-      stop: +o.stop, target: +o.target, entry_limit: +o.entry_limit, highest_close: null, days_held: 0,
-      exit_next_open: null, last_bar_date: null, exit_date: null, exit_price: null, exit_reason: null, fees: 0,
-      notes: o.setup || '' });
-    n += 1;
-  }
-  return n;
-}
-
-// Fill pending paper orders at the next open and walk open paper trades through new bars (up to `upto`).
-export function processPaper(book, cfg, barsBySymbol, upto) {
-  const fee = cfg.fee_pct_per_side / 100;
-  const stats = { filled: 0, cancelled: 0, closed: 0 };
-  for (const r of trades(book, 'paper', ['pending'])) {
-    const bars = (barsBySymbol[r.symbol] || []).filter(b => b.date > r.signal_date && b.date <= upto);
-    if (!bars.length) continue;
-    const bar = bars[0];
-    const [pos, msg] = fillOrder({ symbol: r.symbol, shares: r.shares, stop: r.stop, target: r.target,
-      entry_limit: r.entry_limit, sector: r.sector }, bar);
-    if (!pos) {
-      Object.assign(r, { status: 'cancelled', exit_reason: msg, exit_date: bar.date });
-      stats.cancelled += 1;
-      continue;
-    }
-    const { cash } = accountSummary(book, 'paper', cfg, {});
-    pos.shares = Math.min(pos.shares, Math.floor(cash / (pos.entry_price * (1 + fee))));
-    if (pos.shares <= 0) {
-      Object.assign(r, { status: 'cancelled', exit_reason: 'not enough paper cash' });
-      stats.cancelled += 1;
-      continue;
-    }
-    Object.assign(r, { status: 'open', entry_date: pos.entry_date, entry_price: pos.entry_price, shares: pos.shares,
-      highest_close: pos.entry_price, fees: pos.entry_price * pos.shares * fee, last_bar_date: null, days_held: 0 });
-    stats.filled += 1;
-  }
-  for (const r of trades(book, 'paper', ['open'])) {
-    const all = barsBySymbol[r.symbol];
-    if (!all) continue;
-    const bars = all.filter(b => (r.last_bar_date ? b.date > r.last_bar_date : b.date >= r.entry_date) && b.date <= upto);
-    const pos = position(r);
-    let last = r.last_bar_date;
-    let exit = null;
-    for (const bar of bars) {
-      const res = processBar(pos, bar, cfg);
-      last = bar.date;
-      if (res) { exit = res; break; }
-    }
-    Object.assign(r, { stop: pos.stop, highest_close: pos.highest_close, days_held: pos.days_held,
-      exit_next_open: pos.exit_next_open, last_bar_date: last });
-    if (exit) {
-      closeTrade(book, cfg, r.id, last, exit[0], exit[1]);
-      stats.closed += 1;
-    }
-  }
-  return stats;
-}
-
-// One scan day for a paper account (scan.process_account): bonus-share updates, fills and exits up to that close, then
-// the orders for that day's BUY signals. day = { date, risk_off, buys: [...] }; stocks: Map of symbol → stock info.
-export function paperDay(book, cfg, barsBySymbol, events, day, stocks, today) {
-  applyPaper(book, events, today);
-  const st = processPaper(book, cfg, barsBySymbol, day.date);
-  let newOrders = 0;
-  const mine = day.buys.filter(b => stocks.has(b.symbol) && passesFilter(stocks.get(b.symbol), cfg.shariah_filter));
-  if (cfg.auto_paper && mine.length) {
-    const px = {};
-    for (const [sym, bars] of Object.entries(barsBySymbol)) {
-      const upto = bars.filter(b => b.date <= day.date);
-      const last = upto[upto.length - 1];
-      if (last && Number.isFinite(last.close)) px[sym] = last.close;
-    }
-    const paper = accountSummary(book, 'paper', cfg, px, events);
-    const sized = allocate(mine, paper.equity, paper.cash, positionsForAllocation(book, 'paper'), cfg, day.risk_off);
-    const already = new Set(trades(book, 'paper').filter(t => t.signal_date === day.date).map(t => t.symbol));
-    newOrders = createPaperOrders(book, sized.filter(o => !already.has(o.symbol)), day.date);
-  }
-  return { ...st, new_orders: newOrders, date: day.date };
-}
-
-// The last close at or before `day` in a sorted series { time: [...], close: [...] }.
-export function closeOn(series, day) {
-  let lo = 0, hi = series.time.length - 1, found = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (series.time[mid] <= day) { found = mid; lo = mid + 1; } else hi = mid - 1;
-  }
-  return found >= 0 ? series.close[found] : null;
-}
-
-// Daily account value from the first trade onward (cash + holdings at each close).
-export function equityCurve(book, account, cfg, closes, dates) {
-  const ts = trades(book, account, ['open', 'closed']);
-  const start = +(account === 'real' ? cfg.capital : cfg.paper_capital);
-  if (!ts.length) return [];
-  const first = ts.map(t => t.entry_date).sort()[0];
-  const fee = cfg.fee_pct_per_side / 100;
-  const out = [];
-  for (const d of dates.filter(x => x >= first)) {
-    let cash = start, held = 0;
-    for (const r of ts) {
-      if (r.entry_date > d) continue;
-      cash -= r.entry_price * r.shares * (1 + fee);
-      if (r.status === 'closed' && r.exit_date <= d) cash += r.exit_price * r.shares * (1 - fee);
-      else {
-        const s = closes[r.symbol];
-        const c = s ? closeOn(s, d) : null;
-        held += (c ?? r.entry_price) * r.shares;
-      }
-    }
-    out.push([d, cash + held]);
-  }
-  return out;
 }

@@ -1,5 +1,7 @@
 // Settings: Telegram alerts and the daily scan, every number the agent uses, the data status and refresh buttons.
-import { html, useApi, useState, useEffect, api, toast, refreshAll, startJob, fmt, cls, todayISO } from '../lib.js';
+import {
+  html, useApi, useState, useEffect, useStore, api, toast, refreshAll, startJob, fmt, cls, todayISO, setOwner, watchForData,
+} from '../lib.js';
 import {
   Icon, Kpi, Callout, PageHead, Disclaimer, PageLoading, Field, Switch, Confirm, JobProgress, useJob,
 } from '../ui.js';
@@ -76,7 +78,7 @@ export function SettingsPage() {
   const admin = data.is_admin;
   return html`
     <${PageHead} title="Settings" sub=${website && !admin
-      ? 'Your own numbers: they size your BUY signals and run your paper account. The strategy itself is the same for everyone.'
+      ? `Your own numbers: they size your BUY signals${data.static ? '' : ' and run your paper account'}. The strategy itself is the same for everyone.`
       : 'Changes apply from the next scan, or press Re-score now to apply them to the latest data.'}>
       <button class="btn ghost" onClick=${() => setConfirmReset(true)}>${admin ? 'Restore default rules' : 'Reset my settings'}</button><//>
     ${saved && admin && html`<div style="margin-bottom:14px"><${Callout} tone="ok"><div class="row" style="gap:12px">
@@ -90,7 +92,7 @@ export function SettingsPage() {
         <a role="button" onClick=${() => scrollTo('sec-data')}>Data</a>
       </nav>
       <div class="stack">
-        ${data.static ? html`<${DeviceCard} telegram=${data.telegram} />` : html`<${AlertsCard} />`}
+        ${data.static ? html`<${DeviceCard} telegram=${data.telegram} scanUrl=${data.scan_url} />` : html`<${AlertsCard} />`}
         ${data.sections.map(s => html`<div class="card settings-section" id=${slug(s.title)}>
           <div class="card-title" style="font-size:14px;color:var(--text)">${s.title}${website && admin && html`
             <span class=${cls('scope-tag', s.scope === 'strategy' && 'everyone')}>${s.scope === 'strategy'
@@ -107,7 +109,7 @@ export function SettingsPage() {
     ${confirmReset && html`<${Confirm} title=${admin ? 'Restore the default rules?' : 'Reset your settings?'}
       confirmLabel=${admin ? 'Restore defaults' : 'Reset'}
       text=${admin ? `All rules go back to the tested defaults${website ? ' for everyone' : ''}. Your capital, paper capital and fees are kept.`
-        : 'Your risk limits, Shariah filter and paper-trading choice go back to the defaults. Your capital and fees are kept.'}
+        : `Your risk limits${data.static ? ' and Shariah filter' : ', Shariah filter and paper-trading choice'} go back to the defaults. Your capital and fees are kept.`}
       onConfirm=${restore} onClose=${() => setConfirmReset(false)} />`}
     <${Disclaimer} />`;
 }
@@ -173,8 +175,9 @@ function DataCard({ d, running, admin }) {
 }
 
 // ------------------------------------------------------------------ the GitHub Pages site: your data lives here
-function DeviceCard({ telegram }) {
+function DeviceCard({ telegram, scanUrl }) {
   const [restore, setRestore] = useState(null);
+  const owner = useStore(s => s.owner);
   const download = async () => {
     const site = await import('../local/site.js');
     const blob = new Blob([site.backupText(site.loadBook())], { type: 'application/json' });
@@ -207,7 +210,7 @@ function DeviceCard({ telegram }) {
   };
   return html`<div class="card settings-section" id="sec-alerts">
     <div class="card-title" style="font-size:14px;color:var(--text)"><${Icon} name="shield" size=${16} />Your data on this device</div>
-    <p class="muted" style="font-size:13px">Your portfolio, paper account and settings are saved only in this browser.
+    <p class="muted" style="font-size:13px">Your portfolio and settings are saved only in this browser.
       Nobody else can see them, not even the person who runs the site. They don't move to your other phone or computer by
       themselves: download a backup here and restore it there.</p>
     <div class="device-actions">
@@ -235,6 +238,18 @@ function DeviceCard({ telegram }) {
       : html`<div class="muted" style="font-size:12.5px">The site has no Telegram alerts yet. Open it after each close
           (from about 4 pm Cairo time) for the next session's orders.</div>`}
     </div>
+    ${scanUrl && html`<div class="sub-block"><h3>Run a scan now (for the person who runs the site)</h3>
+      <div class="muted" style="font-size:12.5px">The site scans by itself after every close. To scan now, open the
+        scan on GitHub and press <b>Run workflow</b>, then the green <b>Run workflow</b> button. It needs your GitHub
+        sign-in, so it only works for you. The new data shows here in about 5 minutes. During trading hours the
+        prices aren't final: the site scans again after the close.</div>
+      <div class="device-actions">
+        <a class="btn" href=${scanUrl} target="_blank" rel="noopener noreferrer" onClick=${() => watchForData()}>
+          <${Icon} name="refresh" />Run scan on GitHub</a>
+      </div>
+      <label class="check" style="font-size:13px"><input type="checkbox" checked=${owner}
+        onChange=${e => setOwner(e.target.checked)} />Show a Run scan button at the top of every page on this device</label>
+    </div>`}
     ${restore && html`<${Confirm} title="Restore this backup?" confirmLabel="Restore" danger text=${restore.text}
       onConfirm=${apply} onClose=${() => setRestore(null)} />`}
   </div>`;

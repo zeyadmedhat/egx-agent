@@ -65,7 +65,21 @@ export const store = {
   theme: document.documentElement.dataset.theme || 'dark',
   me: null,          // /api/me: { multi_user, user } (on your Mac: you, as admin, no login)
   auth: null,        // the website only: 'login' or 'terms' while that screen is needed
+  owner: readOwner(),  // the GitHub Pages site: this device shows the owner's Run scan button
 };
+
+// The Run scan button on the GitHub Pages site opens the scan's page on GitHub, which only works for the person who
+// runs the site (signed in to GitHub), so it's switched on per device in Settings.
+function readOwner() {
+  try { return localStorage.getItem('egx-owner') === '1'; } catch { return false; }
+}
+export function setOwner(on) {
+  try {
+    if (on) localStorage.setItem('egx-owner', '1');
+    else localStorage.removeItem('egx-owner');
+  } catch { /* storage blocked: it lasts until the page is closed */ }
+  setStore({ owner: on });
+}
 export const isAdmin = () => !store.me || !!store.me.user.is_admin;
 export const multiUser = () => !!(store.me && store.me.multi_user);
 
@@ -148,6 +162,7 @@ export async function pollStatus() {
 }
 
 // The GitHub Pages site: look for a newer scan every few minutes; pages reload when there is one.
+let watchUntil = 0;
 async function pollSite() {
   if (store.auth) return;
   try {
@@ -155,13 +170,26 @@ async function pollSite() {
     await site.newData();
     const s = await api('/status');
     const patch = { status: s, offline: false };
-    if (store.version !== s.version) patch.version = s.version;
+    if (store.version !== s.version) {
+      if (store.version && Date.now() < watchUntil) {
+        watchUntil = 0;
+        toast(`New data: the site now shows the scan of the ${fmt.date(s.market && s.market.date)} close.`, 'ok', 9000);
+      }
+      patch.version = s.version;
+    }
     setStore(patch);
   } catch (e) {
     if (!store.auth) setStore({ offline: true });
   }
   clearTimeout(pollTimer);
-  pollTimer = setTimeout(pollSite, store.offline ? 30000 : 300000);
+  pollTimer = setTimeout(pollSite, store.offline || Date.now() < watchUntil ? 30000 : 300000);
+}
+
+// After you start a scan on GitHub: look for its data every 30 seconds for a while (it takes about 5 minutes).
+export function watchForData(minutes = 20) {
+  watchUntil = Date.now() + minutes * 60000;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollSite, 30000);
 }
 
 export async function startJob(path, body) {

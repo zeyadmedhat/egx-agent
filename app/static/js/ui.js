@@ -1,7 +1,7 @@
 // Shared building blocks: icons, Shariah badges, KPI tiles, tables, forms, the stock picker, dialogs.
 import {
   html, Fragment, useState, useEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
-  stockHref,
+  stockHref, watchForData, STATIC,
 } from './lib.js';
 
 // ------------------------------------------------------------------ icons (stroke icons, 24×24)
@@ -353,6 +353,8 @@ export function useJob(kind) {
 export function JobControl() {
   const { job, running } = useJob();
   const market = useStore(s => s.status && s.status.market);
+  const scanUrl = useStore(s => s.status && s.status.scan_url);
+  const owner = useStore(s => s.owner);
   if (running) {
     const pct = Math.round((job.progress || 0) * 100);
     return html`<div class="job" title=${job.message}><span class="spinner"></span>
@@ -360,8 +362,13 @@ export function JobControl() {
       <span class="pbar"><span style=${`width:${pct}%`}></span></span><b>${pct}%</b></div>`;
   }
   if (store.me && !store.me.user.is_admin) {
-    return market ? html`<span class="data-pill" title="The site scans by itself after every close">
-      <${Icon} name="check" size=${14} /><span class="hide-mobile">Data:${' '}</span>${fmt.date(market.date, false)} close</span>` : null;
+    const pill = market && html`<span class="data-pill" title="The site scans by itself after every close">
+      <${Icon} name="check" size=${14} /><span class="hide-mobile">Data:${' '}</span>${fmt.date(market.date, false)} close</span>`;
+    // The GitHub Pages site: the owner's button opens the scan on GitHub (Settings → Run a scan now).
+    const url = STATIC && owner && scanUrl;
+    return url ? html`${pill}<a class="btn primary" href=${url} target="_blank" rel="noopener noreferrer"
+      onClick=${() => watchForData()} title="Opens the scan on GitHub: press Run workflow there. The new data shows here in about 5 minutes.">
+      <${Icon} name="refresh" /> Run scan</a>` : pill;
   }
   return html`<button class="btn primary" onClick=${() => startJob('/jobs/scan', { update_data: true })}
     title=${`Download the latest closing prices and look for signals${market ? ` (data now: ${fmt.date(market.date)} close)` : ''}`}>

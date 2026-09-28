@@ -10,25 +10,12 @@ const input = JSON.parse(await new Promise(resolve => {
 }));
 
 const bars = list => list.map(b => ({ ...b, atr14: E.num(b.atr14), ema50: E.num(b.ema50) }));
-const barsBySymbol = obj => Object.fromEntries(Object.entries(obj).map(([s, b]) => [s, bars(b)]));
 const emptyBook = () => ({ next_id: 1, trades: [], fills: [], dividends: [], adjustments: [] });
 
 const OPS = {
   realStatus: ({ trade, bars: b, cfg }) => E.realStatus(trade, bars(b), cfg),
   allocate: ({ candidates, equity, cash, positions, cfg, risk_off: riskOff }) =>
     E.allocate(candidates, equity, cash, positions, cfg, riskOff),
-  paper: ({ cfg, bars: b, days, stocks }) => {
-    const book = emptyBook();
-    const all = barsBySymbol(b);
-    const info = new Map(Object.entries(stocks));
-    const stats = days.map(day => E.paperDay(book, cfg, all, [], day, info, '2026-01-01'));
-    const last = days[days.length - 1].date;
-    const closes = Object.fromEntries(Object.entries(all).map(([s, x]) => [s, x.filter(y => y.date <= last).at(-1).close]));
-    const series = Object.fromEntries(Object.entries(all).map(([s, x]) => [s, { time: x.map(y => y.date), close: x.map(y => y.close) }]));
-    const dates = all[Object.keys(all)[0]].map(y => y.date).filter(d => d <= last);
-    return { stats, trades: E.trades(book, 'paper'), summary: E.accountSummary(book, 'paper', cfg, closes),
-      curve: E.equityCurve(book, 'paper', cfg, series, dates) };
-  },
   real: ({ cfg, steps, events }) => {
     const book = emptyBook();
     const out = [];

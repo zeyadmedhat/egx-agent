@@ -116,54 +116,6 @@ def test_share_sizing_matches(cfg):
 
 
 @needs_node
-def test_paper_account_catch_up_matches_the_daily_scan(tmp_path, cfg):
-    """The browser replays missed scans one by one; the result must equal the Mac's scan doing them day by day."""
-    ind = market()
-    rng = np.random.default_rng(3)
-    stocks = pd.DataFrame({"symbol": list(ind), "sector": ["A", "B", "A", "C", "B"], "kashif_status": "compliant",
-                           "egx33": 1}).set_index("symbol", drop=False)
-    days = []
-    for ts in list(ind["S0"].index[200:]):
-        buys = []
-        for sym, frame in ind.items():
-            r = frame.loc[ts]
-            if r.close > r.ema50 and rng.random() < 0.25:
-                stop = float(strategy.initial_stop(r.close, r.atr14, cfg))
-                buys.append({"symbol": sym, "sector": stocks.loc[sym, "sector"], "score": float(rng.uniform(70, 95)),
-                             "setup": "Breakout", "close": float(r.close), "entry_high": float(r.close + 0.25 * r.atr14),
-                             "entry_limit": float(r.close + 0.25 * r.atr14), "stop": stop,
-                             "target": float(r.close + 2 * (r.close - stop)), "avg_value": 5e7})
-        buys.sort(key=lambda b: -b["score"])
-        days.append({"date": str(ts.date()), "risk_off": bool(rng.random() < 0.15), "buys": buys})
-
-    conn = db.connect(tmp_path / "paper.db")
-    py_stats = []
-    for day in days:
-        ts = pd.Timestamp(day["date"])
-        py_stats.append(scan.process_account(conn, cfg, {s: f.loc[:ts] for s, f in ind.items()}, ts, day["buys"],
-                                             stocks, day["risk_off"]))
-    py_trades = portfolio.trades_df(conn, "paper").to_dict("records")
-    last = pd.Timestamp(days[-1]["date"])
-    closes = {s: float(f.close.loc[:last].iloc[-1]) for s, f in ind.items()}
-    py_summary = portfolio.account_summary(conn, "paper", cfg, closes)
-    dates = ind["S0"].index[ind["S0"].index <= last]
-    py_curve = portfolio.equity_curve(conn, "paper", cfg, {s: f.close for s, f in ind.items()}, dates)
-
-    (js,) = run_js({"op": "paper", "args": {"cfg": cfg, "bars": {s: bars_of(f) for s, f in ind.items()}, "days": days,
-                                            "stocks": {s: stocks.loc[s].to_dict() for s in stocks.index}}})
-    assert len(py_trades) >= 5 and any(t["status"] == "closed" for t in py_trades)
-    assert len(js["trades"]) == len(py_trades)
-    for a, b in zip(py_trades, js["trades"]):
-        assert_same(a, b, TRADE_KEYS)
-    for a, b in zip(py_stats, js["stats"]):
-        assert_same(a, b, ("filled", "cancelled", "closed", "new_orders", "date"))
-    assert_same(py_summary, js["summary"], ("cash", "equity", "realized", "unrealized", "open_count", "open_risk"))
-    assert len(py_curve) == len(js["curve"])
-    for (t, v), (jt, jv) in zip(py_curve.items(), js["curve"]):
-        assert str(t.date()) == jt and np.isclose(v, jv)
-
-
-@needs_node
 def test_your_trades_bonus_shares_and_dividends_match(tmp_path, cfg):
     conn = db.connect(tmp_path / "real.db")
     t1 = portfolio.add_real_buy(conn, cfg, "AAA", "2026-01-05", 10.0, 100, 0.5, "Banks")
@@ -274,8 +226,12 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
     assert not any(k.startswith("telegram") for k in core["strategy"])
     assert core["signals"][0]["symbol"] == "AAA" and core["signals"][0]["trigger"]
     assert {s["symbol"] for s in core["stocks"]} == {"AAA", "BBB"}
-    assert core["scans"][-1]["buys"][0]["symbol"] == "AAA"
     assert all(s["scope"] == "personal" for s in core["sections"])
+    # No paper trading or backtest on the site: those stay on the Mac.
+    assert "scans" not in core and "backtest.bin" not in files
+    fields = {f["key"] for s in core["sections"] for f in s["fields"]}
+    assert "capital" in fields and not fields & {"paper_capital", "auto_paper"}
+    assert not {"paper_capital", "auto_paper"} & set(core["personal_defaults"])
     assert "atr14" in files["stock/AAA.bin"]["series"]
     with pytest.raises(InvalidTag):
         static_site.unseal((out / "data" / "core.bin").read_bytes(),
@@ -348,7 +304,7 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
 
     first = site_daily.run(src, site, PASSWORD, "me/egx", "123:abc", "https://me.github.io/egx/")
     assert scans == [False]            # the strategy is new to this data: re-scored without downloading
-    assert first["telegram"] == "1 connected (1 new, 0 left), sent to 1" and first["backtest"] == "updated"
+    assert first["telegram"] == "1 connected (1 new, 0 left), sent to 1" and "backtest" not in first
     assert [c for c, _ in bot.sent] == ["111", "111"]
     assert "Connected" in bot.sent[0][1]
     daily = bot.sent[1][1]
@@ -359,6 +315,9 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     core = static_site.unseal((site / "data" / "core.bin").read_bytes(), key)
     assert core["telegram"] == {"bot": "TestEGXBot", "link": f"https://t.me/TestEGXBot?start={code}"}
     assert core["final"] is True
+    # The owner's Run scan button opens the scan on GitHub; the site holds no GitHub key for it.
+    assert core["scan_url"] == "https://github.com/me/egx/actions/workflows/site.yml"
+    assert static_site.scan_page("local") is None and static_site.scan_page('a/b"><script>') is None
     everything = b"".join(p.read_bytes() for p in site.rglob("*") if p.is_file())
     assert code.encode() not in everything and b"Zarqa-Friend" not in everything
     assert "Zarqa-Friend" not in json.dumps(first) and "111" not in json.dumps(first)
@@ -433,4 +392,26 @@ def test_a_scan_during_the_session_is_redone_after_the_close(tmp_path, monkeypat
     assert scan.scan_is_final(conn) and not scan.scan_is_stale(conn)
     db.set_meta(conn, "market", json.dumps({"finished": "2026-09-29T09:00:00+03:00"}))      # the next morning
     assert scan.scan_is_final(conn)
+    conn.close()
+
+
+def test_a_scan_during_the_session_does_not_hold_back_the_one_after_the_close(tmp_path, monkeypatch):
+    """The 2-hour pause after a try only counts tries made once the close's data was due (15:30 Cairo)."""
+    from datetime import date, timedelta
+    conn = db.connect(tmp_path / "egx.db")
+    db.set_meta(conn, "scan_data_date", "2026-09-28")
+    db.set_meta(conn, "market", json.dumps({"finished": "2026-09-28T15:00:00+03:00"}))
+    monkeypatch.setattr(scan, "expected_session_date", lambda now=None: date(2026, 9, 28))
+    due = datetime(2026, 9, 28, 15, 30, tzinfo=scan.CAIRO).astimezone().replace(tzinfo=None)
+
+    class Clock(datetime):          # it's 15:50 Cairo
+        @classmethod
+        def now(cls, tz=None):
+            return due + timedelta(minutes=20)
+
+    monkeypatch.setattr(scan, "datetime", Clock)
+    db.set_meta(conn, "scan_attempted", (due - timedelta(minutes=30)).isoformat())
+    assert scan.scan_is_stale(conn)          # tried at 15:00, during the session: scan again now
+    db.set_meta(conn, "scan_attempted", (due + timedelta(minutes=5)).isoformat())
+    assert not scan.scan_is_stale(conn)      # tried at 15:35 with no new data yet: wait a while
     conn.close()

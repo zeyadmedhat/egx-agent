@@ -47,8 +47,12 @@ def scan_is_stale(conn: sqlite3.Connection) -> bool:
     if data_date and (data_date > expected or data_date == expected and scan_is_final(conn)):
         return False
     attempted = db.get_meta(conn, "scan_attempted")
-    if attempted and datetime.fromisoformat(attempted) > datetime.now() - timedelta(hours=2):
-        return False  # tried recently; probably a holiday or data not published yet
+    if attempted:
+        tried = datetime.fromisoformat(attempted)
+        # Only a try after this close's data was due counts: a scan during the session doesn't hold back the one after.
+        due = datetime.combine(date.fromisoformat(expected), DATA_READY, CAIRO).astimezone().replace(tzinfo=None)
+        if tried >= due and tried > datetime.now() - timedelta(hours=2):
+            return False  # tried recently; probably a holiday or data not published yet
     return True
 
 

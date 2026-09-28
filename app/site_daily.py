@@ -3,7 +3,7 @@
     python -m app.site_daily --db state/egx.db --config site/strategy.yaml --out _site
 
 1. Downloads the new closing prices and scans (the first run downloads 10 years of history, about 5 minutes).
-2. Keeps the prediction model trained (the first time, then monthly) and re-runs the backtest weekly.
+2. Keeps the prediction model trained (the first time, then monthly).
 3. Connects the friends who pressed "Connect Telegram" on the site (if the TELEGRAM_TOKEN secret is set).
 4. Builds the encrypted site into --out, then sends each connected friend the day's signals, once per close.
 
@@ -21,7 +21,7 @@ import json
 import os
 import sys
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -30,8 +30,6 @@ from egx_agent import config, db, predict, scan
 from egx_agent.data import prices
 
 from . import alerts, jobs, static_site, views
-
-BACKTEST_DAYS = 7
 
 
 def log(msg: str) -> None:
@@ -114,7 +112,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                           + ("" if final else " (during the session: scanned again after the close)")
                           + f", Kashif status for {n_kashif} stocks")
 
-        # 2. the prediction model and the weekly backtest
+        # 2. the prediction model
         try:
             if predict.load_meta(predict.model_dir(conn)) is None:
                 jobs.train_job(conn, _progress("Training the prediction model"))
@@ -124,17 +122,6 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         except Exception as exc:  # the site still works without the model
             traceback.print_exc()
             report["model"] = f"failed ({type(exc).__name__})"
-        backtest = db_path.parent / "last_backtest.json"
-        old = not backtest.exists() or datetime.fromtimestamp(backtest.stat().st_mtime) < datetime.now() - timedelta(
-            days=BACKTEST_DAYS)
-        if old or changed:
-            try:
-                jobs.backtest_job(3, "all", backtest, {**cfg, **{k: config.DEFAULTS[k] for k in config.PERSONAL_KEYS}})(
-                    conn, _progress("Backtest"))
-                report["backtest"] = "updated"
-            except Exception as exc:
-                traceback.print_exc()
-                report["backtest"] = f"failed ({type(exc).__name__})"
 
         # 3. Telegram: the friends who pressed Start (or /stop) since the last run
         telegram = subs = None
@@ -148,7 +135,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                 report["telegram"] = f"failed: {exc}"
 
         # 4. the site, then this close's signals to each connected friend
-        res = static_site.build(conn, cfg, out, password, site_id, backtest if backtest.exists() else None, telegram)
+        res = static_site.build(conn, cfg, out, password, site_id, telegram, static_site.scan_page(site_id))
         report["site"] = f"{res['files']} files, {res['bytes'] / 1e6:.1f} MB"
         report["publish"] = always_publish or live_stamp(site_url) != res["stamp"]
         if not report["publish"]:
