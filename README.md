@@ -1,0 +1,205 @@
+# EGX Trading Agent
+
+A personal decision-support tool for swing trades on the Egyptian Exchange: **hold 2 weeks, 1 month at most**.
+It scans every EGX stock after the close, tells you what to buy, how many shares, where to put your stop and
+target, and when to get out. You place every order yourself at your broker. It never trades for you, and it
+is **not investment advice**.
+
+## Start it
+
+Double-click **`Start Trading Agent.command`** in this folder.
+
+- The first time, it sets itself up (about a minute) and downloads 5 years of prices (about 5 minutes).
+- Your browser opens the dashboard at `http://localhost:8501`. Only this Mac can open it.
+- Keep the Terminal window open while you use it. To stop it, press Ctrl+C in that window, or double-click
+  **`Stop Trading Agent.command`**, which works however the dashboard was started.
+- While it runs, it scans by itself once new closing prices are out, so you can leave the page open all day.
+  To scan even when it's closed, and get the results on your phone, see [Alerts](#alerts-on-your-phone).
+
+If macOS says the file can't be opened, right-click it → **Open** → **Open**.
+
+## Daily routine (Sunday–Thursday)
+
+1. **After 3:30 pm Cairo time**, open the dashboard. It scans automatically when new closing prices are available,
+   or press **Run scan** (top right). The progress shows in the top bar and you can keep using the pages meanwhile.
+2. **Today** page:
+   - **Orders for tomorrow** lists everything to do at your broker, most urgent first: sells, stops to move up,
+     bonus-share updates and buys. Tick each one off as you place it, or press Copy.
+   - The market banner says if EGX30 is healthy. When it is below its 50-day average the agent makes **no new BUY
+     calls**. That is deliberate: in the backtest this was the single most helpful rule.
+   - **BUY cards** show the stock, *Buy up to* price, stop-loss, target, number of shares and the maximum
+     loss in EGP (about 1.5% of your capital). Next morning, don't pay more than *Buy up to*.
+   - **Your open positions** show one of: 🔴 EXIT, 🟠 REVIEW, 🔵 TIGHTEN STOP (move your stop order up) or 🟢 HOLD.
+3. After you buy or sell at your broker, record it on **My Portfolio** so the agent can track it.
+
+## The pages
+
+| Page | What it's for |
+|---|---|
+| **Today** | Market mood with a 6-month EGX30 chart, the orders checklist for the next session, BUY signals (each with a **Log buy** button), alerts for your positions, watchlist |
+| **Market** | Breadth: how many stocks are above their 20-, 50- and 200-day averages, up/down counts, 1-year highs/lows, a 1-year chart against EGX30 and a sector table. Context only: it doesn't change the BUY rules |
+| **Predict** | A machine-learning model's chance that each liquid stock reaches its target before its stop within 2 weeks and 1 month, how it did on years it never saw, and its live track record. Information only: it doesn't change the BUY rules |
+| **Stock** | TradingView-style chart with averages, volume, RSI, MACD, your levels and your buys/sells marked; why a stock does or doesn't qualify; Shariah details |
+| **My Portfolio** | Log real buys and sells. Click a position to sell some or all of it, record a cash dividend, see its transactions, or delete it if it was logged by mistake. Buying more of a stock you hold joins it at the average price. See status, days held (of 20) and P&L after fees and dividends |
+| **Paper Trading** | A virtual 100k account the agent trades by itself. Watch it for 3–4 weeks before using real money |
+| **Backtest** | Replays the exact rules on 1–4 years of history and compares with EGX30. The last result is kept |
+| **Settings** | Telegram alerts and the daily scan, then every number the agent uses: capital, risk, fees, filters, Shariah filter, exits. Plus the data status and refresh buttons |
+
+Handy: press **/** to search any stock by symbol or Arabic name. The sun/moon button at the bottom of the sidebar
+switches between the dark and light themes. On the chart, use the 3M…All buttons to zoom and drag to move.
+
+## Alerts on your phone
+
+In **Settings → Alerts**:
+
+1. **Telegram.** In Telegram, open @BotFather, send `/newbot` and answer its two questions. Paste the token it
+   gives you into Settings, open your new bot, press **Start**, then press **Connect**. After each scan you get
+   the orders for the next session. Switch on *Only message me on days with something to do* for fewer messages.
+   The token stays in `config.yaml` on this Mac and is only sent to Telegram.
+2. **Daily scan.** Turn it on to scan by itself Sunday–Thursday at 15:45, even when the dashboard is closed. It
+   tries again at 18:00 and 21:00 if prices were late. Your Mac needs to be on; if it's asleep, the scan runs as
+   soon as it wakes. Each run is logged in `data/daily.log`. Turning it off removes it completely.
+
+## Bonus shares, splits and dividends
+
+When a company gives bonus shares (or splits its shares), TradingView divides all its past prices by the ratio.
+The agent notices, and any position you bought before that date shows **UPDATE SHARES**, first in the orders
+list. Open it on My Portfolio, check your new share count at your broker and press *Update position*. Your average
+price, stop and target move by the same ratio, and what you paid in total doesn't change. If your shares didn't
+change, choose *My shares didn't change*. Paper trades are updated by themselves.
+
+Record cash dividends from the position on My Portfolio (*Record a cash dividend*). They count in that position's
+P&L and in your realized P&L.
+
+## Shariah badges
+
+Every stock shows two small boxes:
+
+- **EGX33 ✓ / ✗**: membership of the EGX33 Shariah index, read from Kashif's index list. Kashif currently lists
+  29 of the 33 members. If you know a missing one, add it under *Settings → Extra EGX33 members*.
+- **Kashif 🟢 / 🔴 / 🕐 / 🚫**: the status on [kasheif.com](https://kasheif.com). Hover for purity grade, purification %
+  and statements date. Click to open the stock on Kashif.
+
+By default this is information only. To only get BUY signals for compliant stocks, choose a filter in
+*Settings → Shariah filter*. Kashif data refreshes weekly.
+
+## The rules in one minute
+
+- **Stocks:** all EGX stocks with at least 5M EGP traded per day, price ≥ 1 EGP, one year of history.
+- **Entry (breakout):** price above its 20- and 50-day averages, closes above its 20-day high on at least
+  1.5× normal volume, ADX above 20. Stocks are scored 0–100 (trend, strength vs other stocks, volume,
+  room to run) and need 70+.
+- **Size:** shares = 1.5% of your account ÷ (entry − stop), capped at 25% of the account per stock, 5 positions,
+  2 per sector, 6% total risk.
+- **Stop:** 2× the stock's average daily range below entry (kept between 4% and 12%).
+- **Exits:** target at 2× the risk; stop moves to breakeven after +1× risk, then trails; exit on a close below
+  the 50-day average; **review at day 10 (2 weeks), hard exit at day 20 (1 month)**.
+
+## Backtest results (Sep 2022 – Sep 2026, default settings)
+
+| | Oldest 2 years | Latest 2 years | All 4 years |
+|---|---|---|---|
+| Agent | +38% | +31% | +91% |
+| EGX30 buy & hold | +212% | +74% | +443% |
+| Profit factor | 1.21 | 1.20 | 1.24 |
+| Worst drop | −21% | −17% | −21% |
+
+Be honest with yourself about these numbers:
+
+- **The agent made money in both halves, but far less than simply holding EGX30.** Much of EGX30's rise is the
+  pound's devaluation, which a strategy that is often in cash doesn't capture.
+- **Fees matter a lot.** Around 100 trades a year at 0.25% per side cost roughly half the gross profit. Set
+  your broker's real fee in Settings.
+- Only today's listed stocks are tested (survivorship bias), so real results would likely be somewhat worse.
+- Pullback and MACD entries lost money in testing, so they're off by default (you can enable them in Settings).
+
+## The prediction model (Predict page)
+
+**What it predicts.** After each close, for every liquid stock: if you bought at the next open with the agent's usual
+plan (stop 2× the average daily range below, kept 4–12% under the price; target 2× the risk above), what is the
+chance the **target is reached before the stop** within 10 sessions (~2 weeks) and within 20 sessions (~1 month)?
+If both are touched on the same day it counts as a loss.
+
+**How it learns.** Press *Train the model* on the Predict page once. The first time it downloads 10 years of prices
+(about 4 minutes); then it trains for about 2 minutes. One gradient-boosting model per horizon learns from every
+liquid EGX stock since about 2013 (≈250,000 past examples) using 47 measures: trend, momentum, volume,
+volatility, the stock against its sector, and the whole market's breadth. "Liquid" is judged in the money of its
+time, so 2017's stocks aren't measured against today's 5M EGP rule.
+
+**How it's tested.** Walk-forward: each year from 2017 on is predicted by a version trained only on the years
+before it, with a gap so no test trade overlaps a training trade. The page shows those results, not results on data
+the model has seen. The chances are calibrated on those results, so "22%" means about 22 in 100 did.
+
+**Results when it was built (Sep 2026, your data):**
+
+| 10 sessions, 2017–2026, never-seen years | Target first | Average result |
+|---|---|---|
+| The model's top 10% each day | 21% | +0.94% |
+| The average liquid stock | 13% | +0.27% |
+| The bottom half | 11% | +0.02% |
+| Rule BUYs the model also liked | 29% | +2.07% |
+| Rule BUYs it didn't | 23% | +0.85% |
+
+The top 10% beat the average stock in all 10 years (AUC 0.59, graded *Useful*). The 20-session model is weaker
+(*Small edge*). Even its best picks usually don't reach the target, so always use the stop.
+
+**After that** it updates its numbers after every scan and retrains by itself once a month (or after you change
+the stop or target settings). The *Live track record* shows how its predictions turned out since you trained it.
+That's the real test. Consider using it as a filter for BUYs only once the live record agrees with the test.
+
+## The website for friends (GitHub Pages)
+
+The agent also runs as a free, private website on GitHub Pages, so friends can use it for their own portfolios
+without a server and without your Mac being on.
+
+- **Every trading day** GitHub runs the scan by itself after the close (`.github/workflows/site.yml` →
+  `app/site_daily.py`): new prices, signals, the prediction model (monthly), a weekly backtest, then it publishes
+  the site. Nothing to do on your side.
+- **One group password.** Everything the scan publishes is encrypted with it (AES-256, key from the password with
+  600,000 PBKDF2 rounds), so the link alone shows nothing. Friends type it once per device. To remove someone,
+  change the `SITE_PASSWORD` secret and give the new one to the others.
+- **Each friend's portfolio stays in their own browser**: buys, sells, dividends, bonus-share updates, the paper
+  account and their own numbers (capital, risk, Shariah filter). Nobody else sees it, not even you. It doesn't
+  sync between devices: *Settings → Download a backup* / *Restore from a backup* moves it. On iPhone, use the
+  site from its Home Screen icon (Safari can delete a website's data after 7 days without a visit).
+- **Same rules as the Mac.** The browser runs a copy of the exit, sizing and paper-trading rules
+  (`app/static/js/local/`), and `tests/test_static_site.py` checks it gives exactly the same answers.
+- **Telegram:** with `TELEGRAM_TOKEN` and `TELEGRAM_CHAT_ID` secrets set, the day's signals are posted to your
+  group chat after each close (without share counts: each person sizes them on the site).
+- **The strategy** is yours: change it in Settings on the Mac, then double-click **Publish website.command**. It
+  sends only the code and the rules (`site/strategy.yaml`); your portfolio, `config.yaml` and the Telegram token
+  stay on the Mac (see `.gitignore`), and it refuses to publish if the token would be included.
+- **Keep it small and private.** Sharing signals publicly can need an FRA licence, and the free TradingView data
+  isn't meant for public websites.
+
+The multi-user server version (logins, invites; `app/auth.py`, `app/accounts.py`, `python -m app.server
+--server`) is still in the code if you ever want a real server.
+
+## Data sources
+
+- **Prices:** TradingView via the free, unofficial `tvdatafeed` library. It sometimes drops connections, so the
+  agent retries. Some renamed companies use a different code on TradingView than on Kashif (e.g. AIHC → AIH,
+  ANFI → TYCN); these are translated automatically, and you can add more under *Settings → TradingView code overrides*.
+- **Stocks with no prices anywhere** (listed in *Settings → Data*):
+  - **Listed but never traded:** ACFR, ANCC, DCCC, EFAC, GEOS, KNGC, NMIN, POCO, SIEG. They show only a par-value quote
+    with zero volume, so no website has a price history for them. The agent re-checks weekly and adds them once
+    they trade (they need about a year of trading before they can get BUY signals).
+  - **Suspended:** SIMO (trading halted on EGX since December 2018).
+- **Shariah, sectors and index membership:** kasheif.com public search pages, read once a week, slowly.
+
+If the free price source stops working, the code is ready for a paid provider (EODHD / Twelve Data) in
+`egx_agent/data/prices.py`.
+
+## Files
+
+- `config.yaml`: your settings (created when you first save Settings)
+- `data/egx.db`: prices, Shariah data, scans and your trades. **Back this up.**
+- `data/last_backtest.json`: the last backtest result
+- `data/daily.log`: what the daily scan did each time it ran
+- `data/models/`: the trained prediction model and its test results
+- `app/static_site.py` builds the GitHub Pages site, `app/site_daily.py` is its daily job, `app/static/js/local/` runs your portfolio in the browser, `site/strategy.yaml` is the strategy it uses
+- `deploy/` (kept on this Mac only): the older Oracle server plan; `app/auth.py` and `app/accounts.py` are its logins
+- `egx_agent/`: the analysis code · `tests/`: automated checks (`.venv/bin/python -m pytest`)
+- `app/`: the dashboard. `server.py` is a small local web server (FastAPI) that sends data to the page in `app/static/`
+  (Preact, with TradingView's Lightweight Charts saved in `app/static/vendor/`, so it needs no build step).
+  `alerts.py` sends the Telegram messages, and `daily.py` is the daily scan that `schedule.py` sets up with macOS

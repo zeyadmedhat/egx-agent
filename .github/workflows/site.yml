@@ -1,0 +1,106 @@
+# The website: after every EGX close, download prices, scan, and publish the encrypted site to GitHub Pages.
+# Secrets (Settings → Secrets and variables → Actions): SITE_PASSWORD (required), TELEGRAM_TOKEN and
+# TELEGRAM_CHAT_ID (optional, for the group chat). The logs are public, so the job only prints counts.
+name: Daily scan and website
+
+on:
+  schedule:                     # UTC. EGX closes 14:30 Cairo (UTC+3 in summer, UTC+2 in winter); prices are
+    - cron: "50 12 * * 0-4"     # usually there an hour later. The later runs catch late prices; a run with
+    - cron: "55 13 * * 0-4"     # nothing new only rebuilds the site.
+    - cron: "20 16 * * 0-4"
+    - cron: "20 19 * * 0-4"
+  workflow_dispatch:
+    inputs:
+      force_scan:
+        description: "Download prices and scan even if nothing new is due"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ["app/**", "egx_agent/**", "site/**", "requirements.txt", ".github/workflows/site.yml"]
+
+permissions:
+  contents: write     # the keep-alive commit
+  pages: write
+  id-token: write
+  actions: write      # tidying old copies of the data
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Bring back the data from the last run
+        uses: actions/cache/restore@v6
+        with:
+          path: state
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+
+      - id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Scan and build the site
+        env:
+          EGX_SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+          FORCE_SCAN: ${{ inputs.force_scan }}
+          TZ: Africa/Cairo
+        run: python -m app.site_daily --db state/egx.db --config site/strategy.yaml --out _site
+
+      - name: Keep the data for the next run
+        if: always() && hashFiles('state/egx.db') != ''
+        uses: actions/cache/save@v6
+        with:
+          path: state
+          key: state-${{ github.run_id }}
+
+      - name: Remove older copies of the data
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh cache list --key state- --sort created_at --order desc --limit 100 --json id --jq '.[1:][].id' \
+            | xargs -r -n1 gh cache delete || true
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Keep the schedule alive
+        # GitHub pauses scheduled jobs in a repository with no commits for 60 days.
+        run: |
+          if [ $(( ($(date +%s) - $(git log -1 --format=%ct)) / 86400 )) -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            date -u +%F > .github/keepalive
+            git add .github/keepalive
+            git commit -m "Keep the daily scan running"
+            git push
+          fi
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

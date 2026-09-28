@@ -1,0 +1,21 @@
+# Your own data and settings never go to GitHub: the portfolio database, config.yaml (your numbers and the
+# Telegram token), backups and models. The leading "/" means "only the folder at the top" (egx_agent/data/ is code).
+/data/
+/config.yaml
+/state/
+/_site/
+*.db
+*.db-journal
+*.log
+
+# Python and Mac clutter
+.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+
+# Only on this Mac: the old Oracle server plan and a saved Kashif page used by one test
+/deploy/
+/Deploy to server.command
+/tests/fixtures/
+/.claude/

@@ -1,0 +1,19 @@
+# The strategy the website uses, copied from your Mac's settings by 'Publish website.command'.
+min_avg_value_egp: 5000000.0
+min_price: 1.0
+min_history_bars: 250
+egx33_extra: []
+symbol_aliases: {}
+buy_score: 70
+watch_score: 60
+riskoff_score_bonus: 5
+riskoff_block_buys: true
+setups:
+- breakout
+atr_stop_mult: 2.0
+stop_min_pct: 4.0
+stop_max_pct: 12.0
+target_r: 2.0
+review_day: 10
+max_hold_days: 20
+history_years: 5

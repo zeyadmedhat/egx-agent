@@ -1,0 +1,183 @@
+"""Daily portfolio backtest using the same signals, sizing and exit rules as the live agent.
+
+Signals are computed on day t's close; orders fill at day t+1's open. Fees apply on both sides.
+Caveats: the universe is today's listed stocks (survivorship bias) and Shariah status is today's.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+from . import engine, risk, strategy
+from .data import shariah
+from .indicators import add_indicators
+
+
+@dataclass
+class Prepared:
+    ind: dict[str, pd.DataFrame]
+    sf: dict[str, pd.DataFrame]
+    index_ind: pd.DataFrame
+    score: pd.DataFrame
+    buy: pd.DataFrame
+    risk_off: pd.Series
+    sectors: dict[str, str]
+
+
+def _panel(frames: dict[str, pd.Series], dates: pd.DatetimeIndex, fill=np.nan) -> pd.DataFrame:
+    return pd.DataFrame({s: f.reindex(dates) for s, f in frames.items()}, index=dates).fillna(fill) if frames else pd.DataFrame(index=dates)
+
+
+def prepare(price_data: dict[str, pd.DataFrame], index_df: pd.DataFrame, stocks: pd.DataFrame, cfg: dict) -> Prepared:
+    index_ind = add_indicators(index_df)
+    ind = {s: add_indicators(df, index_df["close"]) for s, df in price_data.items() if len(df) > 60}
+    sf = {s: strategy.signal_frame(ind[s], cfg) for s in ind}
+    dates = index_ind.index
+    eligible = _panel({s: f["eligible"].astype(float) for s, f in sf.items()}, dates, 0.0).astype(bool)
+    setup = _panel({s: f["any_setup"].astype(float) for s, f in sf.items()}, dates, 0.0).astype(bool)
+    ret63 = _panel({s: ind[s]["ret63"] for s in ind}, dates)
+    base = _panel({s: f["base_score"] for s, f in sf.items()}, dates, 0.0)
+    rank = ret63.where(eligible).rank(axis=1, pct=True).fillna(0.0)
+    score = (base + rank * 25).clip(0, 100)
+    risk_off = index_ind["close"] < index_ind["ema50"]
+    thr = pd.Series(np.where(risk_off, strategy.buy_threshold(cfg, True), strategy.buy_threshold(cfg, False)), index=dates)
+    info = stocks.to_dict("index")
+    allowed = pd.Series({s: shariah.passes_filter(info.get(s, {}), cfg["shariah_filter"]) for s in score.columns}, dtype=bool)
+    buy = eligible & setup & score.ge(thr, axis=0) & allowed.reindex(score.columns).fillna(False).astype(bool)
+    sectors = {s: info.get(s, {}).get("sector", "Other") for s in ind}
+    return Prepared(ind, sf, index_ind, score, buy, risk_off, sectors)
+
+
+def run(prep: Prepared, cfg: dict, start: str | pd.Timestamp, end: str | pd.Timestamp | None = None,
+        symbols: set[str] | None = None) -> dict:
+    fee = cfg["fee_pct_per_side"] / 100
+    capital = float(cfg["capital"])
+    dates = prep.index_ind.index
+    dates = dates[(dates >= pd.Timestamp(start)) & (dates <= pd.Timestamp(end or dates[-1]))]
+    cash = capital
+    positions: dict[str, engine.Position] = {}
+    pending: list[dict] = []
+    last_close: dict[str, float] = {}
+    trades, equity, n_pos, cancelled = [], [], [], 0
+
+    def close_position(sym: str, d: pd.Timestamp, price: float, reason: str) -> None:
+        nonlocal cash
+        pos = positions.pop(sym)
+        proceeds = price * pos.shares * (1 - fee)
+        cost = pos.entry_price * pos.shares * (1 + fee)
+        cash += proceeds
+        trades.append({
+            "symbol": sym, "sector": pos.sector, "entry_date": pos.entry_date, "entry_price": pos.entry_price,
+            "exit_date": str(d.date()), "exit_price": price, "shares": pos.shares, "days_held": pos.days_held,
+            "pnl": proceeds - cost, "return_pct": proceeds / cost - 1, "reason": reason,
+        })
+
+    for i, d in enumerate(dates):
+        filled_today = set()
+        for order in pending:
+            ind_s = prep.ind[order["symbol"]]
+            if d not in ind_s.index:
+                cancelled += 1
+                continue
+            bar = ind_s.loc[d]
+            pos, _ = engine.fill_order(order, bar)
+            if pos is None:
+                cancelled += 1
+                continue
+            max_affordable = math.floor(cash / (pos.entry_price * (1 + fee)))
+            pos.shares = min(pos.shares, max_affordable)
+            if pos.shares <= 0:
+                cancelled += 1
+                continue
+            cash -= pos.entry_price * pos.shares * (1 + fee)
+            positions[pos.symbol] = pos
+            filled_today.add(pos.symbol)
+            res = engine.process_bar(pos, bar, cfg)
+            if res:
+                close_position(pos.symbol, d, *res)
+        pending = []
+
+        for sym in list(positions):
+            if sym in filled_today:
+                continue
+            ind_s = prep.ind[sym]
+            if d not in ind_s.index:
+                continue
+            res = engine.process_bar(positions[sym], ind_s.loc[d], cfg)
+            if res:
+                close_position(sym, d, *res)
+
+        for sym in positions:
+            ind_s = prep.ind[sym]
+            if d in ind_s.index:
+                last_close[sym] = float(ind_s.at[d, "close"])
+        eq = cash + sum(p.shares * last_close.get(s, p.entry_price) for s, p in positions.items())
+        equity.append(eq)
+        n_pos.append(len(positions))
+
+        if i == len(dates) - 1:
+            break
+        row = prep.buy.loc[d]
+        syms = [s for s in row.index[row.values] if symbols is None or s in symbols]
+        if not syms:
+            continue
+        cands = []
+        for s in sorted(syms, key=lambda s: -prep.score.at[d, s]):
+            ind_row, sf_row = prep.ind[s].loc[d], prep.sf[s].loc[d]
+            cands.append({
+                "symbol": s, "sector": prep.sectors.get(s, "Other"), "close": float(ind_row["close"]),
+                "stop": float(sf_row["stop"]), "target": float(sf_row["target"]),
+                "entry_limit": float(sf_row["entry_high"]), "avg_value": float(ind_row["value_avg20"]),
+            })
+        held = [{"symbol": s, "sector": p.sector, "entry_price": p.entry_price, "stop": p.stop, "shares": p.shares}
+                for s, p in positions.items()]
+        for a in risk.allocate(cands, eq, cash, held, cfg, bool(prep.risk_off.loc[d])):
+            if a["shares"] > 0:
+                pending.append(a)
+
+    open_at_end = []
+    for sym, p in positions.items():
+        px = last_close.get(sym, p.entry_price)
+        open_at_end.append({"symbol": sym, "entry_date": p.entry_date, "entry_price": p.entry_price,
+                            "last_close": px, "shares": p.shares, "unrealized_pct": px / p.entry_price - 1})
+
+    eq = pd.Series(equity, index=dates, name="equity")
+    tdf = pd.DataFrame(trades)
+    idx = prep.index_ind["close"].reindex(dates)
+    return {
+        "equity": eq,
+        "index_equity": capital * idx / idx.iloc[0],
+        "trades": tdf,
+        "open_at_end": pd.DataFrame(open_at_end),
+        "metrics": metrics(eq, tdf, n_pos, capital, idx, cancelled),
+    }
+
+
+def metrics(eq: pd.Series, trades: pd.DataFrame, n_pos: list[int], capital: float, idx: pd.Series,
+            cancelled: int) -> dict:
+    years = max((eq.index[-1] - eq.index[0]).days / 365.25, 1 / 365.25)
+    final = float(eq.iloc[-1])
+    dd = eq / eq.cummax() - 1
+    m = {
+        "final_equity": final,
+        "total_return": final / capital - 1,
+        "cagr": (final / capital) ** (1 / years) - 1 if final > 0 else -1.0,
+        "max_drawdown": float(dd.min()),
+        "egx30_return": float(idx.iloc[-1] / idx.iloc[0] - 1),
+        "trades": int(len(trades)),
+        "exposure": float(np.mean([n > 0 for n in n_pos])),
+        "orders_cancelled": cancelled,
+    }
+    if len(trades):
+        wins, losses = trades[trades.pnl > 0], trades[trades.pnl <= 0]
+        m.update({
+            "win_rate": len(wins) / len(trades),
+            "avg_win": float(wins.return_pct.mean()) if len(wins) else 0.0,
+            "avg_loss": float(losses.return_pct.mean()) if len(losses) else 0.0,
+            "profit_factor": float(wins.pnl.sum() / -losses.pnl.sum()) if losses.pnl.sum() < 0 else float("inf"),
+            "avg_days_held": float(trades.days_held.mean()),
+        })
+    return m

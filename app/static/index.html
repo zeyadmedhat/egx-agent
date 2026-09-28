@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EGX Trading Agent</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    try { var t = localStorage.getItem('egx-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <script type="importmap">
+    { "imports": {
+        "preact": "/static/vendor/preact.module.js",
+        "preact/hooks": "/static/vendor/hooks.module.js",
+        "htm": "/static/vendor/htm.module.js" } }
+  </script>
+  <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+  <script type="module" src="/static/js/main.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <noscript>The dashboard needs JavaScript turned on.</noscript>
+</body>
+</html>
