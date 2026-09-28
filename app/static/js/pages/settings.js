@@ -90,7 +90,7 @@ export function SettingsPage() {
         <a role="button" onClick=${() => scrollTo('sec-data')}>Data</a>
       </nav>
       <div class="stack">
-        ${data.static ? html`<${DeviceCard} group=${data.telegram_group} />` : html`<${AlertsCard} />`}
+        ${data.static ? html`<${DeviceCard} telegram=${data.telegram} />` : html`<${AlertsCard} />`}
         ${data.sections.map(s => html`<div class="card settings-section" id=${slug(s.title)}>
           <div class="card-title" style="font-size:14px;color:var(--text)">${s.title}${website && admin && html`
             <span class=${cls('scope-tag', s.scope === 'strategy' && 'everyone')}>${s.scope === 'strategy'
@@ -173,7 +173,7 @@ function DataCard({ d, running, admin }) {
 }
 
 // ------------------------------------------------------------------ the GitHub Pages site: your data lives here
-function DeviceCard({ group }) {
+function DeviceCard({ telegram }) {
   const [restore, setRestore] = useState(null);
   const download = async () => {
     const site = await import('../local/site.js');
@@ -217,10 +217,23 @@ function DeviceCard({ group }) {
     </div>
     <p class="faint" style="font-size:12.5px;margin-top:12px">On iPhone, use the site from its Home Screen icon (Share →
       Add to Home Screen): Safari may delete a website's saved data if you don't open it for 7 days.</p>
-    <div class="sub-block"><h3>Alerts</h3>
-      <div class="muted" style="font-size:12.5px">${group
-        ? "After each scan, the day's signals are posted in the group's Telegram chat. Ask the person who runs the site to add you."
-        : 'The site has no Telegram alerts yet. Open it after each close (from about 4 pm Cairo time) for the next session\'s orders.'}</div>
+    <div class="sub-block"><h3>Alerts on your phone (Telegram)</h3>
+      ${telegram ? html`
+        <div class="muted" style="font-size:12.5px">After each close, the bot sends you the day's signals: what to buy,
+          up to which price, the stop and the target. Your share counts are here on the site.</div>
+        <ol class="steps" style="margin-top:10px">
+          <li><div>Press <b>Connect Telegram</b> below, then <b>Start</b> in Telegram.</div></li>
+          <li><div>The bot answers <b>"Connected"</b> within about 3 hours: it checks for new people a few times a day.
+            Then you get the latest signals, and new ones after each close.</div></li>
+        </ol>
+        <div class="device-actions">
+          <a class="btn primary" href=${telegram.link} target="_blank" rel="noopener noreferrer">
+            <${Icon} name="send" />Connect Telegram</a>
+        </div>
+        <p class="faint" style="font-size:12.5px;margin-top:10px">To stop, send <b>/stop</b> to @${telegram.bot}. Keep this
+          button's link to yourself: anyone who opens it gets the messages too.</p>`
+      : html`<div class="muted" style="font-size:12.5px">The site has no Telegram alerts yet. Open it after each close
+          (from about 4 pm Cairo time) for the next session's orders.</div>`}
     </div>
     ${restore && html`<${Confirm} title="Restore this backup?" confirmLabel="Restore" danger text=${restore.text}
       onConfirm=${apply} onClose=${() => setRestore(null)} />`}

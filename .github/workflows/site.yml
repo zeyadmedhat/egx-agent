@@ -1,6 +1,6 @@
 # The website: after every EGX close, download prices, scan, and publish the encrypted site to GitHub Pages.
-# Secrets (Settings → Secrets and variables → Actions): SITE_PASSWORD (required), TELEGRAM_TOKEN and
-# TELEGRAM_CHAT_ID (optional, for the group chat). The logs are public, so the job only prints counts.
+# Secrets (Settings → Secrets and variables → Actions): SITE_PASSWORD (required) and TELEGRAM_TOKEN (optional: the
+# bot that messages each friend who pressed Connect Telegram). The logs are public, so the job only prints counts.
 name: Daily scan and website
 
 on:
@@ -9,6 +9,7 @@ on:
     - cron: "55 13 * * 0-4"     # nothing new only rebuilds the site.
     - cron: "20 16 * * 0-4"
     - cron: "20 19 * * 0-4"
+    - cron: "40 */3 * * *"      # every 3 hours, every day: connects friends who pressed Start in Telegram
   workflow_dispatch:
     inputs:
       force_scan:
@@ -33,6 +34,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      publish: ${{ steps.scan.outputs.publish }}
     steps:
       - uses: actions/checkout@v7
 
@@ -55,10 +58,10 @@ jobs:
         uses: actions/configure-pages@v6
 
       - name: Scan and build the site
+        id: scan
         env:
           EGX_SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SITE_URL: ${{ steps.pages.outputs.base_url }}
           FORCE_SCAN: ${{ inputs.force_scan }}
           TZ: Africa/Cairo
@@ -80,6 +83,7 @@ jobs:
             | xargs -r -n1 gh cache delete || true
 
       - uses: actions/upload-pages-artifact@v5
+        if: steps.scan.outputs.publish == 'true'
         with:
           path: _site
 
@@ -97,6 +101,7 @@ jobs:
 
   deploy:
     needs: build
+    if: needs.build.outputs.publish == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

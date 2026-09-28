@@ -154,7 +154,8 @@ without a server and without your Mac being on.
 
 - **Every trading day** GitHub runs the scan by itself after the close (`.github/workflows/site.yml` →
   `app/site_daily.py`): new prices, signals, the prediction model (monthly), a weekly backtest, then it publishes
-  the site. Nothing to do on your side.
+  the site. Nothing to do on your side. The run's page on GitHub shows a one-line summary (counts only).
+  A scan during trading hours is redone after the close; paper trading and Telegram wait for that one.
 - **One group password.** Everything the scan publishes is encrypted with it (AES-256, key from the password with
   600,000 PBKDF2 rounds), so the link alone shows nothing. Friends type it once per device. To remove someone,
   change the `SITE_PASSWORD` secret and give the new one to the others.
@@ -164,8 +165,11 @@ without a server and without your Mac being on.
   site from its Home Screen icon (Safari can delete a website's data after 7 days without a visit).
 - **Same rules as the Mac.** The browser runs a copy of the exit, sizing and paper-trading rules
   (`app/static/js/local/`), and `tests/test_static_site.py` checks it gives exactly the same answers.
-- **Telegram:** with `TELEGRAM_TOKEN` and `TELEGRAM_CHAT_ID` secrets set, the day's signals are posted to your
-  group chat after each close (without share counts: each person sizes them on the site).
+- **Telegram, to each friend:** with the `TELEGRAM_TOKEN` secret set (your bot's token), each friend presses
+  *Settings → Connect Telegram* on the site, then Start. The job checks for new people every 3 hours, answers
+  "Connected", and from then on sends each of them the day's signals after every close (without share counts:
+  each person sizes them on the site). `/stop` stops them. The link comes from the password, so only people who can
+  open the site have it, and changing the password disconnects everyone until they press the new link.
 - **The strategy** is yours: change it in Settings on the Mac, then double-click **Publish website.command**. It
   sends only the code and the rules (`site/strategy.yaml`); your portfolio, `config.yaml` and the Telegram token
   stay on the Mac (see `.gitignore`), and it refuses to publish if the token would be included.

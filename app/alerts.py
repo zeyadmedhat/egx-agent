@@ -6,6 +6,8 @@ only ever sent to api.telegram.org, never shown again). Each person then opens t
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import html
 import json
 import re
@@ -15,7 +17,7 @@ from datetime import datetime
 
 import requests
 
-from egx_agent import breadth, config, db, portfolio
+from egx_agent import breadth, config, db, portfolio, scan
 
 from . import views
 
@@ -27,7 +29,9 @@ KASHIF = {"compliant": "🟢", "non_compliant": "🔴", "awaiting": "🕐", "blo
 
 
 class TelegramError(Exception):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 def _now() -> str:
@@ -43,11 +47,12 @@ def call(token: str, method: str, **params):
     try:
         data = r.json()
     except ValueError:
-        raise TelegramError(f"Telegram answered with an error ({r.status_code}).") from None
+        raise TelegramError(f"Telegram answered with an error ({r.status_code}).", r.status_code) from None
     if not data.get("ok"):
         if r.status_code in (401, 404):
-            raise TelegramError("Telegram doesn't recognise this bot token. Copy it again from @BotFather.")
-        raise TelegramError(f"Telegram: {data.get('description') or r.status_code}")
+            raise TelegramError("Telegram doesn't recognise this bot token. Copy it again from @BotFather.",
+                                r.status_code)
+        raise TelegramError(f"Telegram: {data.get('description') or r.status_code}", r.status_code)
     return data["result"]
 
 
@@ -160,9 +165,9 @@ def build_message(d: views.Data) -> tuple[str, bool]:
     return text, bool(o["items"])
 
 
-def build_group_message(d: views.Data, site_url: str = "") -> str:
-    """The GitHub Pages site's message to the group chat: the day's signals for everyone, without share counts
-    (each person sizes them with their own numbers on the site)."""
+def build_site_message(d: views.Data, site_url: str = "") -> str:
+    """The GitHub Pages site's message, sent to each friend who connected Telegram: the day's signals for everyone,
+    without share counts (each person sizes them with their own numbers on the site)."""
     m = views.market_info(d.conn)
     scan_date, df = views.current_scan(d.conn)
     if not m or not scan_date:
@@ -194,9 +199,99 @@ def build_group_message(d: views.Data, site_url: str = "") -> str:
     if watch:
         lines.append(f"Watchlist: {watch} stock{'s' if watch != 1 else ''} could trigger next.")
     lines += ["", "Open the site for your share counts, your Shariah filter and what to do with your own positions."
-              + (f"\n{site_url}" if site_url else ""), "", "<i>Rules-based signals, not investment advice.</i>"]
+              + (f"\n{site_url}" if site_url else ""), "",
+              "<i>Rules-based signals, not investment advice.</i> Send /stop to stop these messages."]
     text = "\n".join(lines)
     return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + "\n…more on the site."
+
+
+# ------------------------------------------------------------------ the website: a message to each friend
+# Each friend presses "Connect Telegram" on the site, which opens t.me/<bot>?start=<the site's code>. The code comes
+# from the site's password (static_site.telegram_code), so only people who can open the site have it, and changing
+# the password disconnects everyone until they press the new link. The GitHub job reads the bot's messages a few
+# times a day. It doesn't confirm them to Telegram (your Mac's copy reads the same bot): it remembers the last one
+# it handled instead, and ignores any other /start (like your Mac's own link).
+STOP_RE = re.compile(r"^/stop(@\w+)?\s*$")
+WELCOME = ("✅ <b>Connected.</b> After each EGX close you'll get the day's signals here. Your share counts are on "
+           "the website.\nSend /stop to stop.")
+STOPPED = "Stopped. To start again, open the website → Settings → Connect Telegram."
+RESET = ("The website's password has changed, so these messages have stopped. Open the website with the new "
+         "password → Settings → Connect Telegram to get them again.")
+
+
+def _fingerprint(code: str) -> str:
+    return hashlib.sha256(code.encode()).hexdigest()[:16]
+
+
+def _subscribers(conn: sqlite3.Connection) -> dict:
+    return json.loads(db.get_meta(conn, "site_subscribers") or "{}")
+
+
+def _reply(token: str, chat_id: str, text: str) -> None:
+    try:
+        send(token, chat_id, text)
+    except TelegramError:
+        pass  # only a courtesy: the next message tries again
+
+
+def sync_subscribers(conn: sqlite3.Connection, token: str, code: str) -> dict:
+    """Connect the friends who pressed Start through the site's link and disconnect those who sent /stop.
+    Returns counts only (the logs are public)."""
+    subs = _subscribers(conn)
+    seen = int(db.get_meta(conn, "site_update_seen") or 0)
+    fp = _fingerprint(code)
+    replies, joined, left = [], 0, 0
+    for u in sorted(call(token, "getUpdates", timeout=0, allowed_updates=["message"]), key=lambda u: u["update_id"]):
+        if int(u["update_id"]) <= seen:
+            continue
+        seen = int(u["update_id"])
+        msg = u.get("message") or {}
+        chat = msg.get("chat") or {}
+        if chat.get("type") != "private":
+            continue
+        cid, text = str(chat["id"]), (msg.get("text") or "").strip()
+        m = START_RE.match(text)
+        if m and hmac.compare_digest(m.group(1), code):
+            if subs.get(cid, {}).get("code") != fp:
+                name = " ".join(x for x in (chat.get("first_name"), chat.get("last_name")) if x)
+                subs[cid] = {"name": name or chat.get("username") or "", "code": fp, "since": _now(), "sent_for": None}
+                replies.append((cid, WELCOME))
+                joined += 1
+        elif STOP_RE.match(text) and cid in subs:
+            del subs[cid]
+            replies.append((cid, STOPPED))
+            left += 1
+    for cid in [c for c, s in subs.items() if s["code"] != fp]:   # the password changed
+        del subs[cid]
+        replies.append((cid, RESET))
+        left += 1
+    db.set_meta(conn, "site_subscribers", json.dumps(subs))
+    db.set_meta(conn, "site_update_seen", str(seen))
+    for cid, text in replies:
+        _reply(token, cid, text)
+    return {"connected": len(subs), "joined": joined, "left": left}
+
+
+def send_to_subscribers(conn: sqlite3.Connection, token: str, text: str, data_date: str) -> dict:
+    """Send this close's message to every connected friend who hasn't had it yet (a friend who connects later
+    gets the latest one). A friend who blocked the bot is removed; other failures are tried again next run."""
+    subs = _subscribers(conn)
+    sent = failed = gone = 0
+    for cid, s in list(subs.items()):
+        if s.get("sent_for") == data_date:
+            continue
+        try:
+            send(token, cid, text)
+            s["sent_for"] = data_date
+            sent += 1
+        except TelegramError as exc:
+            if exc.status == 403 or "chat not found" in str(exc).lower():
+                del subs[cid]
+                gone += 1
+            else:
+                failed += 1
+    db.set_meta(conn, "site_subscribers", json.dumps(subs))
+    return {"sent": sent, "failed": failed, "gone": gone}
 
 
 # ------------------------------------------------------------------ sending after a scan
@@ -211,6 +306,8 @@ def after_scan(conn: sqlite3.Connection, cfg: dict, force: bool = False) -> str:
         return "no scan yet"
     if not force and db.get_user_meta(conn, "telegram_sent_for") == data_date:
         return "already sent"
+    if not force and not scan.scan_is_final(conn):
+        return "waiting for the close"   # a scan during the session: the one after the close is sent
     text, action = build_message(views.Data(conn, cfg, views.Cache()))
     if not force and cfg.get("telegram_only_action") and not action:
         db.set_user_meta(conn, "telegram_sent_for", data_date)

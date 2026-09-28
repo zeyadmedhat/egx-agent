@@ -190,6 +190,18 @@ def test_telegram_summary_is_sent_once_per_close(client, sent):  # noqa: F811
     assert alerts.after_scan(conn, cfg, force=True) == "sent" and len(sent) == 2
 
 
+def test_telegram_waits_for_the_scan_after_the_close(client, sent):  # noqa: F811
+    conn = db.connect(client.app_db)
+    alerts.save(telegram_token="123456:" + "A" * 35, telegram_chat_id="42")
+    market = {"date": "2026-09-24", "egx30_close": 1300.0, "egx30_change": 0.01, "risk_off": False}
+    db.set_meta(conn, "market", json.dumps({**market, "finished": "2026-09-24T12:10:00+03:00"}))  # during trading
+    db.set_meta(conn, "scan_data_date", "2026-09-24")
+    _scan(conn, "2026-09-24", [{"symbol": "AAA", "action": "BUY"}])
+    assert alerts.after_scan(conn, config.load_config()) == "waiting for the close" and sent == []
+    db.set_meta(conn, "market", json.dumps({**market, "finished": "2026-09-24T15:40:00+03:00"}))
+    assert alerts.after_scan(conn, config.load_config()) == "sent" and len(sent) == 1
+
+
 def test_quiet_mode_skips_days_with_nothing_to_do(client, sent):  # noqa: F811
     conn = db.connect(client.app_db)
     alerts.save(telegram_token="123456:" + "A" * 35, telegram_chat_id="42", telegram_only_action=True)

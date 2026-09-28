@@ -13,6 +13,7 @@ import argparse
 import base64
 import gzip
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -25,7 +26,7 @@ from pathlib import Path
 import yaml
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from egx_agent import breadth, config, db
+from egx_agent import breadth, config, db, scan
 from egx_agent.data import prices, shariah
 
 from . import views
@@ -62,6 +63,13 @@ def unseal(box: bytes, key: bytes):
     return json.loads(gzip.decompress(AESGCM(key).decrypt(box[:12], box[12:], None)))
 
 
+def telegram_code(password: str, site_id: str) -> str:
+    """The code in the site's "Connect Telegram" link (t.me/<bot>?start=<code>). It comes from the password, so only
+    people who can open the site see it, and a new password makes a new code."""
+    key = derive_key(password, salt_for(site_id))
+    return base64.urlsafe_b64encode(hmac.new(key, b"telegram link", hashlib.sha256).digest()).decode()[:24]
+
+
 # ------------------------------------------------------------------ what the site shows
 def _scan_history(conn, index_ind, stocks, sessions: int = PAPER_SESSIONS) -> list[dict]:
     """Each recent session with that day's BUY signals and market mood, oldest first (paper trading replays it)."""
@@ -82,7 +90,7 @@ def _scan_history(conn, index_ind, stocks, sessions: int = PAPER_SESSIONS) -> li
             for ts, row in tail.iterrows()]
 
 
-def public_data(conn, cfg: dict, backtest: Path | None = None, telegram_group: bool = False) -> dict[str, object]:
+def public_data(conn, cfg: dict, backtest: Path | None = None, telegram: dict | None = None) -> dict[str, object]:
     """Every file the site publishes, by name: core, market, predict, backtest and stock/<SYMBOL>."""
     d = views.Data(conn, cfg, views.Cache(), is_admin=False, multi_user=True)
     scan_date, df = views.current_scan(conn)
@@ -109,6 +117,7 @@ def public_data(conn, cfg: dict, backtest: Path | None = None, telegram_group: b
     personal_keys = [k for k in config.PERSONAL_KEYS if not k.startswith("telegram_")]
     core = {
         "v": 1, "built": datetime.now().isoformat(timespec="seconds"), "scan_date": scan_date, "market": m or None,
+        "final": scan.scan_is_final(conn),     # False: scanned during the session, again after the close
         "signals": signals, "stocks": views.stocks_list(d), "predictions": views.predictions(d),
         "spark": spark, "index": index or {"time": [], "close": []},
         "breadth_today": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
@@ -118,7 +127,7 @@ def public_data(conn, cfg: dict, backtest: Path | None = None, telegram_group: b
         "sections": [s for s in views.SETTINGS_SECTIONS if s["scope"] == "personal"],
         "events": events, "data_status": views.settings_view(d)["data"],
         "scans": _scan_history(conn, index_ind, d.table),
-        "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram_group": telegram_group,
+        "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,
     }
     out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d)}
     if backtest and backtest.exists():
@@ -160,8 +169,9 @@ MANIFEST = {"name": "EGX Trading Agent", "short_name": "EGX Agent", "start_url":
 
 
 def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", backtest: Path | None = None,
-          telegram_group: bool = False) -> dict:
-    """Write the whole site to `out` (emptied first). Returns what was published."""
+          telegram: dict | None = None) -> dict:
+    """Write the whole site to `out` (emptied first). `telegram` is {"bot", "link"} when friends can connect
+    Telegram. Returns what was published."""
     if len(password or "") < MIN_PASSWORD:
         raise SystemExit(f"The group password must be at least {MIN_PASSWORD} characters.")
     out = Path(out)
@@ -173,7 +183,7 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", bac
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
 
-    files = public_data(conn, cfg, backtest, telegram_group)
+    files = public_data(conn, cfg, backtest, telegram)
     plain = {name: to_json(obj) for name, obj in files.items() if name != "core"}
     # The stamp changes only when the content does, so browsers reload only after a real update.
     stamp = hashlib.sha256(b"".join(n.encode() + b"\0" + p for n, p in sorted(plain.items()))
@@ -217,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--out", required=True)
     b.add_argument("--backtest", help="a backtest result to show (JSON)")
     b.add_argument("--site-id", default=os.environ.get("GITHUB_REPOSITORY", "local"))
+    b.add_argument("--telegram-bot", help="the bot's @username, to show the Connect Telegram button")
     sub.add_parser("strategy", help="copy the strategy from config.yaml to site/strategy.yaml")
     a = p.parse_args(argv)
     if a.cmd == "strategy":
@@ -224,10 +235,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.config:
         config.CONFIG_PATH = Path(a.config)
+    password = os.environ.get("EGX_SITE_PASSWORD", "")
+    telegram = None
+    if a.telegram_bot:
+        telegram = {"bot": a.telegram_bot,
+                    "link": f"https://t.me/{a.telegram_bot}?start={telegram_code(password, a.site_id)}"}
     conn = db.connect(a.db)
     try:
-        res = build(conn, config.load_config(), Path(a.out), os.environ.get("EGX_SITE_PASSWORD", ""), a.site_id,
-                    Path(a.backtest) if a.backtest else None)
+        res = build(conn, config.load_config(), Path(a.out), password, a.site_id,
+                    Path(a.backtest) if a.backtest else None, telegram)
     finally:
         conn.close()
     print(f"Built the site: {res['files']} files ({res['stocks']} stocks), {res['bytes'] / 1e6:.1f} MB, "

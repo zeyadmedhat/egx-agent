@@ -53,7 +53,8 @@ async function barsFor(c, symbols) {
 // bonus-share updates, fills at the next open, exits, then the new orders from that day's BUY signals.
 async function catchUpPaper(c) {
   const { core, book, cfg } = c;
-  const scans = core.scans || [];
+  // A scan during the session used unfinished prices: paper trading waits for the one after the close.
+  const scans = (core.scans || []).filter(s => core.final !== false || s.date < core.scan_date);
   if (!scans.length) return;
   const last = book.meta.paper_last_scan && book.meta.paper_last_scan.date;
   const todo = last ? scans.filter(s => s.date > last) : scans.slice(-1);
@@ -219,8 +220,11 @@ async function today(c) {
   }
   const positions = await openPositions(c);
   const paper = E.accountSummary(c.book, 'paper', cfg, closes(c), core.events);
+  const early = core.final === false
+    ? ["These signals use prices from during today's session. The site scans again after the close, from about 4 pm."] : [];
   return {
-    market: core.market ? { ...core.market, buys: buys.length } : null, scan_date: scanDate, buys, watch, positions,
+    market: core.market ? { ...core.market, buys: buys.length, warnings: [...early, ...(core.market.warnings || [])] } : null,
+    scan_date: scanDate, buys, watch, positions,
     spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today,
     paper: { equity: paper.equity, return_pct: paper.return_pct, open: paper.open_count,
       last_scan: c.book.meta.paper_last_scan || null },
@@ -354,7 +358,7 @@ function settingsView(c) {
     values: Object.fromEntries(keys.map(k => [k, c.cfg[k]])),
     defaults: Object.fromEntries(keys.map(k => [k, c.core.personal_defaults[k]])),
     sections: c.core.sections, multi_user: true, is_admin: false, static: true, data: c.core.data_status,
-    telegram_group: c.core.telegram_group,
+    telegram: c.core.telegram || null,
   };
 }
 

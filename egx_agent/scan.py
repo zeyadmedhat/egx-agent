@@ -30,9 +30,21 @@ def expected_session_date(now: datetime | None = None) -> date:
     return d
 
 
+def scan_is_final(conn: sqlite3.Connection) -> bool:
+    """False when the last scan ran during its own session, before the closing data was ready: it used an
+    unfinished day, so it's scanned again after the close (and Telegram waits for that one)."""
+    data_date = db.get_meta(conn, "scan_data_date")
+    finished = json.loads(db.get_meta(conn, "market") or "{}").get("finished")
+    if not (data_date and finished):
+        return True
+    t = datetime.fromisoformat(finished).astimezone(CAIRO)
+    return not (t.date().isoformat() == data_date and t.time() < DATA_READY)
+
+
 def scan_is_stale(conn: sqlite3.Connection) -> bool:
     data_date = db.get_meta(conn, "scan_data_date")
-    if data_date and data_date >= expected_session_date().isoformat():
+    expected = expected_session_date().isoformat()
+    if data_date and (data_date > expected or data_date == expected and scan_is_final(conn)):
         return False
     attempted = db.get_meta(conn, "scan_attempted")
     if attempted and datetime.fromisoformat(attempted) > datetime.now() - timedelta(hours=2):

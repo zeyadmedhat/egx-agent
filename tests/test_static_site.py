@@ -302,9 +302,33 @@ def test_strategy_file_has_no_personal_numbers(tmp_path, cfg):
     assert "buy_score: 75" in text and "123456" not in text and "telegram" not in text and "capital" not in text
 
 
-def test_daily_job_posts_once_per_close_and_builds_the_site(tmp_path, monkeypatch):
+class FakeBot:
+    """Telegram's getMe, getUpdates and sendMessage, in memory. Messages are never confirmed, as in the real job."""
+
+    def __init__(self):
+        self.updates, self.sent, self.blocked = [], [], set()
+
+    def says(self, chat_id: int, text: str, kind: str = "private", name: str = "Zarqa-Friend"):
+        self.updates.append({"update_id": 500 + len(self.updates),
+                             "message": {"chat": {"id": chat_id, "type": kind, "first_name": name}, "text": text}})
+
+    def call(self, token, method, **params):
+        if method == "getMe":
+            return {"username": "TestEGXBot", "first_name": "EGX"}
+        assert method == "getUpdates" and "offset" not in params
+        return list(self.updates)
+
+    def send(self, token, chat, text):
+        from app import alerts
+        if chat in self.blocked:
+            raise alerts.TelegramError("Telegram: Forbidden: bot was blocked by the user", 403)
+        self.sent.append((chat, text))
+
+
+def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     from app import alerts, jobs, site_daily
     src = _site_db(tmp_path / "state" / "egx.db")
+    site = tmp_path / "site"
     strategy = tmp_path / "strategy.yaml"
     static_site.export_strategy(dict(config.DEFAULTS), strategy)
     monkeypatch.setattr(config, "CONFIG_PATH", strategy)
@@ -313,17 +337,100 @@ def test_daily_job_posts_once_per_close_and_builds_the_site(tmp_path, monkeypatc
     monkeypatch.setattr(scan, "run_scan", lambda conn, cfg, progress=None, update_data=True: scans.append(update_data)
                         or {"date": "x", "buys": 1, "watches": 0})
     monkeypatch.setattr(jobs, "train_job", lambda conn, say: None)
-    sent = []
-    monkeypatch.setattr(alerts, "send", lambda token, chat, text: sent.append((chat, text)))
+    bot = FakeBot()
+    monkeypatch.setattr(alerts, "call", bot.call)
+    monkeypatch.setattr(alerts, "send", bot.send)
+    code = static_site.telegram_code(PASSWORD, "me/egx")
+    bot.says(111, f"/start {code}")
+    bot.says(222, "/start SomeOtherLink123")           # e.g. your Mac's own link: not for the site
+    bot.says(-333, f"/start {code}", kind="group")     # only private chats
+    bot.says(444, "hello")
 
-    first = site_daily.run(src, tmp_path / "site", PASSWORD, "me/egx", "123:abc", "-100", "https://me.github.io/egx/")
+    first = site_daily.run(src, site, PASSWORD, "me/egx", "123:abc", "https://me.github.io/egx/")
     assert scans == [False]            # the strategy is new to this data: re-scored without downloading
-    assert first["telegram"] == "sent" and first["backtest"] == "updated" and first["site"]
-    chat, text = sent[0]
-    assert chat == "-100" and "AAA" in text and "buy up to" in text and "https://me.github.io/egx/" in text
-    assert "shares" not in text.lower() and "MY PRIVATE NOTE" not in text
-    assert (tmp_path / "site" / "data" / "backtest.bin").exists()
+    assert first["telegram"] == "1 connected (1 new, 0 left), sent to 1" and first["backtest"] == "updated"
+    assert [c for c, _ in bot.sent] == ["111", "111"]
+    assert "Connected" in bot.sent[0][1]
+    daily = bot.sent[1][1]
+    assert "AAA" in daily and "buy up to" in daily and "https://me.github.io/egx/" in daily and "/stop" in daily
+    assert "shares" not in daily.lower() and "MY PRIVATE NOTE" not in daily
+    # The link is only inside the encrypted data; nothing about who connected is published or logged.
+    key = static_site.derive_key(PASSWORD, static_site.salt_for("me/egx"))
+    core = static_site.unseal((site / "data" / "core.bin").read_bytes(), key)
+    assert core["telegram"] == {"bot": "TestEGXBot", "link": f"https://t.me/TestEGXBot?start={code}"}
+    assert core["final"] is True
+    everything = b"".join(p.read_bytes() for p in site.rglob("*") if p.is_file())
+    assert code.encode() not in everything and b"Zarqa-Friend" not in everything
+    assert "Zarqa-Friend" not in json.dumps(first) and "111" not in json.dumps(first)
 
-    second = site_daily.run(src, tmp_path / "site", PASSWORD, "me/egx", "123:abc", "-100")
-    assert len(sent) == 1 and "telegram" not in second and second["scan"] == "no new close yet"
-    assert scans == [False]            # same strategy, same close: nothing to redo
+    # The same messages come back next time: nobody is welcomed or sent the same close twice.
+    second = site_daily.run(src, site, PASSWORD, "me/egx", "123:abc")
+    assert len(bot.sent) == 2 and second["telegram"] == "1 connected (0 new, 0 left), sent to 0"
+    assert second["scan"] == "no new close yet" and scans == [False]
+
+    # A new friend gets the latest close at once; /stop disconnects.
+    bot.says(555, f"/start {code}", name="Omar")
+    bot.says(111, "/stop")
+    third = site_daily.run(src, site, PASSWORD, "me/egx", "123:abc")
+    assert third["telegram"] == "1 connected (1 new, 1 left), sent to 1"
+    assert [c for c, _ in bot.sent[2:]] == ["555", "111", "555"] and "Stopped" in bot.sent[3][1]
+
+    # A scan during the session isn't sent; the one after the close is. A friend who blocked the bot is removed.
+    conn = db.connect(src)
+    new_close = "2099-01-05"
+    db.set_meta(conn, "scan_data_date", new_close)
+    db.set_meta(conn, "market", json.dumps({"date": new_close, "egx30_close": 1300, "egx30_change": 0.01,
+                                            "risk_off": False, "finished": f"{new_close}T11:30:00+02:00"}))
+    conn.close()
+    bot.says(666, f"/start {code}", name="Mona")
+    fourth = site_daily.run(src, site, PASSWORD, "me/egx", "123:abc")
+    assert fourth["telegram"] == "2 connected (1 new, 0 left), sent to 0" and "during the session" in fourth["data"]
+    assert static_site.unseal((site / "data" / "core.bin").read_bytes(), key)["final"] is False
+    conn = db.connect(src)
+    db.set_meta(conn, "market", json.dumps({"date": new_close, "egx30_close": 1300, "egx30_change": 0.01,
+                                            "risk_off": False, "finished": f"{new_close}T15:45:00+02:00"}))
+    conn.close()
+    bot.blocked.add("555")
+    fifth = site_daily.run(src, site, PASSWORD, "me/egx", "123:abc")
+    assert fifth["telegram"] == "1 connected (0 new, 1 left), sent to 1"
+    assert bot.sent[-1][0] == "666" and "5 Jan close" in bot.sent[-1][1]
+
+    # A new password disconnects everyone until they press the new link.
+    sixth = site_daily.run(src, site, "a brand new password", "me/egx", "123:abc")
+    assert sixth["telegram"] == "0 connected (0 new, 1 left), sent to 0"
+    assert bot.sent[-1][0] == "666" and "password has changed" in bot.sent[-1][1]
+
+
+def test_scheduled_runs_publish_only_when_something_changed(tmp_path, monkeypatch):
+    from app import jobs, site_daily
+    src = _site_db(tmp_path / "state" / "egx.db")
+    strategy = tmp_path / "strategy.yaml"
+    static_site.export_strategy(dict(config.DEFAULTS), strategy)
+    monkeypatch.setattr(config, "CONFIG_PATH", strategy)
+    monkeypatch.setattr(scan, "scan_is_stale", lambda conn: False)
+    monkeypatch.setattr(scan, "run_scan", lambda *a, **k: {"date": "x", "buys": 1, "watches": 0})
+    monkeypatch.setattr(jobs, "train_job", lambda conn, say: None)
+    first = site_daily.run(src, tmp_path / "site", PASSWORD, "me/egx")
+    assert first["publish"] and first["telegram"] == "not set up"
+    live = json.loads((tmp_path / "site" / "data" / "site.json").read_text())["stamp"]
+    monkeypatch.setattr(site_daily, "live_stamp", lambda url: live)
+    assert not site_daily.run(src, tmp_path / "site", PASSWORD, "me/egx", always_publish=False)["publish"]
+    monkeypatch.setattr(site_daily, "live_stamp", lambda url: "older")
+    assert site_daily.run(src, tmp_path / "site", PASSWORD, "me/egx", always_publish=False)["publish"]
+
+
+def test_a_scan_during_the_session_is_redone_after_the_close(tmp_path, monkeypatch):
+    from datetime import date
+    conn = db.connect(tmp_path / "egx.db")
+    db.set_meta(conn, "scan_data_date", "2026-09-28")
+    db.set_meta(conn, "market", json.dumps({"finished": "2026-09-28T11:55:00+03:00"}))
+    assert not scan.scan_is_final(conn)
+    monkeypatch.setattr(scan, "expected_session_date", lambda now=None: date(2026, 9, 27))    # still trading
+    assert not scan.scan_is_stale(conn)
+    monkeypatch.setattr(scan, "expected_session_date", lambda now=None: date(2026, 9, 28))    # after 15:30
+    assert scan.scan_is_stale(conn)
+    db.set_meta(conn, "market", json.dumps({"finished": "2026-09-28T15:45:00+03:00"}))
+    assert scan.scan_is_final(conn) and not scan.scan_is_stale(conn)
+    db.set_meta(conn, "market", json.dumps({"finished": "2026-09-29T09:00:00+03:00"}))      # the next morning
+    assert scan.scan_is_final(conn)
+    conn.close()

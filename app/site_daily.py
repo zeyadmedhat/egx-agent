@@ -4,11 +4,14 @@
 
 1. Downloads the new closing prices and scans (the first run downloads 10 years of history, about 5 minutes).
 2. Keeps the prediction model trained (the first time, then monthly) and re-runs the backtest weekly.
-3. Posts the day's signals to the group's Telegram chat, once per close (if the Telegram secrets are set).
-4. Builds the encrypted site into --out.
+3. Connects the friends who pressed "Connect Telegram" on the site (if the TELEGRAM_TOKEN secret is set).
+4. Builds the encrypted site into --out, then sends each connected friend the day's signals, once per close.
 
-Secrets come from the environment: EGX_SITE_PASSWORD (required), TELEGRAM_TOKEN and TELEGRAM_CHAT_ID (optional).
-The logs are public on a public repository, so they only ever show counts, never the signals.
+It also runs every few hours on quiet days, only to connect new friends: the site is then published again only
+if something changed (a scheduled run with the same data isn't republished).
+
+Secrets come from the environment: EGX_SITE_PASSWORD (required) and TELEGRAM_TOKEN (optional).
+The logs are public on a public repository, so they only ever show counts, never the signals or who connected.
 """
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ import sys
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import requests
 
 from egx_agent import config, db, predict, scan
 from egx_agent.data import prices
@@ -33,6 +38,12 @@ def log(msg: str) -> None:
     print(f"{datetime.now():%H:%M:%S}  {msg}", flush=True)
 
 
+def annotate(level: str, title: str, text: str) -> None:
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::{level} title={title}::{text}", flush=True)
+
+
 def _progress(label: str):
     last = {"step": -1}
 
@@ -44,12 +55,35 @@ def _progress(label: str):
     return say
 
 
-def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", chat: str = "",
-        site_url: str = "", force_scan: bool = False) -> dict:
+def _bot(conn, token: str) -> str | None:
+    """The bot's @username, for the site's Connect Telegram link."""
+    try:
+        name = alerts.call(token, "getMe").get("username")
+        db.set_meta(conn, "site_bot", name)
+        return name
+    except alerts.TelegramError:
+        return db.get_meta(conn, "site_bot")
+
+
+def live_stamp(site_url: str) -> str | None:
+    """The stamp of the site people see now, or None if it can't be read (then the site is published)."""
+    if not site_url:
+        return None
+    try:
+        r = requests.get(site_url.rstrip("/") + "/data/site.json", params={"t": int(datetime.now().timestamp())},
+                         timeout=15)
+        return r.json().get("stamp") if r.ok else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", site_url: str = "",
+        force_scan: bool = False, always_publish: bool = True) -> dict:
     cfg = config.load_config()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = db.connect(db_path)
     report: dict = {}
+    warnings: list[str] = []
     try:
         fresh = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0] == 0
         strategy = hashlib.sha256(json.dumps(static_site.strategy_settings(cfg), sort_keys=True).encode()).hexdigest()
@@ -64,13 +98,21 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                 db.set_meta(conn, "history_years_loaded", str(prices.DEEP_YEARS))
             report["scan"] = f"{market['date']}: {market['buys']} BUY, {market['watches']} watch"
             for w in market.get("warnings") or []:
-                log("Warning: " + w.split(":")[0])     # the part before the list of symbols
+                warnings.append(w.split(":")[0])      # the part before the list of symbols
+                log("Warning: " + warnings[-1])
         elif changed:
             market = scan.run_scan(conn, cfg, progress=_progress("Re-score"), update_data=False)
             report["scan"] = f"re-scored with the new strategy: {market['buys']} BUY"
         else:
             report["scan"] = "no new close yet"
         db.set_meta(conn, "site_strategy", strategy)
+        data_date = db.get_meta(conn, "scan_data_date")
+        final = scan.scan_is_final(conn)
+        n_prices = conn.execute("SELECT COUNT(DISTINCT symbol) FROM prices").fetchone()[0]
+        n_kashif = conn.execute("SELECT COUNT(*) FROM stocks WHERE kashif_status IS NOT NULL").fetchone()[0]
+        report["data"] = (f"prices for {n_prices} symbols up to {data_date}"
+                          + ("" if final else " (during the session: scanned again after the close)")
+                          + f", Kashif status for {n_kashif} stocks")
 
         # 2. the prediction model and the weekly backtest
         try:
@@ -94,22 +136,34 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                 traceback.print_exc()
                 report["backtest"] = f"failed ({type(exc).__name__})"
 
-        # 3. the group chat, once per close
-        data_date = db.get_meta(conn, "scan_data_date")
-        if token and chat and data_date and db.get_meta(conn, "group_sent_for") != data_date:
+        # 3. Telegram: the friends who pressed Start (or /stop) since the last run
+        telegram = subs = None
+        if token:
+            code = static_site.telegram_code(password, site_id)
+            bot = _bot(conn, token)
+            telegram = {"bot": bot, "link": f"https://t.me/{bot}?start={code}"} if bot else None
             try:
-                alerts.send(token, chat, alerts.build_group_message(views.Data(conn, cfg, views.Cache()), site_url))
-                db.set_meta(conn, "group_sent_for", data_date)
-                report["telegram"] = "sent"
+                subs = alerts.sync_subscribers(conn, token, code)
             except alerts.TelegramError as exc:
                 report["telegram"] = f"failed: {exc}"
-        elif not (token and chat):
-            report["telegram"] = "not set up"
 
-        # 4. the site
-        res = static_site.build(conn, cfg, out, password, site_id, backtest if backtest.exists() else None,
-                                telegram_group=bool(token and chat))
+        # 4. the site, then this close's signals to each connected friend
+        res = static_site.build(conn, cfg, out, password, site_id, backtest if backtest.exists() else None, telegram)
         report["site"] = f"{res['files']} files, {res['bytes'] / 1e6:.1f} MB"
+        report["publish"] = always_publish or live_stamp(site_url) != res["stamp"]
+        if not report["publish"]:
+            report["site"] += ", unchanged (not published again)"
+        if subs is not None:
+            sent = {"sent": 0, "failed": 0, "gone": 0}
+            if data_date and final and subs["connected"]:
+                text = alerts.build_site_message(views.Data(conn, cfg, views.Cache()), site_url)
+                sent = alerts.send_to_subscribers(conn, token, text, data_date)
+            report["telegram"] = (f"{subs['connected'] - sent['gone']} connected ({subs['joined']} new, "
+                                  f"{subs['left'] + sent['gone']} left), sent to {sent['sent']}"
+                                  + (f", {sent['failed']} failed" if sent["failed"] else ""))
+        elif not token:
+            report["telegram"] = "not set up"
+        report["warnings"] = warnings
         return report
     finally:
         conn.close()
@@ -128,10 +182,19 @@ def main(argv: list[str] | None = None) -> int:
               "Settings → Secrets and variables → Actions.")
         return 1
     report = run(Path(a.db), Path(a.out), password, os.environ.get("GITHUB_REPOSITORY", "local"),
-                 os.environ.get("TELEGRAM_TOKEN", "").strip(), os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
-                 os.environ.get("SITE_URL", ""), os.environ.get("FORCE_SCAN", "").lower() == "true")
+                 os.environ.get("TELEGRAM_TOKEN", "").strip(), os.environ.get("SITE_URL", ""),
+                 os.environ.get("FORCE_SCAN", "").lower() == "true",
+                 always_publish=os.environ.get("GITHUB_EVENT_NAME") != "schedule")
+    publish, warnings = report.pop("publish"), report.pop("warnings")
     for k, v in report.items():
         log(f"{k.capitalize()}: {v}")
+    # The run's page shows these without signing in to GitHub (the logs need a sign-in): counts only.
+    annotate("notice", "Summary", " · ".join(f"{k.capitalize()}: {v}" for k, v in report.items()))
+    for w in warnings:
+        annotate("warning", "Scan", w)
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+            f.write(f"publish={'true' if publish else 'false'}\n")
     return 0
 
 
