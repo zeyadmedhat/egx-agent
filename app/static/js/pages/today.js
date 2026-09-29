@@ -4,7 +4,7 @@ import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cl
 import {
   Icon, Badges, IndexPills, StatusChip, ScoreRing, DayBar, Empty, Callout, PageHead, SectionHead, PageLoading, DataTable,
   StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, LiveQuotes, LIVE_NOTE, StockAvatar, Change, Term,
-  SessionBadge, More, ScoreBar,
+  SessionBadge, More, ScoreBar, ShariahNote,
 } from '../ui.js';
 import { t, tp, isAr } from '../i18n.js';
 import { Sparkline } from '../charts.js';
@@ -61,7 +61,7 @@ export function SignalsPage() {
     </section>
     <section class="section">
       <${SectionHead} title=${html`<${Term} k="watchlist">${t('Close to a BUY')}<//>`} count=${data.watch.length}
-        hint="Strong uptrends without an entry trigger yet." />
+        hint="Strong uptrends without an entry trigger yet."><${ShariahNote} mode=${data.cfg.shariah_filter} /><//>
       <div class="card flush"><${NearList} rows=${data.watch} model=${data.model} /></div>
     </section>
     ${data.cfg.auto_paper && data.paper && data.paper.last_scan && html`<p class="faint note">

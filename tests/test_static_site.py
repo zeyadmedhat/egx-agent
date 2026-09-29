@@ -271,6 +271,7 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
     fields = {f["key"] for s in core["sections"] for f in s["fields"]}
     assert "capital" in fields and not fields & {"paper_capital", "auto_paper"}
     assert not {"paper_capital", "auto_paper"} & set(core["personal_defaults"])
+    assert core["personal_defaults"]["shariah_filter"] == "kashif"      # friends start with Kashif-compliant only
     assert "atr14" in files["stock/AAA.bin"]["series"]
     assert files["stock/AAA.bin"]["plan"]["stop"] < files["stock/AAA.bin"]["stats"]["close"]   # for the calculator
     assert {"dividends", "yield", "bonus"} <= set(files["stock/AAA.bin"]["corporate"])

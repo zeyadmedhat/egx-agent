@@ -171,7 +171,7 @@ def test_signals_use_each_persons_shariah_filter_and_capital(site, tmp_path):
     f = friend.get("/api/today").json()
     assert [b["symbol"] for b in a["buys"]] == ["AAA", "BBB"]
     assert [b["symbol"] for b in f["buys"]] == ["AAA"]                        # BBB isn't Kashif-compliant
-    assert [w["symbol"] for w in f["watch"]] == ["BBB"] and "Shariah" in f["watch"][0]["size_note"]
+    assert "BBB" not in [w["symbol"] for w in f["watch"]]                    # nor close to a BUY: the filter hides it
     assert f["buys"][0]["shares"] < a["buys"][0]["shares"]                   # half the capital, smaller size
     assert friend.get("/api/status").json()["market"]["buys"] == 1
 

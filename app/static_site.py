@@ -39,6 +39,7 @@ ITERATIONS = 600_000        # PBKDF2 rounds: each guess costs about a second on 
 SERIES_TAIL = 750           # about 3 years of daily bars per stock page
 MIN_PASSWORD = 10
 MAC_ONLY_KEYS = ("paper_capital", "auto_paper")     # settings for the Mac's paper account
+SITE_DEFAULTS = {"shariah_filter": "kashif"}         # friends start with Kashif-compliant stocks only
 WORKFLOW = "site.yml"       # the GitHub job that scans and publishes the site (.github/workflows/)
 STOCK_COLS = views.SERIES_COLS + ("atr14",)   # the exit rules in the browser need the ATR too
 
@@ -127,7 +128,7 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "breadth_today": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
                           **breadth.verdict(b, m.get("risk_off") if m else None)} if b else None,
         "strategy": strategy_settings(cfg),
-        "personal_defaults": {k: config.DEFAULTS[k] for k in personal_keys()},
+        "personal_defaults": {k: SITE_DEFAULTS.get(k, config.DEFAULTS[k]) for k in personal_keys()},
         "sections": site_sections(),
         "events": events, "data_status": views.settings_view(d)["data"],
         "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,

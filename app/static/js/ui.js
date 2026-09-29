@@ -248,6 +248,15 @@ export function Fold({ title, hint, open: first, flush, children }) {
     ${open && html`<div class=${cls('fold-body', flush && 'flush')}>${children}</div>`}</details>`;
 }
 
+// Which stocks a list shows under your Shariah filter (Settings), with a link to change it.
+const SHARIAH_SHOWN = { kashif: 'Kashif compliant only', egx33: 'EGX33 members only',
+  either: 'Kashif compliant OR EGX33 member', both: 'Kashif compliant AND EGX33 member' };
+export function ShariahNote({ mode }) {
+  if (!SHARIAH_SHOWN[mode]) return null;
+  return html`<span class="shariah-note"><${Icon} name="shield" size=${13} />${t('Showing: {filter}', { filter: t(SHARIAH_SHOWN[mode]) })}
+    <a href="#/settings">${t('Change')}</a></span>`;
+}
+
 // Short main text, the fine print one tap away.
 export function More({ label = 'Details and caveats', children, open }) {
   return html`<details class="more" open=${open}><summary><${Icon} name="chevron" size=${14} />${t(label)}</summary>

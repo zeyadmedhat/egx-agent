@@ -317,7 +317,7 @@ def today(d: Data) -> dict:
         if r["action"] == "BUY":
             r["sell_by"] = sessions_after(scan_date, cfg["max_hold_days"])
             buys.append(r)
-        else:
+        elif shariah.passes_filter(r["info"], cfg["shariah_filter"]):   # close to a BUY: only what your filter allows
             px = d.prices(r["symbol"])
             trigger = float(px["high"].tail(20).max()) if len(px) else None
             r["trigger"] = trigger
@@ -934,13 +934,15 @@ def predict_public(d: Data) -> dict:
 
 
 def predict_view(d: Data) -> dict:
+    """The model's ranking, with only the stocks your Shariah filter allows (their rank stays the model's)."""
     out = predict_public(d)
+    out["shariah_filter"] = d.cfg["shariah_filter"]
     if out["model"]:
         _, sig_rows = signals(d)
         action = {r["symbol"]: r["action"] for r in sig_rows}
         held = {p["symbol"] for p in open_positions(d)}
-        for row in out["rows"]:
-            row.update(action=action.get(row["symbol"]), held=row["symbol"] in held)
+        out["rows"] = [{**row, "action": action.get(row["symbol"]), "held": row["symbol"] in held} for row in out["rows"]
+                       if shariah.passes_filter(row.get("info") or d.info(row["symbol"]), d.cfg["shariah_filter"])]
     return clean(out)
 
 
@@ -997,7 +999,8 @@ SETTINGS_SECTIONS = [
     {"title": "Shariah", "fields": [
         {"key": "shariah_filter", "label": "Shariah filter for BUY signals", "kind": "select",
          "options": [{"value": k, "label": v} for k, v in config.SHARIAH_MODES.items()],
-         "help": "The EGX33 and Kashif badges always show. This only decides which stocks can get BUY signals."},
+         "help": "The EGX33 and Kashif badges always show. This decides which stocks can get BUY signals, and "
+                 "which show in Close to a BUY and the model's ranking."},
     ]},
     {"title": "Paper trading", "fields": [
         {"key": "auto_paper", "label": "Place paper trades automatically after each scan", "kind": "toggle"},

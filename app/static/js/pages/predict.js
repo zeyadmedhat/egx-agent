@@ -2,7 +2,7 @@
 import { html, useApi, useState, startJob, fmt, tone, go, stockHref, STATIC } from '../lib.js';
 import {
   Icon, Badges, Kpi, Callout, More, PageHead, SectionHead, PageLoading, DataTable, StockCell, Seg, JobProgress,
-  useJob, StatusChip, Chance, Empty, MarketSwitch, Fold,
+  useJob, StatusChip, Chance, Empty, MarketSwitch, Fold, ShariahNote,
 } from '../ui.js';
 import { t } from '../i18n.js';
 
@@ -57,7 +57,7 @@ export function PredictPage() {
     <section class="section">
       <${SectionHead} title="Today's chances" count=${data.rows.length}
         hint=${`From the ${fmt.date(data.date)} close, sorted by the model's rank. A chance is shown only for its top ${fmt.int(data.top_n)} stocks.`}>
-        <${Seg} options=${SHOW} value=${show} onChange=${setShow} /><//>
+        <${ShariahNote} mode=${data.shariah_filter} /><${Seg} options=${SHOW} value=${show} onChange=${setShow} /><//>
       <div class="card flush"><${ChanceTable} rows=${rows} hz=${hz} base=${base} /></div>
     </section>
 

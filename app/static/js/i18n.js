@@ -783,4 +783,11 @@ export const AR = {
   "These orders were for {date}.": "كانت هذه الأوامر لجلسة {date}.",
   "The next session's list appears here after the site's next scan.": "تظهر قائمة الجلسة القادمة هنا بعد الفحص القادم للموقع.",
   "Press Run scan for the next session's list.": "اضغط تشغيل الفحص لتحصل على قائمة الجلسة القادمة.",
+  "Showing: {filter}": "المعروض: {filter}",
+  "Change": "تغيير",
+  "Kashif compliant only": "المتوافقة مع كاشف فقط",
+  "EGX33 members only": "أعضاء EGX33 فقط",
+  "Kashif compliant OR EGX33 member": "متوافقة مع كاشف أو عضو في EGX33",
+  "Kashif compliant AND EGX33 member": "متوافقة مع كاشف وعضو في EGX33",
+  "No filter (show badges only)": "بدون فلتر (الشارات فقط)",
 };

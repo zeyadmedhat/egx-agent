@@ -215,7 +215,7 @@ async function today(c) {
       delete r.trigger; delete r.to_trigger;
       r.sell_by = E.sessionsAfter(scanDate, cfg.max_hold_days);
       buys.push(r);
-    } else watch.push(r);
+    } else if (E.passesFilter(r.info, cfg.shariah_filter)) watch.push(r);   // close to a BUY: only what your filter allows
   }
   const positions = (await openPositions(c)).map(p => ({ ...p, cautions: warn[p.symbol] || [] }));
   const early = core.final === false
@@ -297,15 +297,18 @@ async function portfolioView(c) {
   };
 }
 
+// The model's ranking, with only the stocks your Shariah filter allows (their rank stays the model's).
 async function predictView(c) {
   const out = await load('predict');
   if (out && out.model) {
     const [, rows] = signals(c);
     const action = Object.fromEntries(rows.map(r => [r.symbol, r.action]));
     const held = new Set(E.trades(c.book, 'real', ['open']).map(t => t.symbol));
-    return { ...out, rows: out.rows.map(r => ({ ...r, action: action[r.symbol] ?? null, held: held.has(r.symbol) })) };
+    return { ...out, shariah_filter: c.cfg.shariah_filter,
+      rows: out.rows.filter(r => E.passesFilter(r.info || info(c, r.symbol), c.cfg.shariah_filter))
+        .map(r => ({ ...r, action: action[r.symbol] ?? null, held: held.has(r.symbol) })) };
   }
-  return out;
+  return out && { ...out, shariah_filter: c.cfg.shariah_filter };
 }
 
 // The dividend calendar (views.dividends_view): everyone's dividends, plus which of them you hold.
