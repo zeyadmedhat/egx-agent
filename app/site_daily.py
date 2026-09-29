@@ -6,6 +6,8 @@
 2. Keeps the prediction model trained (the first time, then monthly).
 3. Connects the friends who pressed "Connect Telegram" on the site (if the TELEGRAM_TOKEN secret is set).
 4. Builds the encrypted site into --out, then sends each connected friend the day's signals, once per close.
+5. Tells the owner on Telegram when something breaks, and when it's fixed (app/health.py; the OWNER_TELEGRAM secret
+   says who the owner is), and backs up the data once a day (app/backup.py, with --backup).
 
 The scan also reads the news, dividends and bonus shares (egx_agent/data/news.py); a run without a new close reads
 them on its own, so the site's News page keeps moving on quiet days and weekends.
@@ -13,15 +15,17 @@ them on its own, so the site's News page keeps moving on quiet days and weekends
 It also runs every few hours on quiet days, only to connect new friends: the site is then published again only
 if something changed (a scheduled run with the same data isn't republished).
 
-Secrets come from the environment: EGX_SITE_PASSWORD (required) and TELEGRAM_TOKEN (optional).
+Secrets come from the environment: EGX_SITE_PASSWORD (required), TELEGRAM_TOKEN and OWNER_TELEGRAM (optional).
 The logs are public on a public repository, so they only ever show counts, never the signals or who connected.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import os
+import re
 import sys
 import traceback
 from datetime import datetime
@@ -32,7 +36,7 @@ import requests
 from egx_agent import config, db, predict, scan
 from egx_agent.data import news, prices
 
-from . import alerts, jobs, static_site, views
+from . import alerts, backup, health, jobs, static_site, views
 
 
 NEWS_BUDGET_S = 120   # runs without a new close read the news too, a little less of it
@@ -69,6 +73,28 @@ def _bot(conn, token: str) -> str | None:
         return db.get_meta(conn, "site_bot")
 
 
+def owner_chat(conn, token: str, owner: str) -> str | None:
+    """The owner's Telegram chat, from the OWNER_TELEGRAM secret: their @username (or chat number). They must have
+    pressed Connect Telegram on the site, which lets the bot message them. Kept, so it's looked up only once."""
+    who = owner.strip().lstrip("@").lower()
+    if not who:
+        return None
+    known = json.loads(db.get_meta(conn, "site_owner") or "{}")
+    if known.get("who") == who:
+        return known.get("chat")
+    chat = who if who.lstrip("-").isdigit() else None
+    for cid in [] if chat else list(alerts._subscribers(conn))[:50]:
+        try:
+            if (alerts.call(token, "getChat", chat_id=cid).get("username") or "").lower() == who:
+                chat = cid
+                break
+        except alerts.TelegramError:
+            continue
+    if chat:
+        db.set_meta(conn, "site_owner", json.dumps({"who": who, "chat": chat}))
+    return chat
+
+
 def live_stamp(site_url: str) -> str | None:
     """The stamp of the site people see now, or None if it can't be read (then the site is published)."""
     if not site_url:
@@ -82,7 +108,7 @@ def live_stamp(site_url: str) -> str | None:
 
 
 def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", site_url: str = "",
-        force_scan: bool = False, always_publish: bool = True) -> dict:
+        force_scan: bool = False, always_publish: bool = True, owner: str = "") -> dict:
     cfg = config.load_config()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = db.connect(db_path)
@@ -104,6 +130,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             for w in market.get("warnings") or []:
                 warnings.append(w.split(":")[0])      # the part before the list of symbols
                 log("Warning: " + warnings[-1])
+            health.note(conn, market.get("failed", []), market.get("checked", []))
         elif changed:
             market = scan.run_scan(conn, cfg, progress=_progress("Re-score"), update_data=False)
             report["scan"] = f"re-scored with the new strategy: {market['buys']} BUY"
@@ -115,8 +142,10 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                                   budget_s=NEWS_BUDGET_S)
                 report["news"] = f"{got['new']} new headlines, {got['actions']} new dividends/bonus shares" + (
                     f" ({len(got['failed'])} sources didn't answer)" if got["failed"] else "")
+                health.note(conn, got["failed"], got["tried"])
             except Exception as exc:  # the site still builds with the news it has
                 report["news"] = f"not updated ({type(exc).__name__})"
+                health.note(conn, ["News"], ["News"])
         db.set_meta(conn, "site_strategy", strategy)
         data_date = db.get_meta(conn, "scan_data_date")
         final = scan.scan_is_final(conn)
@@ -139,6 +168,9 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         except Exception as exc:  # the site still works without the model
             traceback.print_exc()
             report["model"] = f"failed ({type(exc).__name__})"
+        if report["model"].startswith(("trained", "retrain", "failed")):
+            health.note(conn, ["Prediction model training"] if "failed" in report["model"] else [],
+                        ["Prediction model training"])
 
         # 3. Telegram: the friends who pressed Start (or /stop) since the last run
         telegram = subs = None
@@ -171,6 +203,25 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                                   + (f", {fired} alerts" if fired else ""))
         elif not token:
             report["telegram"] = "not set up"
+
+        # 5. alarms: tell the owner what broke since the last run, and what's fixed
+        try:
+            chat = owner_chat(conn, token, owner) if token and owner else None
+            current = health.problems(conn)
+            res = health.notify(conn, current, (lambda text: alerts.send(token, chat, text)) if chat else None,
+                                health.run_link(), " website")
+            hint = (", the owner was told" if res["sent"] else
+                    ", but there's no Telegram bot to tell the owner" if not token else
+                    ": add the OWNER_TELEGRAM secret to get these on Telegram" if not owner else
+                    ": the OWNER_TELEGRAM person hasn't pressed Connect Telegram on the site yet" if not chat else
+                    ", but Telegram didn't take the message (tried again next run)" if res["new"] or res["fixed"]
+                    else "")
+            report["alarms"] = (f"{res['open']} open" if res["open"] else "all fine") + (
+                hint if res["open"] or res["sent"] else "")
+            warnings += [html.unescape(re.sub(r"<[^>]+>", "", t)) for t in current.values()]
+        except Exception as exc:  # an alarm must never stop the site
+            traceback.print_exc()
+            report["alarms"] = f"not checked ({type(exc).__name__})"
         report["warnings"] = warnings
         return report
     finally:
@@ -182,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", default="state/egx.db")
     p.add_argument("--config", default=str(static_site.STRATEGY_PATH))
     p.add_argument("--out", default="_site")
+    p.add_argument("--backup", default="", help="write the day's locked backup here (once a day)")
     a = p.parse_args(argv)
     config.CONFIG_PATH = Path(a.config)
     password = os.environ.get("EGX_SITE_PASSWORD", "")
@@ -192,8 +244,16 @@ def main(argv: list[str] | None = None) -> int:
     report = run(Path(a.db), Path(a.out), password, os.environ.get("GITHUB_REPOSITORY", "local"),
                  os.environ.get("TELEGRAM_TOKEN", "").strip(), os.environ.get("SITE_URL", ""),
                  os.environ.get("FORCE_SCAN", "").lower() == "true",
-                 always_publish=os.environ.get("GITHUB_EVENT_NAME") != "schedule")
+                 always_publish=os.environ.get("GITHUB_EVENT_NAME") != "schedule",
+                 owner=os.environ.get("OWNER_TELEGRAM", ""))
     publish, warnings = report.pop("publish"), report.pop("warnings")
+    if a.backup:
+        try:
+            size = backup.make_if_due(Path(a.db), Path(a.backup), backup.secret())
+            report["backup"] = f"{size / 1e6:.1f} MB, kept {backup.BACKUP_DAYS} days" if size else "done today already"
+        except Exception as exc:  # the site is still published; tried again next run
+            report["backup"] = f"failed ({type(exc).__name__})"
+            warnings.append("The daily backup failed")
     for k, v in report.items():
         log(f"{k.capitalize()}: {v}")
     # The run's page shows these without signing in to GitHub (the logs need a sign-in): counts only.

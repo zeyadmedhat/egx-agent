@@ -64,6 +64,10 @@ In **Settings → Alerts**:
 2. **Daily scan.** Turn it on to scan by itself Sunday–Thursday at 15:45, even when the dashboard is closed. It
    tries again at 18:00 and 21:00 if prices were late. Your Mac needs to be on; if it's asleep, the scan runs as
    soon as it wakes. Each run is logged in `data/daily.log`. Turning it off removes it completely.
+3. **Alarms.** With Telegram connected, you also get a message when something breaks, and another when it's fixed
+   (`app/health.py`): a scan that crashed, no new closing prices for 2 sessions in a row (a long holiday looks the
+   same, so the message says so), a data source (prices, Egypt data, dividends, a news site, Kashif) failing on
+   every try for a whole day, or the prediction model not retrained for 40 days. One bad run doesn't count.
 
 ## Bonus shares, splits and dividends
 
@@ -210,6 +214,16 @@ without a server and without your Mac being on.
   "Connected", and from then on sends each of them the day's signals after every close (without share counts:
   each person sizes them on the site). `/stop` stops them. The link comes from the password, so only people who can
   open the site have it, and changing the password disconnects everyone until they press the new link.
+- **Alarms, to you only:** add the `OWNER_TELEGRAM` secret with your Telegram @username and press *Connect
+  Telegram* on the site like a friend. You then get the same alarms as on the Mac (a failed run, prices stuck
+  for 2 sessions, a source down for a day, the model not retrained), once when they start and once when they're
+  fixed. Friends never get them. Without it, GitHub's own e-mail about a failed run is the only alarm.
+- **Backups.** The site's data (prices, signals, the model's live record, who connected on Telegram) lives in
+  GitHub's cache between runs. Once a day it's also saved as a locked file kept for 30 days (`app/backup.py`,
+  the `state-backup` file on a run's page). It opens only with the site password *and* the bot token, so friends
+  can't open it. If the cache is ever lost, the next run brings back the latest backup by itself.
+- **GitHub's machine is pinned to Ubuntu 24.04**, so GitHub moving "latest" to a new Ubuntu can't break a run
+  overnight. Move it on purpose, after a test run, before 24.04's support ends.
 - **The strategy** is yours: change it in Settings on the Mac, then double-click **Publish website.command**. It
   sends only the code and the rules (`site/strategy.yaml`); your portfolio, `config.yaml` and the Telegram token
   stay on the Mac (see `.gitignore`), and it refuses to publish if the token would be included.
@@ -242,6 +256,7 @@ If the free price source stops working, the code is ready for a paid provider (E
 - `data/daily.log`: what the daily scan did each time it ran
 - `data/models/`: the trained prediction model and its test results
 - `app/static_site.py` builds the GitHub Pages site, `app/site_daily.py` is its daily job, `app/static/js/local/` runs your portfolio in the browser, `site/strategy.yaml` is the strategy it uses
+- `app/health.py`: the alarms (what counts as broken, sent once when it starts and once when it's fixed) · `app/backup.py`: the site's locked daily backup
 - `deploy/` (kept on this Mac only): the older Oracle server plan; `app/auth.py` and `app/accounts.py` are its logins
 - `egx_agent/`: the analysis code · `tests/`: automated checks (`.venv/bin/python -m pytest`)
 - `app/`: the dashboard. `server.py` is a small local web server (FastAPI) that sends data to the page in `app/static/`

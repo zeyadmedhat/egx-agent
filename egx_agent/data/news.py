@@ -319,9 +319,10 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
     (today's signals). Returns counts, and the sources that failed (the others still update)."""
     f = fetcher or Fetcher()
     say = progress or (lambda msg: None)
-    res = {"new": 0, "actions": 0, "stocks": 0, "failed": []}
+    res = {"new": 0, "actions": 0, "stocks": 0, "failed": [], "tried": []}
 
     def attempt(name: str, fn):
+        res["tried"].append(name)
         try:
             return fn()
         except Exception:            # one source down must not stop the others
@@ -378,12 +379,14 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
         else:
             misses += 1
             if misses >= 3:            # the site isn't answering: try again next run
+                res["failed"].append("Mubasher stock pages")
                 break
     db.set_meta(conn, "news_checked", json.dumps(checked))
     conn.execute("DELETE FROM news WHERE symbol = '' AND published < ?",
                  (_iso(_now() - timedelta(days=KEEP_DAYS)),))
     conn.commit()
     res["failed"] = sorted(set(res["failed"]))
+    res["tried"] = sorted(set(res["tried"]))
     db.set_meta(conn, "news_updated", datetime.now().isoformat(timespec="seconds"))
     return res
 

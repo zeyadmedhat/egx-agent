@@ -1,6 +1,7 @@
 """Long-running work (scans, Kashif refresh, backtests) on a background thread, one job at a time."""
 from __future__ import annotations
 
+import html
 import itertools
 import json
 import threading
@@ -14,7 +15,7 @@ import pandas as pd
 from egx_agent import backtest, config, corporate, db, predict, scan
 from egx_agent.data import macro, news, prices, shariah, universe
 
-from . import accounts, alerts, views
+from . import accounts, alerts, health, views
 
 Progress = Callable[[float, str], None]
 AUTOSCAN_EVERY = 300  # seconds between "are new closing prices due?" checks
@@ -64,6 +65,12 @@ class JobRunner:
         except Exception as exc:  # shown to you in the dashboard instead of a stack trace
             traceback.print_exc()
             job["state"], job["error"] = "error", str(exc) or exc.__class__.__name__
+            if job["kind"] == "scan":
+                try:
+                    health.crashed(conn, f"The scan failed: {html.escape(job['error'][:300])}",
+                                   owner_sender(self.site, config.load_config()), where=" on your Mac")
+                except Exception:
+                    traceback.print_exc()
         finally:
             job["finished"] = datetime.now().isoformat(timespec="seconds")
             conn.close()
@@ -111,8 +118,31 @@ def scan_job(update_data: bool, site: "accounts.Site | None" = None):
         market = scan.run_scan(conn, cfg, progress=say, update_data=update_data, accounts=people)
         market["telegram"] = send_alerts(site, conn, cfg)
         market["model"] = retrain_if_due(conn, cfg, say)
+        market["alarms"] = check_health(site, conn, cfg, market)
         return market
     return fn
+
+
+def owner_sender(site: "accounts.Site | None", cfg: dict) -> health.Send | None:
+    """Alarms go to your own Telegram on your Mac (the multi-user server has no single owner to tell)."""
+    if site is not None and site.multi_user:
+        return None
+    token, chat = cfg.get("telegram_token"), cfg.get("telegram_chat_id")
+    return (lambda text: alerts.send(token, chat, text)) if token and chat else None
+
+
+def check_health(site: "accounts.Site | None", conn, cfg: dict, market: dict) -> str:
+    """After a scan: note the sources that failed, then tell you about problems that started or ended."""
+    try:
+        health.note(conn, market.get("failed", []), market.get("checked", []))
+        if market.get("model"):
+            health.note(conn, ["Prediction model training"] if "failed" in market["model"] else [],
+                        ["Prediction model training"])
+        res = health.notify(conn, health.problems(conn), owner_sender(site, cfg), where=" on your Mac")
+    except Exception:  # an alarm must never break the scan
+        traceback.print_exc()
+        return ""
+    return f"{res['open']} open" if res["open"] else ""
 
 
 def send_alerts(site: "accounts.Site | None", conn, cfg: dict) -> str:

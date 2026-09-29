@@ -1,6 +1,8 @@
 # The website: after every EGX close, download prices, scan, and publish the encrypted site to GitHub Pages.
-# Secrets (Settings → Secrets and variables → Actions): SITE_PASSWORD (required) and TELEGRAM_TOKEN (optional: the
-# bot that messages each friend who pressed Connect Telegram). The logs are public, so the job only prints counts.
+# Secrets (Settings → Secrets and variables → Actions): SITE_PASSWORD (required), TELEGRAM_TOKEN (optional: the
+# bot that messages each friend who pressed Connect Telegram) and OWNER_TELEGRAM (optional: your Telegram @username,
+# so the alarms reach you when something breaks). The logs are public, so the job only prints counts.
+# The data is kept in GitHub's cache between runs and backed up once a day (locked; see app/backup.py).
 name: Daily scan and website
 
 on:
@@ -32,7 +34,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned: "latest" moves to a new Ubuntu by itself, which could break a run overnight
     timeout-minutes: 60
     outputs:
       publish: ${{ steps.scan.outputs.publish }}
@@ -44,15 +46,34 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install
-        run: pip install -r requirements.txt
-
       - name: Bring back the data from the last run
+        id: restore
         uses: actions/cache/restore@v6
         with:
           path: state
           key: state-${{ github.run_id }}
           restore-keys: state-
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: If the data is gone, bring back the latest backup
+        if: steps.restore.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EGX_SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        run: |
+          mkdir -p _restore
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=state-backup&per_page=10" \
+                        --jq '.artifacts | map(select(.expired | not)) | sort_by(.created_at) | reverse | .[].id'); do
+            rm -f _restore/*
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > _restore/backup.zip \
+              && unzip -o -q _restore/backup.zip -d _restore \
+              && python -m app.backup restore --file _restore/state.egxb --db state/egx.db && break
+          done
+          rm -rf _restore
+          [ -f state/egx.db ] || echo "No backup to bring back: starting fresh."
 
       - id: pages
         uses: actions/configure-pages@v6
@@ -62,10 +83,20 @@ jobs:
         env:
           EGX_SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          OWNER_TELEGRAM: ${{ secrets.OWNER_TELEGRAM }}
           SITE_URL: ${{ steps.pages.outputs.base_url }}
           FORCE_SCAN: ${{ inputs.force_scan }}
           TZ: Africa/Cairo
-        run: python -m app.site_daily --db state/egx.db --config site/strategy.yaml --out _site
+        run: >-
+          python -m app.site_daily --db state/egx.db --config site/strategy.yaml --out _site
+          --backup _backup/state.egxb
+
+      - name: Tell the owner on Telegram that this run failed
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TZ: Africa/Cairo
+        run: python3 -m app.health crashed --db state/egx.db
 
       - name: Keep the data for the next run
         if: always() && hashFiles('state/egx.db') != ''
@@ -73,6 +104,15 @@ jobs:
         with:
           path: state
           key: state-${{ github.run_id }}
+
+      - name: Back up the data (about once a day)
+        if: success() && hashFiles('_backup/state.egxb') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: state-backup
+          path: _backup/state.egxb
+          retention-days: 30
+          compression-level: 0
 
       - name: Remove older copies of the data
         if: success()
@@ -102,7 +142,7 @@ jobs:
   deploy:
     needs: build
     if: needs.build.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

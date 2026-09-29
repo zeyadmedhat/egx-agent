@@ -6,6 +6,7 @@ Otherwise it scans when new closing prices are due and sends the Telegram summar
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import sys
 import traceback
@@ -16,7 +17,7 @@ import requests
 
 from egx_agent import config, db, scan
 
-from . import alerts, jobs, schedule
+from . import alerts, health, jobs, schedule
 
 HEALTH = "http://127.0.0.1:8501/api/health"
 MAX_LOG = 200_000  # bytes
@@ -49,8 +50,10 @@ def run(db_path: Path | str, health_url: str = HEALTH) -> tuple[bool, str]:
     try:
         cfg = config.load_config()
         parts = []
+        market: dict = {}
         if scan.scan_is_stale(conn):
-            parts.append(jobs.scan_summary(scan.run_scan(conn, cfg)))
+            market = scan.run_scan(conn, cfg)
+            parts.append(jobs.scan_summary(market))
         else:
             parts.append("Prices are up to date.")
         try:
@@ -62,6 +65,8 @@ def run(db_path: Path | str, health_url: str = HEALTH) -> tuple[bool, str]:
         model = jobs.retrain_if_due(conn, cfg, lambda p, m: None)
         if model:
             parts.append(f"Prediction model {model}.")
+        if alarms := jobs.check_health(None, conn, cfg, {**market, "model": model}):
+            parts.append(f"Alarms: {alarms}.")
         return ok and not model.startswith("retraining failed"), " ".join(parts)
     finally:
         conn.close()
@@ -75,14 +80,22 @@ def main(argv: list[str] | None = None) -> int:
     if a.config:
         config.CONFIG_PATH = Path(a.config)
     trim_log(schedule.log_path())
+    crash = None
     try:
         ok, msg = run(a.db)
     except Exception as exc:
         traceback.print_exc()
         ok, msg = False, f"Failed: {exc}"
+        crash = str(exc) or exc.__class__.__name__
     log(msg)
     conn = db.connect(a.db)
     try:
+        if crash:
+            try:
+                health.crashed(conn, f"The daily scan failed: {html.escape(crash[:300])}",
+                               jobs.owner_sender(None, config.load_config()), where=" on your Mac")
+            except Exception:
+                traceback.print_exc()
         db.set_meta(conn, "daily_last_run", json.dumps(
             {"at": datetime.now().isoformat(timespec="seconds"), "ok": ok, "message": msg}))
     finally:

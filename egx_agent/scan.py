@@ -16,6 +16,7 @@ from .indicators import add_indicators
 CAIRO = ZoneInfo("Africa/Cairo")
 DATA_READY = time(15, 30)       # EGX closes ~14:30 Cairo; give data providers an hour
 TRADING_WEEKDAYS = {6, 0, 1, 2, 3}  # Sunday–Thursday
+PRICES_FAILING = 0.25           # the price download counts as broken when over a quarter of the stocks got nothing
 
 
 def expected_session_date(now: datetime | None = None) -> date:
@@ -108,13 +109,16 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     db.set_meta(conn, "scan_attempted", datetime.now().isoformat(timespec="seconds"))
     warnings = []
     events = []
+    checked, failed = [], []        # data sources tried and the ones that didn't work (app/health.py)
 
     say(0.02, "Checking Kashif Shariah data…")
     if shariah.needs_refresh(conn):
+        checked.append("Kashif (Shariah data)")
         try:
             shariah.refresh_kashif(conn)
         except Exception as exc:
             warnings.append(f"Kashif refresh failed, using cached Shariah data ({exc})")
+            failed.append(checked[-1])
     universe.ensure_seeded(conn)
 
     if update_data:
@@ -125,6 +129,9 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         )
         if res["failed"]:
             warnings.append(f"No price data from TradingView for: {', '.join(res['failed'])}")
+        checked.append("TradingView prices")
+        if prices.INDEX_SYMBOL in res["failed"] or len(res["failed"]) > PRICES_FAILING * len(syms):
+            failed.append(checked[-1])
         events = res.get("events", [])
         say(0.81, "Downloading the dollar rate, interest rates and inflation…")
         try:
@@ -133,10 +140,13 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             missed = [str(exc)]
         if missed:
             warnings.append(f"Egypt data not updated (the model uses the last values): {', '.join(missed)}")
+        checked += ["Egypt data (TradingView)", "Dividends (TradingView)"]
+        failed += ["Egypt data (TradingView)"] if missed else []
         try:
             dividends.update(conn)
         except Exception as exc:  # the dividend pages show what was downloaded before
             warnings.append(f"Dividend data not updated ({type(exc).__name__})")
+            failed.append("Dividends (TradingView)")
         say(0.815, "Downloading news, dividends and bonus shares…")
         try:
             first = list(db.latest_scan(conn)[1].get("symbol", []))
@@ -148,8 +158,12 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
                               progress=lambda msg: say(0.815, msg))
             if got["failed"]:
                 warnings.append(f"Some news sources didn't answer (the others were read): {', '.join(got['failed'])}")
+            checked += got["tried"]
+            failed += got["failed"]
         except Exception as exc:  # the news pages show what was downloaded before
             warnings.append(f"News not updated ({type(exc).__name__})")
+            checked.append("News")
+            failed.append("News")
 
     say(0.82, "Calculating indicators…")
     stocks = universe.stock_table(conn, cfg.get("egx33_extra"))
@@ -196,11 +210,13 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     db.save_scan(conn, scan_date, buys + watches)
 
     say(0.94, "Updating the prediction model's numbers…")
+    checked.append("Prediction model")
     try:
         predict.resolve(conn, cfg)          # what happened to earlier predictions
         predict.predict_latest(conn, cfg)   # nothing to do until you train the model on the Predict page
     except Exception as exc:
         warnings.append(f"Prediction model skipped this time ({exc})")
+        failed.append("Prediction model")
 
     say(0.96, "Updating paper trading…")
     n_accounts = 0
@@ -223,6 +239,8 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         "scanned": len(rows),
         "eligible": int(len(eligible_ret)),
         "warnings": warnings,
+        "checked": checked,
+        "failed": failed,
         "accounts": n_accounts,
         "price_events": events,
         "finished": datetime.now().isoformat(timespec="seconds"),
