@@ -34,6 +34,7 @@ from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from egx_agent import config, corporate, db, levels, portfolio
+from egx_agent.data import prices
 
 from . import accounts, alerts, auth, jobs, schedule, views
 from .accounts import LOCAL, Person
@@ -445,6 +446,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
 
     @app.get("/api/stock/{symbol}/intraday")
     def stock_intraday(symbol: str, d: views.Data = Depends(get_data)):
+        try:        # a stock opened before the next scan downloads its hourly bars: fetch them now
+            prices.refresh_intraday(d.conn, symbol.upper(), aliases=d.cfg.get("symbol_aliases"))
+        except Exception:  # offline or TradingView busy: the chart shows what's stored
+            pass
         return JSON(views.stock_intraday(d, symbol))
 
     @app.get("/api/watchlist")

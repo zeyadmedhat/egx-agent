@@ -97,3 +97,25 @@ def test_recent_record_counts_its_daily_top_picks(tmp_path):
     assert rec["days"] == 30 and rec["n"] == 300 and rec["hits"] == 300 and rec["misses"] == 0
     assert abs(rec["ret"] - 0.1) < 1e-9 and rec["all_ret"] < rec["ret"]
     assert predict.recent_record(conn)["20"] == {"n": 0}
+
+
+class HourlyFeed:
+    def __init__(self):
+        self.asked = []
+
+    def fetch_hourly(self, symbol, n_bars):
+        self.asked.append(symbol)
+        return hourly(60, "2026-06-07")
+
+
+def test_hourly_bars_are_fetched_when_behind_the_last_close(tmp_path):
+    conn = db.connect(tmp_path / "egx.db")
+    _stock(conn, np.linspace(10, 12, 80))                      # daily bars, no hourly ones yet
+    feed = HourlyFeed()
+    assert prices.intraday_behind(conn, "VVV") and prices.intraday_behind(conn)
+    assert prices.refresh_intraday(conn, "VVV", provider=feed) and feed.asked == ["VVV"]
+    assert not prices.intraday_behind(conn, "VVV")             # they reach its last close: not fetched again
+    assert not prices.refresh_intraday(conn, "VVV", provider=feed) and feed.asked == ["VVV"]
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) VALUES "
+                 "('VVV', '2026-09-29', 12, 12, 12, 12, 1)")     # a newer close: behind again
+    assert prices.refresh_intraday(conn, "VVV", provider=feed) and feed.asked == ["VVV", "VVV"]

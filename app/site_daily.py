@@ -34,7 +34,7 @@ from pathlib import Path
 import requests
 
 from egx_agent import config, db, predict, scan
-from egx_agent.data import news, prices
+from egx_agent.data import dividends, news, prices
 
 from . import alerts, backup, health, jobs, static_site, views
 
@@ -107,6 +107,26 @@ def live_stamp(site_url: str) -> str | None:
         return None
 
 
+def catch_up(conn, cfg: dict) -> dict:
+    """On a run with no new close: download what a newer agent shows but the last scan didn't fetch yet (the hourly
+    bars for the 1-hour and 4-hour charts, the company numbers), so a new version is complete straight away."""
+    out = {}
+    if prices.intraday_behind(conn):
+        syms = [r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices WHERE symbol != ?", (prices.INDEX_SYMBOL,))]
+        try:
+            res = prices.update_intraday(conn, syms, aliases=cfg.get("symbol_aliases"))
+            out["hourly"] = f"{res['updated']} stocks" + (f", {len(res['failed'])} failed" if res["failed"] else "")
+        except Exception as exc:  # only the hourly charts need them
+            out["hourly"] = f"not updated ({type(exc).__name__})"
+    if not conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0]:
+        try:
+            dividends.update(conn)
+            out["company numbers"] = "downloaded"
+        except Exception as exc:
+            out["company numbers"] = f"not updated ({type(exc).__name__})"
+    return out
+
+
 def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", site_url: str = "",
         force_scan: bool = False, always_publish: bool = True, owner: str = "") -> dict:
     cfg = config.load_config()
@@ -148,6 +168,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                 health.note(conn, ["News"], ["News"])
             tried: list[str] = []
             health.note(conn, scan.history_step(conn, tried, NEWS_BUDGET_S), tried)   # past dividends, a few stocks
+            report.update(catch_up(conn, cfg))
         db.set_meta(conn, "site_strategy", strategy)
         data_date = db.get_meta(conn, "scan_data_date")
         final = scan.scan_is_final(conn)

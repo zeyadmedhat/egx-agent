@@ -233,6 +233,32 @@ def update_intraday(conn: sqlite3.Connection, symbols: list[str], provider=None,
     return {"updated": got, "failed": sorted(failed)}
 
 
+def intraday_behind(conn: sqlite3.Connection, symbol: str | None = None) -> bool:
+    """True when the hourly bars (one stock's, or the newest of all) end before the last daily close stored."""
+    where, args = ("WHERE symbol=?", (symbol,)) if symbol else ("", ())
+    hourly = conn.execute(f"SELECT MAX(ts) FROM intraday {where}", args).fetchone()[0]
+    daily = conn.execute(f"SELECT MAX(date) FROM prices {where}", args).fetchone()[0]
+    return bool(daily) and (not hourly or hourly[:10] < daily)
+
+
+_refreshing = threading.Lock()
+
+
+def refresh_intraday(conn: sqlite3.Connection, symbol: str, provider=None, aliases: dict[str, str] | None = None) -> bool:
+    """On your Mac, when a stock's 1-hour or 4-hour chart is opened: download its hourly bars first if they are
+    missing or older than its last close. Returns whether new bars were stored."""
+    if not intraday_behind(conn, symbol):
+        return False
+    with _refreshing:
+        if not intraday_behind(conn, symbol):
+            return False
+        df = (provider or TvProvider(aliases=aliases)).fetch_hourly(symbol, HOURLY_BARS)
+        if df is None or df.empty:
+            return False
+        db.replace_intraday(conn, symbol, df)
+        return True
+
+
 def four_hour(hourly: pd.DataFrame, session_start: int = 10) -> pd.DataFrame:
     """4-hour bars from hourly ones, as TradingView makes them for EGX: one from the 10:00 open to 14:00, then
     14:00 to the close."""
