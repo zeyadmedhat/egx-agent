@@ -2,7 +2,7 @@
 import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, STATIC } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, ScoreRing, ScoreBar, DayBar, Empty, Callout, PageHead, SectionHead,
-  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch, Cautions,
+  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch, Cautions, Why,
 } from '../ui.js';
 import { Sparkline } from '../charts.js';
 
@@ -211,7 +211,9 @@ function SignalCard({ s, model }) {
     <div class="sig-head">
       <div class="who">
         <div class="sym-line"><a class="sym-big" href=${stockHref(s.symbol)}>${s.symbol}</a><${IndexPills} info=${i} />
-          ${s.setup && html`<span class="tag">${s.setup}</span>`}</div>
+          ${s.source === 'model'
+            ? html`<span class="model-pick" title="One of the prediction model's top picks today that also passes the liquidity and uptrend checks. Same stop, target and sizing as any BUY."><${Icon} name="target" size=${12} />Model pick</span>`
+            : s.setup && html`<span class="tag">${s.setup}</span>`}</div>
         <div class="stock-name" dir="rtl" style="text-align:left">${i.name_ar}</div>
         <div class="stock-sector">${i.sector}</div>
       </div>
@@ -219,10 +221,11 @@ function SignalCard({ s, model }) {
     </div>
     <${Badges} info=${i} />
     <${Cautions} items=${s.cautions} compact />
-    ${(s.cautions || []).some(c => c.kind === 'ex_dividend') && html`<p class="caution-note">
-      <${Icon} name="alert" size=${13} />It goes ex-dividend before this trade would end. The price drops by the
-      dividend that morning, which can hit the stop. In 10 years of tests, BUY signals this close to an ex-date reached
-      the target within a month 22% of the time, against 36% for the others. You still get the dividend if you hold.</p>`}
+    ${(s.cautions || []).some(c => c.kind === 'ex_dividend') && html`<p class="caution-note info">
+      <${Icon} name="info" size=${13} />It goes ex-dividend before this trade would end. The price drops by the
+      dividend that morning and you get it in cash, so the agent lowers the stop and target by the same amount (a to-do
+      reminds you the evening before). Counting the dividend, BUYs this close to an ex-date did as well as the others
+      in 10 years of tests.</p>`}
     <div class="levels">
       <${Level} label="Last close" value=${fmt.price(s.close)} />
       <${Level} label="Buy up to" value=${fmt.price(s.entry_high)} sub=${fmt.pct(s.entry_high / s.close - 1)} subCls="faint" />
@@ -242,9 +245,10 @@ function SignalCard({ s, model }) {
       <ul class="reasons">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${r}</li>`)}</ul></details>
     ${model && s.pred && html`<div class="model-line"><${Icon} name="target" size=${14} />
       ${s.pred.top10 === false
-        ? html`<a href="#/predict">Model: not one of its top picks today</a>`
-        : html`<a href="#/predict">Model: <${Chance} p=${s.pred.p10} base=${model.base[10]} /> chance of target before stop in 2 weeks</a>
-      <span class="faint">(average stock ${fmt.pct(model.base[10], 0, false)})</span>`}</div>`}
+        ? html`<a href="#/predict">Model: #${fmt.int(s.pred.rank10)} of ${fmt.int(model.count)}, not one of its top picks today</a>`
+        : html`<a href="#/predict">Model: #${fmt.int(s.pred.rank10)} of ${fmt.int(model.count)}, <${Chance} p=${s.pred.p10} base=${model.base[10]} /> chance of target before stop in 2 weeks</a>
+      <span class="faint">(average stock ${fmt.pct(model.base[10], 0, false)})</span>`}</div>
+      ${s.pred.why10 && s.pred.why10.length > 0 && html`<${Why} items=${s.pred.why10} />`}`}
     <div class="faint" style="font-size:12px">Sizing: ${s.size_note} · hold at most until <b class="muted">${fmt.date(s.sell_by)}</b></div>
     <div class="sig-foot">
       <a class="btn sm" href=${stockHref(s.symbol)}><${Icon} name="chart" />Chart</a>

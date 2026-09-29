@@ -264,9 +264,10 @@ def create_paper_orders(conn: sqlite3.Connection, orders: list[dict], signal_dat
 
 
 def _save_position(conn: sqlite3.Connection, trade_id: int, pos: engine.Position, last_bar: str) -> None:
-    conn.execute(
-        """UPDATE trades SET stop=?, highest_close=?, days_held=?, exit_next_open=?, last_bar_date=? WHERE id=?""",
-        (pos.stop, pos.highest_close, pos.days_held, pos.exit_next_open, last_bar, trade_id),
+    conn.execute(   # the target too: it moves down on an ex-dividend date (engine.ex_dividend)
+        """UPDATE trades SET stop=?, target=?, highest_close=?, days_held=?, exit_next_open=?, last_bar_date=?
+           WHERE id=?""",
+        (pos.stop, pos.target, pos.highest_close, pos.days_held, pos.exit_next_open, last_bar, trade_id),
     )
 
 
@@ -316,6 +317,10 @@ def process_paper(conn: sqlite3.Connection, cfg: dict, ind: dict[str, pd.DataFra
         )
         last = r.last_bar_date
         for ts, bar in bars.iterrows():
+            div = engine.bar_dividend(bar)
+            if div and pos.days_held >= 1:     # held at the close before the ex-date: paid, like a real account
+                conn.execute("INSERT INTO dividends(trade_id, symbol, date, shares, amount, note) VALUES (?,?,?,?,?,?)",
+                             (r.id, r.symbol, str(ts.date()), pos.shares, div * pos.shares, "paid automatically"))
             res = engine.process_bar(pos, bar, cfg)
             last = str(ts.date())
             if res:

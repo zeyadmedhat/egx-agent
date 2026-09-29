@@ -29,7 +29,7 @@ import yaml
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from egx_agent import breadth, config, db, scan
-from egx_agent.data import prices, shariah
+from egx_agent.data import dividends, prices, shariah
 
 from . import views
 
@@ -132,6 +132,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "events": events, "data_status": views.settings_view(d)["data"],
         "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,
         "scan_url": scan_url, "cautions": views.cautions_map(d),
+        # each stock's next cash dividend: a holder lowers the stop by it before the ex-date (views.exdiv_item)
+        "dividends_coming": dividends.coming(conn, scan_date or datetime.now().date().isoformat()),
     }
     out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
                               "screener": views.screener(d), "history": views.history_data(d),

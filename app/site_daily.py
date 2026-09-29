@@ -146,6 +146,8 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             except Exception as exc:  # the site still builds with the news it has
                 report["news"] = f"not updated ({type(exc).__name__})"
                 health.note(conn, ["News"], ["News"])
+            tried: list[str] = []
+            health.note(conn, scan.history_step(conn, tried, NEWS_BUDGET_S), tried)   # past dividends, a few stocks
         db.set_meta(conn, "site_strategy", strategy)
         data_date = db.get_meta(conn, "scan_data_date")
         final = scan.scan_is_final(conn)
@@ -192,15 +194,22 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         if subs is not None:
             sent = {"sent": 0, "failed": 0, "gone": 0}
             fired = 0
+            weekly = 0
             if data_date and final and subs["connected"]:
                 text = alerts.build_site_message(views.Data(conn, cfg, views.Cache()), site_url)
                 sent = alerts.send_to_subscribers(conn, token, text, data_date)
                 fired = alerts.fire_watch_alerts(conn, token, data_date)
+                week = alerts.week_of(data_date)
+                if alerts.weekly_due(data_date, None) and any(     # each friend once a week (they can turn it off)
+                        s.get("weekly", True) and s.get("weekly_for") != week for s in alerts._subscribers(conn).values()):
+                    weekly = alerts.send_weekly_to_subscribers(
+                        conn, token, alerts.build_weekly(views.Data(conn, cfg, views.Cache()), site_url, mine=False), week)
             report["telegram"] = (f"{subs['connected'] - sent['gone']} connected ({subs['joined']} new, "
                                   f"{subs['left'] + sent['gone']} left), sent to {sent['sent']}"
                                   + (f", {sent['failed']} failed" if sent["failed"] else "")
                                   + (f", {subs['commands']} commands answered" if subs.get("commands") else "")
-                                  + (f", {fired} alerts" if fired else ""))
+                                  + (f", {fired} alerts" if fired else "")
+                                  + (f", weekly summary to {weekly}" if weekly else ""))
         elif not token:
             report["telegram"] = "not set up"
 

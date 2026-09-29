@@ -66,6 +66,7 @@ def load_indicators(conn: sqlite3.Connection, symbols: list[str]) -> tuple[pd.Da
         df = db.load_prices(conn, s)
         if len(df) > 60:
             frames[s] = add_indicators(df, index_df["close"])
+            frames[s]["div"] = dividends.per_share(conn, s, frames[s]["close"])   # paper trades are paid it
     return index_ind, frames
 
 
@@ -73,6 +74,17 @@ def _symbols_to_update(conn: sqlite3.Connection) -> list[str]:
     week_ago = (date.today() - timedelta(days=7)).isoformat()
     rows = conn.execute("SELECT symbol, price_missing_since FROM stocks ORDER BY symbol").fetchall()
     return [r["symbol"] for r in rows if not r["price_missing_since"] or r["price_missing_since"] < week_ago]
+
+
+def history_step(conn: sqlite3.Connection, checked: list[str], budget_s: float = dividends.HISTORY_BUDGET_S) -> list[str]:
+    """A few more stocks' dividend history (data/dividends.update_history). Returns the failed source, if it did."""
+    name = "Dividend history (TradingView)"
+    checked.append(name)
+    try:
+        res = dividends.update_history(conn, budget_s=budget_s)
+    except Exception:
+        return [name]
+    return [name] if res["failed"] and not res["stocks"] else []
 
 
 def process_account(conn: sqlite3.Connection, cfg: dict, ind: dict[str, pd.DataFrame], scan_ts: pd.Timestamp,
@@ -121,6 +133,14 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             failed.append(checked[-1])
     universe.ensure_seeded(conn)
 
+    if update_data and universe.needs_tv_refresh(conn):     # weekly: the stocks Kashif doesn't list
+        checked.append("TradingView stock list")
+        try:
+            universe.refresh_tradingview(conn)
+        except Exception as exc:
+            warnings.append(f"TradingView's stock list not read ({type(exc).__name__})")
+            failed.append(checked[-1])
+
     if update_data:
         syms = _symbols_to_update(conn) + [prices.INDEX_SYMBOL]
         res = prices.update_prices(
@@ -147,6 +167,8 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         except Exception as exc:  # the dividend pages show what was downloaded before
             warnings.append(f"Dividend data not updated ({type(exc).__name__})")
             failed.append("Dividends (TradingView)")
+        say(0.812, "Reading past dividends from TradingView…")
+        failed += history_step(conn, checked)
         say(0.815, "Downloading news, dividends and bonus shares…")
         try:
             first = list(db.latest_scan(conn)[1].get("symbol", []))
@@ -174,6 +196,18 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     risk_off = strategy.is_risk_off(idx_row)
     threshold = strategy.buy_threshold(cfg, risk_off)
 
+    # The prediction model first: its rank orders the BUYs and its best picks are BUYs too (config model_picks).
+    say(0.85, "Updating the prediction model's numbers…")
+    checked.append("Prediction model")
+    try:
+        predict.resolve(conn, cfg)          # what happened to earlier predictions
+        predict.predict_latest(conn, cfg)   # nothing to do until you train the model on the Predict page
+    except Exception as exc:
+        warnings.append(f"Prediction model skipped this time ({exc})")
+        failed.append("Prediction model")
+    model = predict.ranks_for(conn, scan_date) if db.get_meta(conn, "prediction_date") == scan_date else {}
+    model_health = predict.health(conn)["status"] if model else "none"
+
     say(0.88, "Scoring stocks…")
     rows = {}
     for sym, frame in ind.items():
@@ -184,39 +218,53 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     eligible_ret = pd.Series({s: r[0]["ret63"] for s, r in rows.items() if r[1]["eligible"] and not r[2]})
     ranks = strategy.rs_rank(eligible_ret)
 
+    def signal(sym: str) -> dict:
+        ir, sr, _ = rows[sym]
+        rank_pct = float(ranks.get(sym, 0.0))
+        m = model.get(sym)
+        return {
+            "symbol": sym, "sector": stocks.loc[sym].get("sector", "Other"),
+            "score": round(float(strategy.score(sr["base_score"], rank_pct)), 1), "setup": sr["setup"] or "",
+            "close": float(ir["close"]), "entry_high": float(sr["entry_high"]), "entry_limit": float(sr["entry_high"]),
+            "stop": float(sr["stop"]), "target": float(sr["target"]), "atr": float(ir["atr14"]),
+            "avg_value": float(ir["value_avg20"]), "reasons": strategy.explain(ir, sr, rank_pct),
+            "priority": round(m["pct"], 4) if m else None, "source": "rules",
+        }
+
     buys, watches = [], []
     for sym, (ir, sr, flags) in rows.items():
         if not sr["eligible"] or flags or not sr["trend_ok"]:
             continue
-        info = stocks.loc[sym].to_dict()
-        rank_pct = float(ranks.get(sym, 0.0))
-        sc = float(strategy.score(sr["base_score"], rank_pct))
-        item = {
-            "symbol": sym, "sector": info.get("sector", "Other"), "score": round(sc, 1), "setup": sr["setup"] or "",
-            "close": float(ir["close"]), "entry_high": float(sr["entry_high"]), "entry_limit": float(sr["entry_high"]),
-            "stop": float(sr["stop"]), "target": float(sr["target"]), "atr": float(ir["atr14"]),
-            "avg_value": float(ir["value_avg20"]), "reasons": strategy.explain(ir, sr, rank_pct),
-        }
-        if sr["any_setup"] and sc >= threshold:
+        item = signal(sym)
+        if sr["any_setup"] and item["score"] >= threshold:
             buys.append({**item, "action": "BUY"})
-        elif sc >= cfg["watch_score"]:
+        elif item["score"] >= cfg["watch_score"]:
             watches.append({**item, "action": "WATCH"})
-    buys.sort(key=lambda r: -r["score"])
+    # The model's own BUYs: its best-ranked stocks that pass the same liquidity and uptrend checks, none while EGX30
+    # is under its 50-day average, and none while its live results show no edge (predict.health).
+    n_picks = int(cfg.get("model_picks", 0) or 0) if model_health != "bad" else 0
+    added = 0
+    if n_picks and not risk_off:
+        have = {b["symbol"] for b in buys}
+        for sym, m in sorted(model.items(), key=lambda kv: kv[1]["rank"])[:n_picks]:
+            if sym in have or sym not in rows or rows[sym][2] or not rows[sym][1]["eligible"] \
+                    or not rows[sym][1]["trend_ok"]:
+                continue
+            item = signal(sym)
+            item.update(action="BUY", source="model", setup="Model pick",
+                        reasons=[f"The prediction model's #{m['rank']} of {m['of']} stocks today (its top {n_picks} "
+                                 "are BUYs when they pass the liquidity and uptrend checks)"] + item["reasons"])
+            buys.append(item)
+            watches = [w for w in watches if w["symbol"] != sym]
+            added += 1
+    order = lambda r: (-(r["priority"] if r["priority"] is not None else -1.0), -r["score"])   # noqa: E731
+    buys.sort(key=order)       # who gets money first: the model's rank, then the rules' score
     watches.sort(key=lambda r: -r["score"])
     watches = watches[:25]
 
     for r in buys + watches:
         r.update(shares=0, amount=0.0, risk_egp=0.0, size_note="")   # sized for each person when they look
     db.save_scan(conn, scan_date, buys + watches)
-
-    say(0.94, "Updating the prediction model's numbers…")
-    checked.append("Prediction model")
-    try:
-        predict.resolve(conn, cfg)          # what happened to earlier predictions
-        predict.predict_latest(conn, cfg)   # nothing to do until you train the model on the Predict page
-    except Exception as exc:
-        warnings.append(f"Prediction model skipped this time ({exc})")
-        failed.append("Prediction model")
 
     say(0.96, "Updating paper trading…")
     n_accounts = 0
@@ -235,6 +283,8 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         "risk_off": risk_off,
         "buy_threshold": threshold,
         "buys": len(buys),
+        "model_picks": added,
+        "model_health": model_health,
         "watches": len(watches),
         "scanned": len(rows),
         "eligible": int(len(eligible_ret)),

@@ -102,12 +102,22 @@ def problems(conn: sqlite3.Connection, now: datetime | None = None) -> dict[str,
         if age >= MODEL_LATE_DAYS:
             out["model"] = (f"The prediction model is {age} days old (it retrains every {predict.RETRAIN_DAYS}): "
                             f"retraining keeps failing.")
+        try:
+            h = predict.health(conn, meta)
+        except Exception:
+            h = {}
+        if h.get("status") == "bad":
+            out["model_edge"] = (f"The prediction model stopped working lately: over the last {h['days']} sessions its "
+                                 f"top picks made {h['top']:+.2%} a trade, no better than the average stock "
+                                 f"({h['all']:+.2%}). Until that changes it adds no BUYs of its own; it still orders "
+                                 "the rules' BUYs.")
     return out
 
 
 FIXED = {"stale": "New closing prices are coming in again.",
          "run": "The runs work again.",
-         "model": "The prediction model was retrained."}
+         "model": "The prediction model was retrained.",
+         "model_edge": "The prediction model's picks beat the average stock again, so it adds its own BUYs again."}
 
 
 def _fixed_text(key: str) -> str:

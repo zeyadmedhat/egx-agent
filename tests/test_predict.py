@@ -118,14 +118,31 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
     root = tmp_path / "models"
     assert predict.model_dir(conn) == root
     assert (root / "prediction.joblib").exists() and (root / "prediction.json").exists()
-    assert meta["stocks"] == 10 and set(meta["horizons"]) == {"10", "20"}
+    assert meta["stocks"] == 10 and set(meta["horizons"]) == {"10", "20", "5"}     # 5: the paper experiment
     r = meta["horizons"]["10"]
     assert r["years"] and r["all"]["n"] > 1000 and r["grade"] in ("good", "weak", "none")
+    # the honest extras: its test portfolio with and without extra costs, and whether its chances beat the average
+    assert set(r["portfolio"]) == {"cagr", "max_drawdown", "sharpe"}
+    assert r["portfolio_cost"]["cagr"] < r["portfolio"]["cagr"] and r["top_ret_cost"] == r["top"]["ret"] - 0.005
+    assert r["chances"] == {}              # one test year here: nothing earlier to calibrate on (tested below)
+    assert "hold" in meta["horizons"]["5"] and "hold" not in r
+    # the BUY rules replayed with and without the model, on its test years only
+    combo = meta["combo"]
+    assert "error" not in combo, combo
+    assert set(combo) >= {"rules", "ordered", "with_picks", "from", "to", "picks"} and combo["picks"] == 3
+    assert set(combo["rules"]) == {"all", "first", "second"} and "cagr" in combo["with_picks"]["all"]
 
     lt = predict.latest(conn)
     assert len(lt) == 10 and lt["p10"].between(0, 1).all() and set(lt["rank10"]) <= set(range(1, 11))
     day = lt["date"].iloc[0]
-    assert conn.execute("SELECT COUNT(*) FROM predictions WHERE resolved IS NULL").fetchone()[0] == 20
+    assert conn.execute("SELECT COUNT(*) FROM predictions WHERE resolved IS NULL").fetchone()[0] == 30
+    # why it scored each stock as it did: plain words, up and down
+    why = [json.loads(w) for (w,) in conn.execute("SELECT why FROM predictions WHERE horizon=10")]
+    assert all(isinstance(w, list) and len(w) <= 5 for w in why) and any(w for w in why)
+    item = next(x for w in why for x in w)
+    assert set(item) == {"f", "up", "text"} and item["f"] in predict.WHY_TEXT and item["f"] not in predict.MARKET_WIDE
+    ranks = predict.ranks_for(conn, day)
+    assert sorted(v["rank"] for v in ranks.values()) == list(range(1, 11)) and max(v["pct"] for v in ranks.values()) == 1
 
     # 25 sessions later every prediction has an outcome
     for sym in [f"S{i:02d}" for i in range(10)]:
@@ -134,9 +151,65 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
         more = more.rename_axis("date").reset_index()
         more["date"] = more["date"].dt.strftime("%Y-%m-%d")
         db.upsert_prices(conn, sym, more)
-    assert predict.resolve(conn, cfg) == 20
+    assert predict.resolve(conn, cfg) == 30
     live = predict.live_record(conn)
     assert live["10"]["n"] == 10 and live["10"]["all"]["hit"] == 1.0   # a steady doubling reaches every target
+    assert live["5"]["n"] == 10 and live["5"]["all"]["hit"] == 1.0 and live["5"]["picks"]["n"] == 5   # sold on day 5
+    assert live["5"]["all"]["ret"] > 0.1
+
+
+def test_chances_are_judged_against_last_years_average():
+    rng = np.random.default_rng(3)
+    rows = []
+    for year in (2022, 2023, 2024):
+        for i in range(3000):
+            p = rng.uniform(0.05, 0.5)
+            rows.append({"date": pd.Timestamp(f"{year}-03-01") + pd.Timedelta(days=i % 200), "prob": p,
+                         "hit10": float(rng.uniform() < p)})
+    sharp = pd.DataFrame(rows)
+    q = predict.chance_quality(sharp, 10)
+    assert set(q) == {"brier", "brier_base", "skill", "useful"} and q["useful"] and q["brier"] < q["brier_base"]
+    blind = sharp.assign(prob=rng.uniform(0.05, 0.5, len(sharp)))          # scores unrelated to what happened
+    assert not predict.chance_quality(blind, 10)["useful"]
+
+
+def test_the_why_words():
+    assert predict.why_text("ret63", 0.2412) == "3-month change +24%"
+    assert predict.why_text("ret5", -0.012) == "1-week change -1.2%"
+    assert predict.why_text("vol_ratio", 2.13) == "Volume vs usual 2.1×"
+    assert predict.why_text("rank_ret63", 0.93) == "3-month change vs other stocks: top 7%"
+    assert predict.why_text("rank_atr", 0.1) == "Daily range vs other stocks: bottom 10%"
+    assert predict.why_text("breakout", 1.0) == "Breakout setup: yes"
+    assert predict.why_text("div_ex_ahead", 12.0) == "Next ex-dividend date: in 12 days"
+    assert predict.why_text("div_ex_ahead", 9999.0) == "Next ex-dividend date: none"
+    assert predict.why_text("macd_hist", 0.01) == "MACD momentum"
+    assert predict.why_text("ret21", float("nan")) == "1-month change"
+
+
+def test_the_live_check_says_when_the_model_stopped_working(tmp_path):
+    conn = db.connect(tmp_path / "egx.db")
+    meta = {"live_since": "2026-01-01", "horizons": {"10": {"top": {"ret": 0.02, "hit": 0.3},
+                                                            "all": {"ret": 0.005, "hit": 0.15}}}}
+    days = pd.bdate_range("2026-02-01", periods=40, freq="C", weekmask="Sun Mon Tue Wed Thu")
+
+    def fill(top_ret, all_ret, n_days):
+        conn.execute("DELETE FROM predictions")
+        for d in days[:n_days]:
+            for i in range(20):            # stock 19 is the day's best: the top 10% (2 of 20)
+                ret = top_ret if i >= 18 else all_ret
+                conn.execute("INSERT INTO predictions(date, symbol, horizon, prob, raw, hit, ret, resolved) "
+                             "VALUES (?,?,10,0.2,?,?,?, 'done')", (str(d.date()), f"S{i}", i / 20, int(ret > 0), ret))
+        conn.commit()
+    fill(0.03, 0.0, 10)
+    assert predict.health(conn, meta)["status"] == "early"
+    fill(0.03, 0.0, 40)
+    h = predict.health(conn, meta)
+    assert h["status"] == "ok" and h["days"] == 40 and h["edge"] > 0.02
+    fill(0.004, 0.0, 40)
+    assert predict.health(conn, meta)["status"] == "weak"
+    fill(-0.01, 0.0, 40)
+    assert predict.health(conn, meta)["status"] == "bad"
+    assert predict.health(conn, {})["status"] == "none"
 
 
 def test_retraining_is_due_after_a_month_or_a_settings_change(tmp_path, cfg, fast_model):

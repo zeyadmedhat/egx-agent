@@ -51,7 +51,8 @@ def assert_same(py: dict, js: dict, keys):
 def bars_of(ind: pd.DataFrame) -> list[dict]:
     num = lambda v: None if pd.isna(v) else float(v)  # noqa: E731
     return [{"date": str(t.date()), "open": float(r.open), "high": float(r.high), "low": float(r.low),
-             "close": float(r.close), "atr14": num(r.atr14), "ema50": num(r.ema50)} for t, r in ind.iterrows()]
+             "close": float(r.close), "atr14": num(r.atr14), "ema50": num(r.ema50),
+             "div": float(r["div"]) if "div" in ind and r["div"] > 0 else 0} for t, r in ind.iterrows()]
 
 
 def market(n=320, seed=11):

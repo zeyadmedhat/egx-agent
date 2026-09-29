@@ -38,9 +38,10 @@ async function barsFor(c, symbols) {
     const s = page && page.series;
     if (!s) { c.bars[sym] = []; return; }
     const bars = [];
+    const divs = s.divs || {};            // cash dividend per share by ex-date
     for (let i = 0; i < s.time.length; i++) {
       bars.push({ date: s.time[i], open: E.num(s.open[i]), high: E.num(s.high[i]), low: E.num(s.low[i]),
-        close: E.num(s.close[i]), atr14: E.num(s.atr14[i]), ema50: E.num(s.ema50[i]) });
+        close: E.num(s.close[i]), atr14: E.num(s.atr14[i]), ema50: E.num(s.ema50[i]), div: divs[s.time[i]] || 0 });
     }
     c.bars[sym] = bars;
   }));
@@ -65,12 +66,15 @@ function signals(c) {
     }
   }
   let sized = buys;
+  // Who gets money first: the prediction model's rank that day, then the rules' score (views.signal_order).
+  const pri = r => (r.priority == null ? -1 : r.priority);
+  const order = (a, b) => pri(b) - pri(a) || b.score - a.score;
   if (buys.length) {
     const real = E.accountSummary(c.book, 'real', c.cfg, closes(c), c.core.events);
-    sized = E.allocate([...buys].sort((a, b) => b.score - a.score), real.equity, real.cash,
+    sized = E.allocate([...buys].sort(order), real.equity, real.cash,
       E.positionsForAllocation(c.book, 'real', ['open']), c.cfg, !!(c.core.market && c.core.market.risk_off));
   }
-  const rows = [...sized, ...other].sort((a, b) => (a.action !== 'BUY') - (b.action !== 'BUY') || b.score - a.score);
+  const rows = [...sized, ...other].sort((a, b) => (a.action !== 'BUY') - (b.action !== 'BUY') || order(a, b));
   c.signals = [c.core.scan_date, rows];
   return c.signals;
 }
@@ -164,11 +168,25 @@ function orders(c, positions) {
       holds.push({ symbol: sym, stop: p.stop, target: p.target, day: p.day });
     }
   }
+  // A position whose stock goes ex-dividend at the next session: lower the stop first (views.exdiv_item).
+  const coming = c.core.dividends_coming || {};
+  for (const p of positions) {
+    const div = coming[p.symbol];
+    if (div && div.ex_date === session && div.amount && ['HOLD', 'TIGHTEN STOP', 'REVIEW'].includes(p.status)) {
+      const amount = +div.amount, to = p.stop - amount;
+      items.push({ symbol: p.symbol, trade_id: p.id, shares: p.shares, key: `exdiv:${p.symbol}`, kind: 'stop',
+        from: p.stop, to, title: `Lower your ${p.symbol} stop to ${E.px(to)} before the open`,
+        detail: `${p.symbol} goes ex-dividend: the price opens about ${E.g(amount)} EGP lower, and you get `
+          + `${E.g(amount)} EGP a share (${E.int(amount * p.shares)} EGP). The agent moves the stop and the target `
+          + "down by the same amount, so the drop alone doesn't sell." });
+    }
+  }
   for (const r of rows.filter(x => x.action === 'BUY')) {
     if (r.shares > 0) {
       items.push({
         symbol: r.symbol, key: `buy:${r.symbol}`, kind: 'buy', info: info(c, r.symbol), shares: r.shares,
         limit: r.entry_high, stop: r.stop, target: r.target, amount: r.amount, risk_egp: r.risk_egp,
+        source: r.source || 'rules',
         title: `Buy ${E.int(r.shares)} ${r.symbol}, paying no more than ${E.px(r.entry_high)}`,
         detail: `Use a limit order; skip it if it opens higher. Once filled: stop ${E.px(r.stop)}, `
           + `target ${E.px(r.target)}, max loss ${E.int(r.risk_egp)} EGP.`,

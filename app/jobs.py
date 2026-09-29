@@ -149,6 +149,10 @@ def send_alerts(site: "accounts.Site | None", conn, cfg: dict) -> str:
     """Telegram after a scan: to you on your Mac, or to everyone who connected on the website."""
     if site is None or not site.multi_user:
         try:
+            alerts.weekly_after_scan(conn, cfg)  # after Thursday's close, once a week
+        except Exception:  # the daily message still goes
+            traceback.print_exc()
+        try:
             return alerts.after_scan(conn, cfg)  # once per closing-price date
         except alerts.TelegramError as exc:
             return f"failed: {exc}"
@@ -256,7 +260,7 @@ def _backtest(conn, say: Progress, years: int, which: str, results_path: Path, c
         say(0.05, "Loading price history…")
         data = prices.load_all(conn, list(table.index))
         say(0.35, "Calculating indicators and signals for every day…")
-        _prepared["prep"] = backtest.prepare(data, db.load_prices(conn, prices.INDEX_SYMBOL), table, cfg)
+        _prepared["prep"] = backtest.prepare(data, db.load_prices(conn, prices.INDEX_SYMBOL), table, cfg, conn)
         _prepared["key"] = key
     prep = _prepared["prep"]
     symbols = None

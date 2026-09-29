@@ -1,16 +1,30 @@
-"""Every EGX company's cash dividends, from TradingView's screener (one request for the whole market).
+"""Every EGX company's cash dividends, from TradingView.
 
-TradingView gives each stock's latest dividend, the next one once it's announced, and the yield. Each one seen is
-kept, so the history grows from the first download on. Bonus shares and splits are found in the prices instead
-(price_events, data/prices.py).
+- The screener (one request for the whole market) gives each stock's latest dividend, the next one once it's
+  announced, and the yield: cash_dividends.
+- The whole history comes from TradingView's prices: the same chart "adjusted for dividends" and not. On each
+  ex-date the two part by exactly that dividend, so every step in their ratio is one dividend, back to 2001
+  (update_history → dividend_history). A few stocks a run, each again every month.
+
+The exit rules use them (per_share): on the ex-date the price drops by the dividend, so an open position's stop and
+target move down by it too, and the backtest and paper trades are paid it. Bonus shares and splits are found in the
+prices instead (price_events, data/prices.py).
 """
 from __future__ import annotations
 
+import json
+import logging
 import sqlite3
-from datetime import datetime, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
+from typing import Callable
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import requests
+
+from .. import db
+from . import prices
 
 URL = "https://scanner.tradingview.com/egypt/scan"
 COLUMNS = ["name", "dividends_yield_current", "dividend_ex_date_recent", "dividend_amount_recent",
@@ -54,3 +68,141 @@ def save(conn: sqlite3.Connection, rows: list[dict]) -> int:
 
 def update(conn: sqlite3.Connection) -> int:
     return save(conn, fetch())
+
+
+# ------------------------------------------------------------------ the whole history, from the prices
+
+HISTORY_EVERY_DAYS = 30
+HISTORY_BUDGET_S = 120        # seconds a run spends on it: about 10 stocks, so the first full pass takes a few days
+HISTORY_BARS = 5000           # all of it (EGX data on TradingView starts around 2001)
+MAX_YIELD = 0.3               # a bigger "dividend" is a re-basing TradingView got wrong, not cash
+STEP = 0.9995                 # a change under 0.05% in the ratio is rounding, not a dividend
+
+
+def _feed(adjustment: str):
+    """A TradingView client whose charts use this adjustment ("splits", the agent's usual, or "dividends")."""
+    logging.getLogger("tvDatafeed.main").setLevel(logging.CRITICAL)
+    from tvDatafeed import TvDatafeed
+
+    class Feed(TvDatafeed):
+        def _TvDatafeed__send_message(self, func, args):     # the library's own (private) sender
+            if func == "resolve_symbol":
+                args = [a.replace('"adjustment":"splits"', f'"adjustment":"{adjustment}"') if isinstance(a, str)
+                        else a for a in args]
+            return super()._TvDatafeed__send_message(func, args)
+    return Feed()
+
+
+def steps(raw: pd.Series, adjusted: pd.Series) -> list[tuple[str, float]]:
+    """(ex_date, yield) for every dividend: where adjusted ÷ raw closes steps up from one session to the next."""
+    j = pd.concat({"raw": raw, "adj": adjusted}, axis=1).dropna()
+    j = j[(j["raw"] > 0) & (j["adj"] > 0)]
+    if len(j) < 2:
+        return []
+    ratio = j["adj"] / j["raw"]
+    step = (ratio / ratio.shift(-1)).iloc[:-1]
+    out = []
+    for i in (step < STEP).to_numpy().nonzero()[0]:
+        y = 1 - float(step.iloc[i])
+        if y <= MAX_YIELD:
+            out.append((str(j.index[i + 1].date()), round(y, 6)))
+    return out
+
+
+def fetch_history(symbol: str, raw_feed, adj_feed, n_bars: int = HISTORY_BARS) -> list[tuple[str, float]] | None:
+    from tvDatafeed import Interval
+
+    tv = prices.TV_ALIASES.get(symbol, symbol)
+    got = []
+    for feed in (raw_feed, adj_feed):
+        df = None
+        for attempt in range(3):          # the connection drops now and then, as for the prices
+            try:
+                df = feed.get_hist(symbol=tv, exchange="EGX", interval=Interval.in_daily, n_bars=n_bars)
+            except Exception:
+                df = None
+            if df is not None and not df.empty:
+                break
+            time.sleep(1.5 * (attempt + 1))
+        if df is None or df.empty:
+            return None
+        s = df["close"].copy()
+        s.index = pd.to_datetime(s.index).normalize()
+        got.append(s[~s.index.duplicated(keep="last")])
+    return steps(*got)
+
+
+def update_history(conn: sqlite3.Connection, budget_s: float = HISTORY_BUDGET_S,
+                   fetch_one: Callable[[str], list | None] | None = None) -> dict:
+    """Read the dividend history of the stocks checked longest ago (never-checked ones first), for up to budget_s
+    seconds. Each stock is read again every HISTORY_EVERY_DAYS. Returns counts (and how many are still to do)."""
+    checked = json.loads(db.get_meta(conn, "div_history_checked") or "{}")
+    due = (date.today() - timedelta(days=HISTORY_EVERY_DAYS)).isoformat()
+    symbols = [r[0] for r in conn.execute(
+        "SELECT symbol FROM stocks WHERE price_missing_since IS NULL AND symbol IN (SELECT DISTINCT symbol FROM prices)")]
+    todo = sorted((s for s in symbols if checked.get(s, "") < due), key=lambda s: checked.get(s, ""))
+    if fetch_one is None:
+        raw_feed, adj_feed = _feed("splits"), _feed("dividends")
+        fetch_one = lambda s: fetch_history(s, raw_feed, adj_feed)   # noqa: E731
+    res = {"stocks": 0, "dividends": 0, "failed": 0, "left": len(todo)}
+    start, misses = time.monotonic(), 0
+    for sym in todo:
+        if time.monotonic() - start > budget_s or misses >= 5:     # out of time, or TradingView isn't answering
+            break
+        try:
+            rows = fetch_one(sym)
+        except Exception:
+            rows = None
+        if rows is None:
+            res["failed"] += 1
+            misses += 1
+            continue
+        misses = 0
+        before = conn.execute("SELECT COUNT(*) FROM dividend_history WHERE symbol=?", (sym,)).fetchone()[0]
+        conn.execute("DELETE FROM dividend_history WHERE symbol=?", (sym,))
+        conn.executemany("INSERT OR REPLACE INTO dividend_history(symbol, ex_date, yield) VALUES (?,?,?)",
+                         [(sym, ex, y) for ex, y in rows])
+        checked[sym] = date.today().isoformat()
+        res["stocks"] += 1
+        res["dividends"] += max(0, len(rows) - before)
+        res["left"] -= 1
+        conn.commit()
+    db.set_meta(conn, "div_history_checked", json.dumps(checked))
+    return res
+
+
+def per_share(conn: sqlite3.Connection, symbol: str, closes: pd.Series) -> pd.Series:
+    """The cash dividend per share on each ex-date, in the units of `closes` (a stock's closing prices, indexed by
+    date): 0 on every other day. TradingView's announced amount when no bonus shares or split re-based the prices
+    since; otherwise the history's yield × the close the session before, which is right either way."""
+    out = pd.Series(0.0, index=closes.index)
+    if closes.empty:
+        return out
+    pos = {d: i for i, d in enumerate(closes.index)}
+
+    def prev_close(day: str) -> float | None:
+        i = pos.get(pd.Timestamp(day))
+        return float(closes.iloc[i - 1]) if i else None
+
+    for ex, y in conn.execute("SELECT ex_date, yield FROM dividend_history WHERE symbol=?", (symbol,)):
+        pc = prev_close(ex)
+        if pc:
+            out[pd.Timestamp(ex)] = y * pc
+    last_rebase = conn.execute("SELECT MAX(ex_date) FROM price_events WHERE symbol=?", (symbol,)).fetchone()[0] or ""
+    names = (symbol, prices.TV_ALIASES.get(symbol, symbol))
+    for ex, amount in conn.execute("SELECT ex_date, amount FROM cash_dividends WHERE symbol IN (?,?)", names):
+        pc = prev_close(ex)
+        if pc and amount and ex >= last_rebase and amount / pc <= MAX_YIELD:
+            out[pd.Timestamp(ex)] = float(amount)
+    return out
+
+
+def coming(conn: sqlite3.Connection, after: str) -> dict[str, dict]:
+    """Each stock's next announced cash dividend after `after` (YYYY-MM-DD): {symbol: {ex_date, amount}}, with the
+    agent's own symbols (TradingView's names for a few companies differ)."""
+    back = {v: k for k, v in prices.TV_ALIASES.items()}
+    out = {}
+    for r in conn.execute("SELECT symbol, MIN(ex_date) AS ex_date, amount FROM cash_dividends WHERE ex_date > ? "
+                          "GROUP BY symbol", (after,)):
+        out[back.get(r[0], r[0])] = {"ex_date": r[1], "amount": r[2]}
+    return out

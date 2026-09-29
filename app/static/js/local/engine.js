@@ -5,7 +5,8 @@
 //
 // A "book" is one person's data, shaped like the Mac's database tables:
 //   { trades: [...], fills: [...], dividends: [...], adjustments: [...], next_id: 1 }
-// Bars are { date: 'YYYY-MM-DD', open, high, low, close, atr14, ema50 } (missing numbers are NaN).
+// Bars are { date: 'YYYY-MM-DD', open, high, low, close, atr14, ema50, div } (missing numbers are NaN; div is the
+// cash dividend going ex that day, 0 on other days).
 
 // ------------------------------------------------------------------ small helpers
 export const f2 = v => Number(v).toFixed(2);
@@ -85,9 +86,18 @@ function stopLabel(p) {
 }
 
 // Advance a position through one daily bar. Returns [exit price, reason] when it exits.
+// The stock goes ex-dividend today: the price drops by the dividend, which the holder gets, so the stop, the target
+// and the highest close move down by it too (engine.ex_dividend).
+export function exDividend(p, amount) {
+  p.stop -= amount;
+  p.target -= amount;
+  p.highest_close -= amount;
+}
+
 export function processBar(p, bar, cfg) {
   if (p.exit_next_open) return [bar.open, p.exit_next_open];
   p.days_held += 1;
+  if (p.days_held >= 2 && bar.div > 0) exDividend(p, bar.div);   // held at the close before: the dividend is ours
   const { open: o, high: h, low: l } = bar;
   if (o <= p.stop) return [o, `${stopLabel(p)} (gap down)`];
   if (l <= p.stop) return [p.stop, stopLabel(p)];

@@ -214,7 +214,7 @@ def test_pages_messages_and_the_site_show_the_news(tmp_path, cfg):
     feed = views.news_feed(d)
     assert {n["symbol"] for n in feed["items"]} == {"COMI", ""}
     lines = alerts._caution_lines(warn["MHOT"])
-    assert "Ex-dividend" in lines[0] and "can hit the stop" in lines[0]
+    assert "Ex-dividend" in lines[0] and "lower the stop" in lines[0]
     files = static_site.public_data(conn, cfg)
     assert files["core"]["cautions"]["MHOT"][0]["kind"] == "ex_dividend"
     assert files["news"]["items"] and "held" not in files["news"]

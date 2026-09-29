@@ -58,6 +58,8 @@ def run(db_path: Path | str, health_url: str = HEALTH) -> tuple[bool, str]:
             parts.append("Prices are up to date.")
         try:
             parts.append(f"Telegram: {alerts.after_scan(conn, cfg)}.")
+            if weekly := alerts.weekly_after_scan(conn, cfg):
+                parts.append(f"Telegram: {weekly}.")
             ok = True
         except alerts.TelegramError as exc:
             parts.append(f"Telegram failed: {exc}")

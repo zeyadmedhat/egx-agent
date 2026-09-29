@@ -67,7 +67,11 @@ In **Settings → Alerts**:
 3. **Alarms.** With Telegram connected, you also get a message when something breaks, and another when it's fixed
    (`app/health.py`): a scan that crashed, no new closing prices for 2 sessions in a row (a long holiday looks the
    same, so the message says so), a data source (prices, Egypt data, dividends, a news site, Kashif) failing on
-   every try for a whole day, or the prediction model not retrained for 40 days. One bad run doesn't count.
+   every try for a whole day, the prediction model not retrained for 40 days, or its live picks no better than the
+   average stock. One bad run doesn't count.
+4. **Weekly summary.** After Thursday's close (or on Friday if Thursday's scan came late): the week's EGX30 move,
+   the market switch, the week's BUY signals, how the month before's signals are doing, your positions, the paper
+   account and whether the prediction model is on track.
 
 ## Bonus shares, splits and dividends
 
@@ -79,6 +83,14 @@ change, choose *My shares didn't change*. Paper trades are updated by themselves
 
 Record cash dividends from the position on My Portfolio (*Record a cash dividend*). They count in that position's
 P&L and in your realized P&L.
+
+**Cash dividends and your stop.** On the ex-date the price opens lower by the dividend, which you receive in cash,
+so the agent moves that position's stop and target down by the same amount that day. The evening before, the orders
+list says *Lower your … stop to … before the open*, so the drop alone doesn't sell you. Paper trades are paid their
+dividends automatically, and the backtest counts them too. The whole dividend history comes from TradingView:
+its chart "adjusted for dividends" parts from the normal one by exactly each dividend on its ex-date
+(`egx_agent/data/dividends.py`; a few stocks each run, every stock again each month). Tested 2016–2026, counting
+dividends took the rules' backtest from 13.6% to 14.4% a year, and moving the stop for them to 14.8%.
 
 ## Shariah badges
 
@@ -94,7 +106,13 @@ By default this is information only. To only get BUY signals for compliant stock
 
 ## The rules in one minute
 
-- **Stocks:** all EGX stocks with at least 5M EGP traded per day, price ≥ 1 EGP, one year of history.
+- **Stocks:** all EGX stocks with at least 5M EGP traded per day, price ≥ 1 EGP, one year of history. The list is
+  Kashif's, plus (weekly) the stocks on TradingView's EGX list that Kashif leaves out, several of them big banks
+  (Housing & Development, QNB, Suez Canal Bank…). Those have no Shariah status, so a Shariah filter skips them.
+- **Order:** when there are more BUYs than money or slots, the prediction model's rank decides who goes first.
+- **Model picks:** the model's top 3 stocks of the day that pass the same liquidity and uptrend checks are BUYs too,
+  with the usual stop, target and sizing (none while EGX30 is under its 50-day average, or while the model's live
+  results show no edge). *Settings → Prediction model's own BUYs a day* (0 turns it off).
 - **Entry (breakout):** price above its 20- and 50-day averages, closes above its 20-day high on at least
   1.5× normal volume, ADX above 20. Stocks are scored 0–100 (trend, strength vs other stocks, volume,
   room to run) and need 70+.
@@ -167,10 +185,10 @@ buybacks since 2005, with the day each was announced and its ex-date (`egx_agent
 many days until the next announced ex-date and since the last announcement, each only from the day after it was
 announced. In the Sep 2026 tests (several random seeds) it lifted the 20-session model's top 10% from +1.21% to
 +1.41% a trade (better than the average stock in 10 of 11 years, from 8), and the 10-session model's, now with the
-Egypt data and the same LightGBM model, from +0.90% to +1.04% (10 of 11 years, from 9). Buying shortly before an
-ex-dividend date is the clearest pattern: the price drops by the dividend that morning, so rule BUYs with an ex-date
-inside the month reached the target 22% of the time against 36%. The BUY rules themselves don't skip them (you still
-get the dividend, and the backtest can't count it), but every such signal carries a warning.
+Egypt data and the same LightGBM model, from +0.90% to +1.04% (10 of 11 years, from 9). Rule BUYs with an ex-date
+inside the month reach the target less often (the price drops by the dividend), but counting the dividend itself
+they did better than the others (+2.9% against +1.7% a trade, 38 trades), so they aren't skipped: the stop moves down
+for the dividend instead, and the signal says so.
 
 **News.** Headlines from Mubasher (each stock's page, Arabic and English, and the latest Egypt news), Reuters and
 Zawya (through TradingView, tagged to the stock), Al Borsa News and Daily News Egypt. Only headlines, dates and links
@@ -188,7 +206,37 @@ and in Telegram.
 **After that** it updates its numbers after every scan and retrains by itself once a month (or after you change
 the stop or target settings, or the model's design changes). It gives a chance only for its top 10% each day: its
 test results are about those. *Since it went live* shows how this version's predictions turned out, next to its
-test results. That's the real test. Consider using it as a filter for BUYs only once the live record agrees with the test.
+test results. That's the real test.
+
+**How the BUYs use it (since Sep 2026).** Its 10-session rank decides which BUYs get money first, and its top 3 picks
+that pass the liquidity and uptrend checks are BUYs too. Each retraining replays the rules day by day on the years
+it was tested on, with only the scores it gave before seeing each year, and shows the result on the Predict page. When
+it was built (2016–2026, dividends counted): the rules alone 15.3% a year, in the model's order 19.8%, plus its top 3
+26.9% with the same worst drop (−20%), better in each half: to Aug 2021 (7.5% → 11.0%) and after (25.0% → 46.9%). Several versions were tried, so the best one flatters itself
+a little: the live record is what counts.
+
+**The live check.** After every scan it compares the last 60 decided sessions of its live top picks with the
+average stock (`predict.health`). *On track*, *weaker* or *not working*: when it's not working (its picks no better
+than the average), it adds no BUYs of its own, you get an alarm, and it goes back to normal by itself once it works
+again.
+
+**Why it likes a stock.** Each stock's strongest reasons up (green) and down (red), from the model's own trees (like
+SHAP), on the Today cards, the Predict table and the stock page. Whole-market measures are left out: they move every
+stock alike.
+
+**Honest numbers.** The Predict page also shows its top 5 as a test portfolio (every 10 or 20 sessions, sized by the
+market switch), the same with 0.5% more cost per trade, and whether its chance numbers beat simply giving every stock
+the average chance (checked year by year). For 20 sessions they don't: use its rank, not the %.
+
+**5-day experiment (paper only).** A third model picks 5 stocks to buy at the next open and sell 5 sessions later.
+Its tests look strong (with the market switch, +65% a year even with 0.5% more cost), but it trades every week and
+has no stop, so it's only tracked on the Predict page. It won't become signals unless its live results match its
+tests for a few months.
+
+**Tested and not used (Sep 2026):** other exits (trailing sooner or later, wider or tighter, no trend exit, partial
+profits, other time limits; none was better in both halves), Bollinger/volume/company-size measures (no gain),
+ChatGPT's 3-group 5-day target (worse than the agent's own), and companies that left the exchange (TradingView has no
+prices for them, so the tests still see only today's companies).
 
 ## The website for friends (GitHub Pages)
 
@@ -213,7 +261,8 @@ without a server and without your Mac being on.
   *Settings → Connect Telegram* on the site, then Start. The job checks for new people every 3 hours, answers
   "Connected", and from then on sends each of them the day's signals after every close (without share counts:
   each person sizes them on the site). `/stop` stops them. The link comes from the password, so only people who can
-  open the site have it, and changing the password disconnects everyone until they press the new link.
+  open the site have it, and changing the password disconnects everyone until they press the new link. After
+  Thursday's close each friend also gets the week's summary (`/weekly off` stops it).
 - **Alarms, to you only:** add the `OWNER_TELEGRAM` secret with your Telegram @username and press *Connect
   Telegram* on the site like a friend. You then get the same alarms as on the Mac (a failed run, prices stuck
   for 2 sessions, a source down for a day, the model not retrained), once when they start and once when they're

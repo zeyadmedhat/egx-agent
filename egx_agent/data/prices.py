@@ -137,12 +137,13 @@ def update_prices(
     """Download new bars for every symbol. Returns counts of updated / failed / never-traded symbols."""
     provider = provider or TvProvider(aliases=aliases)
     plan = {s: db.last_price_date(conn, s) for s in symbols}
+    full_years = max(years, int(db.get_meta(conn, "history_years_loaded") or 0))  # keep a deeper download deep
     lock = threading.Lock()
     done, updated, failed, readjusted, not_traded = 0, [], [], [], []
     rebased: dict[str, dict] = {}
 
-    def work(sym: str):
-        return sym, provider.fetch(sym, _bars_needed(plan[sym], years))
+    def work(sym: str):   # a stock new to the agent gets as much history as the others
+        return sym, provider.fetch(sym, _bars_needed(plan[sym], years if plan[sym] else full_years))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(work, s) for s in symbols]
@@ -166,7 +167,6 @@ def update_prices(
                     progress(done, len(symbols), sym)
 
     events = []
-    full_years = max(years, int(db.get_meta(conn, "history_years_loaded") or 0))  # keep a deeper download deep
     for sym in readjusted:
         full = provider.fetch(sym, _bars_needed(None, full_years))
         if full is not None:

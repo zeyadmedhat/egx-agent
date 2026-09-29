@@ -98,9 +98,10 @@ def refresh_kashif(conn: sqlite3.Connection, delay: float = 1.0) -> dict:
         members[col] = {r["symbol"] for r in _fetch_all_pages(session, {"search": "", "indexIds": idx}, delay)}
 
     now = datetime.now().isoformat(timespec="seconds")
-    # Drop symbols Kashif no longer lists (delisted / renamed); their price history stays in the db.
+    # Drop symbols Kashif no longer lists (delisted / renamed); their price history stays in the db. Stocks the
+    # agent took from TradingView's list because Kashif doesn't cover them stay (data/universe.py).
     placeholders = ",".join("?" * len(by_symbol))
-    conn.execute(f"DELETE FROM stocks WHERE symbol NOT IN ({placeholders})", list(by_symbol))
+    conn.execute(f"DELETE FROM stocks WHERE symbol NOT IN ({placeholders}) AND listed_by IS NULL", list(by_symbol))
     conn.execute("UPDATE stocks SET kashif_status=NULL, egx30=0, egx70=0, egx33=0")
     for sym, row in by_symbol.items():
         conn.execute(
@@ -111,7 +112,7 @@ def refresh_kashif(conn: sqlite3.Connection, delay: float = 1.0) -> dict:
                    kashif_status=excluded.kashif_status, kashif_label=excluded.kashif_label, purity=excluded.purity,
                    purification_pct=excluded.purification_pct, statements_date=excluded.statements_date,
                    egx30=excluded.egx30, egx70=excluded.egx70, egx33=excluded.egx33,
-                   kashif_updated=excluded.kashif_updated""",
+                   kashif_updated=excluded.kashif_updated, listed_by=NULL""",
             (
                 sym, row["name_ar"], row["sector_ar"], row["kashif_status"], row["kashif_label"], row["purity"],
                 row["purification_pct"], row["statements_date"],

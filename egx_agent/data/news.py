@@ -518,9 +518,12 @@ def cautions(conn: sqlite3.Connection, symbol: str, today: str, hold_days: int =
     if div and div.get("ex_date") and tomorrow <= div["ex_date"] <= end:
         exes[div["ex_date"]] = div.get("amount")
     for ex, amount in sorted(exes.items()):
-        out.insert(0, {"kind": "ex_dividend", "date": ex, "level": "warn", "amount": amount,
+        # Not a reason to skip a BUY: counting the dividend, BUYs just before an ex-date did as well as the others
+        # (2016–2026). What matters is that the drop doesn't sell by itself, so the stop moves down for it.
+        out.insert(0, {"kind": "ex_dividend", "date": ex, "level": "info", "amount": amount,
                        "text": f"Goes ex-dividend on {ex}" + (f" ({amount:g} EGP a share)" if amount else "")
-                               + ": the price drops by the dividend that morning, which can hit the stop."})
+                               + ": the price drops by the dividend that morning and holders get it in cash. "
+                                 "The agent lowers the stop and target by the same amount that day."})
     since = (day - timedelta(days=news_days)).strftime("%Y-%m-%dT00:00")
     for n in _rows(conn.execute(
             "SELECT source, published, title, url, tags, tone FROM news WHERE symbol = ? AND published >= ? "

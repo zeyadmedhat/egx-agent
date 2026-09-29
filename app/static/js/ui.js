@@ -180,6 +180,15 @@ export function Chance({ p, base, top }) {
     title=${base ? `The average liquid stock: ${fmt.pct(base, 0, false)}` : ''}>${fmt.pct(p, 0, false)}</span>`;
 }
 
+// Why the prediction model scored a stock as it did: the measures that pushed its score up (green) and down (red),
+// from its own trees (predict.explain). Whole-market measures are left out: they move every stock alike.
+export function Why({ items }) {
+  if (!items || !items.length) return null;
+  return html`<ul class="model-why" aria-label="Why the model scored it like this">${items.map(x => html`<li
+    class=${x.up ? 'up' : 'down'} key=${x.f} title=${x.up ? 'Pushed its score up' : 'Pulled its score down'}>
+    <span aria-hidden="true">${x.up ? '▲' : '▼'}</span>${x.text}</li>`)}</ul>`;
+}
+
 // A star that adds the stock to your watchlist (or takes it off).
 export function WatchStar({ symbol, label }) {
   const list = useStore(s => s.watchlist) || [];

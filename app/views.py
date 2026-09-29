@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from egx_agent import breadth, config, corporate, db, portfolio, predict, risk, scan, strategy
-from egx_agent.data import news, prices, shariah, universe
+from egx_agent.data import dividends, news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
 EGX_DAY = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
@@ -155,7 +155,9 @@ class Data:
             if symbol == prices.INDEX_SYMBOL:
                 return add_indicators(df)
             index_df = self.prices(prices.INDEX_SYMBOL)
-            return add_indicators(df, index_df["close"] if len(index_df) else None)
+            ind = add_indicators(df, index_df["close"] if len(index_df) else None)
+            ind["div"] = dividends.per_share(self.conn, symbol, ind["close"])   # the exit rules move stops for it
+            return ind
         return self.cache.get(self.version, ("ind", symbol), build)
 
     def last_two(self) -> dict[str, dict]:
@@ -226,11 +228,18 @@ def signals(d: Data) -> tuple[str | None, list[dict]]:
             other.append(r)
     if buys:
         real = portfolio.account_summary(d.conn, "real", d.cfg, d.closes())
-        buys = risk.allocate(sorted(buys, key=lambda r: -r["score"]), real["equity"], real["cash"],
+        buys = risk.allocate(sorted(buys, key=signal_order), real["equity"], real["cash"],
                              portfolio.positions_for_allocation(d.conn, "real", ("open",)), d.cfg,
                              bool(market_info(d.conn).get("risk_off")))
-    d._signals = scan_date, sorted(buys + other, key=lambda r: (r["action"] != "BUY", -r["score"]))
+    d._signals = scan_date, sorted(buys + other, key=lambda r: (r["action"] != "BUY", *signal_order(r)))
     return d._signals
+
+
+def signal_order(r: dict) -> tuple:
+    """Who gets money first: the prediction model's rank that day (scans.priority), then the rules' score.
+    Tested: the same BUYs in the model's order made 20% a year against 15% (2016–2026, its test years only)."""
+    p = r.get("priority")
+    return -(p if p is not None else -1.0), -(r.get("score") or 0)
 
 
 def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
@@ -444,6 +453,9 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     out["cautions"] = cautions_map(d).get(sym, [])
     shown = ind if tail is None else ind.tail(tail)
     out["series"] = {"time": [str(t.date()) for t in shown.index], **{c: column(shown[c]) for c in cols}}
+    if "div" in shown:   # cash dividends by ex-date: the exit rules in the browser move the stop for them too
+        paid = shown["div"][shown["div"] > 0]
+        out["series"]["divs"] = {str(t.date()): round(float(v), 6) for t, v in paid.items()}
     return out
 
 
@@ -736,12 +748,17 @@ def orders(d: Data, positions: list[dict] | None = None) -> dict | None:
                           "title": f"Decide on {sym}: day {p['day']} without progress", "detail": p["reason"]})
         elif st == "HOLD":
             holds.append({"symbol": sym, "stop": p["stop"], "target": p["target"], "day": p["day"]})
+    coming = dividends.coming(d.conn, scan_date)
+    for p in positions:
+        div = coming.get(p["symbol"])
+        if div and div["ex_date"] == session and div.get("amount") and p["status"] in ("HOLD", "TIGHTEN STOP", "REVIEW"):
+            items.append(exdiv_item(p, div))
     for r in [x for x in sig_rows if x["action"] == "BUY"]:
         if r["shares"] and r["shares"] > 0:
             items.append({
                 "symbol": r["symbol"], "key": f"buy:{r['symbol']}", "kind": "buy", "info": d.info(r["symbol"]),
                 "shares": r["shares"], "limit": r["entry_high"], "stop": r["stop"], "target": r["target"],
-                "amount": r["amount"], "risk_egp": r["risk_egp"],
+                "amount": r["amount"], "risk_egp": r["risk_egp"], "source": r.get("source") or "rules",
                 "title": f"Buy {r['shares']:,} {r['symbol']}, paying no more than {px(r['entry_high'])}",
                 "detail": f"Use a limit order; skip it if it opens higher. Once filled: stop {px(r['stop'])}, "
                           f"target {px(r['target'])}, max loss {r['risk_egp']:,.0f} EGP.",
@@ -758,6 +775,18 @@ def orders(d: Data, positions: list[dict] | None = None) -> dict | None:
         "blocked": bool(m.get("risk_off") and d.cfg.get("riskoff_block_buys")),
         "stale": session <= scan.expected_session_date().isoformat(),
     })
+
+
+def exdiv_item(p: dict, div: dict) -> dict:
+    """An open position whose stock goes ex-dividend at the next session: lower the stop by the dividend before the
+    open, or the price drop alone (which the dividend makes up for) could sell it (engine.ex_dividend)."""
+    sym, amount = p["symbol"], float(div["amount"])
+    to = p["stop"] - amount
+    return {"symbol": sym, "trade_id": p["id"], "shares": p["shares"], "key": f"exdiv:{sym}", "kind": "stop",
+            "from": p["stop"], "to": to, "title": f"Lower your {sym} stop to {px(to)} before the open",
+            "detail": f"{sym} goes ex-dividend: the price opens about {amount:g} EGP lower, and you get {amount:g} EGP "
+                      f"a share ({amount * p['shares']:,.0f} EGP). The agent moves the stop and the target down by the "
+                      f"same amount, so the drop alone doesn't sell."}
 
 
 def breadth_data(d: Data) -> dict | None:
@@ -821,10 +850,14 @@ def predictions(d: Data) -> dict:
         base = {hz: (meta["horizons"].get(str(hz), {}).get("all") or {}).get("hit") for hz in predict.HORIZONS}
         # its top 10% each day: the group its tested results are about, so the only chances worth showing
         cut = max(1, math.ceil(len(lt) * TOP_SHARE))
+        why = {(r["symbol"], r["horizon"]): r["why"] for r in d.conn.execute(
+            "SELECT symbol, horizon, why FROM predictions WHERE date=?", (lt["date"].iloc[0],))}
         by = {}
         for sym, r in lt.iterrows():
             by[sym] = {f"{k}{hz}": r.get(f"{k}{hz}") for hz in predict.HORIZONS for k in ("p", "rank")}
             by[sym].update({f"top{hz}": bool(r.get(f"rank{hz}", cut + 1) <= cut) for hz in predict.HORIZONS})
+            # what pushed its score up or down (predict.explain): [{f, up, text}, …]
+            by[sym].update({f"why{hz}": json.loads(why.get((sym, hz)) or "null") for hz in predict.HORIZONS})
         return {"by_symbol": clean(by), "base": clean(base), "count": int(len(lt)), "date": lt["date"].iloc[0],
                 "top_n": cut}
     return d.cache.get(d.version, ("predictions", db.get_meta(d.conn, "prediction_date"),
@@ -832,7 +865,8 @@ def predictions(d: Data) -> dict:
 
 
 HORIZON_KEYS = ("all", "top", "rule", "rule_agree", "rule_disagree", "auc", "lift", "grade", "verdict", "years",
-                "groups", "from", "to", "train_n", "good_years", "top_share", "features")
+                "groups", "from", "to", "train_n", "good_years", "top_share", "features", "top_ret_cost", "portfolio",
+                "portfolio_cost", "chances", "extra_cost", "hold")
 TOP_SHARE = 0.10   # the model's top picks: its best 10% each day
 
 
@@ -843,7 +877,7 @@ def predict_public(d: Data) -> dict:
     deep = int(db.get_meta(d.conn, "history_years_loaded") or 0) >= prices.DEEP_YEARS
     out: dict = {"model": None, "rows": [], "deep": deep, "deep_years": prices.DEEP_YEARS,
                  "horizons": list(predict.HORIZONS), "retrain_days": predict.RETRAIN_DAYS,
-                 "features": {str(hz): len(f) for hz, f in predict.HORIZON_FEATURES.items()},
+                 "features": {str(hz): len(predict.HORIZON_FEATURES[hz]) for hz in predict.HORIZONS},
                  "levels": {k: d.cfg[k] for k in ("atr_stop_mult", "stop_min_pct", "stop_max_pct", "target_r")}}
     if not meta or not predict.model_path(root).exists():
         return out
@@ -866,6 +900,18 @@ def predict_public(d: Data) -> dict:
     out["live"] = predict.live_record(d.conn, since=meta.get("live_since"))
     b = breadth_data(d)
     out["switch"] = breadth.switch(b["above50"]) if b else None
+    # the BUY rules with and without it on its test years, whether it still works live, and the 5-day experiment
+    out["combo"] = meta.get("combo")
+    out["health"] = predict.health(d.conn, meta)
+    out["model_picks"] = int(d.cfg.get("model_picks", 0) or 0)
+    ex = str(predict.EXPERIMENT)
+    if ex in meta["horizons"] and f"rank{ex}" in lt:
+        top = lt.sort_values(f"rank{ex}").head(predict.PICKS)
+        out["experiment"] = {
+            "hz": predict.EXPERIMENT, "test": {k: meta["horizons"][ex].get(k) for k in HORIZON_KEYS},
+            "live": out["live"].get(ex), "picks": [{"symbol": s, "info": d.info(s), "close": float(r["close"]),
+                                                    "rank": int(r[f"rank{ex}"])} for s, r in top.iterrows()],
+        }
     return out
 
 
@@ -960,6 +1006,10 @@ SETTINGS_SECTIONS = [
                      {"value": False, "label": "Stricter: higher score, half the positions"}]},
         _f("riskoff_score_bonus", "Risk-off score increase", 0, 30, 1, kind="int",
            help="Only used with the 'Stricter' option."),
+        _f("model_picks", "Prediction model's own BUYs a day", 0, 5, 1, kind="int",
+           help="Its best-ranked stocks that also pass the liquidity and uptrend checks, with the usual stop and "
+                "target. Tested on years it never saw (2016–2026): the rules alone made 15% a year, plus its top 3 "
+                "27%, with the same worst drop. 0 = none. Either way it decides which BUYs get money first."),
     ]},
     {"title": "Exits", "fields": [
         _f("atr_stop_mult", "Stop distance", 1, 5, 0.25, "× average daily range"),

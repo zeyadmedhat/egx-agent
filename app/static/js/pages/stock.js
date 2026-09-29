@@ -2,7 +2,7 @@
 import { html, useApi, useState, useEffect, useMemo, fmt, tone, cls, go, stockHref, remember, todayISO } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, StockPicker, Seg, Disclaimer, DayBar, Chance, WatchStar,
-  Cautions, NewsList,
+  Cautions, NewsList, Why,
 } from '../ui.js';
 import { PriceChart } from '../charts.js';
 
@@ -156,6 +156,9 @@ function PredictionPanel({ p }) {
     </div>
     ${p.top_n && html`<p class="faint" style="font-size:12px;margin-top:10px">It gives a chance only for its top${' '}
       ${fmt.int(p.top_n)} stocks each day (its best 10%): its test results are about those.</p>`}
+    ${p.why10 && p.why10.length > 0 && html`<div style="margin-top:14px">
+      <div class="faint" style="font-size:12px;margin-bottom:6px">Why it ranks it #${fmt.int(p.rank10)} (2 weeks):
+        green pushed it up, red down</div><${Why} items=${p.why10} /></div>`}
     <a class="btn sm block" style="margin-top:14px" href="#/predict">How reliable is it?</a></div>`;
 }
 

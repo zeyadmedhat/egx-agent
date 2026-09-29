@@ -1,18 +1,21 @@
 """Daily portfolio backtest using the same signals, sizing and exit rules as the live agent.
 
-Signals are computed on day t's close; orders fill at day t+1's open. Fees apply on both sides.
+Signals are computed on day t's close; orders fill at day t+1's open. Fees apply on both sides. Cash dividends are
+paid on the ex-date to positions held the day before, and the stop and target move down by them that day (as the
+live rules do, engine.ex_dividend).
 Caveats: the universe is today's listed stocks (survivorship bias) and Shariah status is today's.
 """
 from __future__ import annotations
 
 import math
+import sqlite3
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from . import engine, risk, strategy
-from .data import shariah
+from .data import dividends, shariah
 from .indicators import add_indicators
 
 
@@ -31,9 +34,14 @@ def _panel(frames: dict[str, pd.Series], dates: pd.DatetimeIndex, fill=np.nan) -
     return pd.DataFrame({s: f.reindex(dates) for s, f in frames.items()}, index=dates).fillna(fill) if frames else pd.DataFrame(index=dates)
 
 
-def prepare(price_data: dict[str, pd.DataFrame], index_df: pd.DataFrame, stocks: pd.DataFrame, cfg: dict) -> Prepared:
+def prepare(price_data: dict[str, pd.DataFrame], index_df: pd.DataFrame, stocks: pd.DataFrame, cfg: dict,
+            conn: sqlite3.Connection | None = None) -> Prepared:
+    """conn: where the cash dividends are (data/dividends.py); without it, none are paid."""
     index_ind = add_indicators(index_df)
     ind = {s: add_indicators(df, index_df["close"]) for s, df in price_data.items() if len(df) > 60}
+    if conn is not None:
+        for s, f in ind.items():
+            f["div"] = dividends.per_share(conn, s, f["close"])
     sf = {s: strategy.signal_frame(ind[s], cfg) for s in ind}
     dates = index_ind.index
     eligible = _panel({s: f["eligible"].astype(float) for s, f in sf.items()}, dates, 0.0).astype(bool)
@@ -52,13 +60,19 @@ def prepare(price_data: dict[str, pd.DataFrame], index_df: pd.DataFrame, stocks:
 
 
 def run(prep: Prepared, cfg: dict, start: str | pd.Timestamp, end: str | pd.Timestamp | None = None,
-        symbols: set[str] | None = None) -> dict:
+        symbols: set[str] | None = None, buy: pd.DataFrame | None = None, order: pd.DataFrame | None = None) -> dict:
+    """buy: which stocks are BUYs each day (default: the rules', prep.buy). order: who gets money first each day,
+    highest first (default: the rules' score). The prediction model's walk-forward test passes both
+    (predict.combo_backtest)."""
     fee = cfg["fee_pct_per_side"] / 100
     capital = float(cfg["capital"])
     dates = prep.index_ind.index
     dates = dates[(dates >= pd.Timestamp(start)) & (dates <= pd.Timestamp(end or dates[-1]))]
+    buy_mask = prep.buy if buy is None else buy
+    priority = prep.score if order is None else order
     cash = capital
     positions: dict[str, engine.Position] = {}
+    paid: dict[str, float] = {}               # dividends each open position has been paid
     pending: list[dict] = []
     last_close: dict[str, float] = {}
     trades, equity, n_pos, cancelled = [], [], [], 0
@@ -66,24 +80,31 @@ def run(prep: Prepared, cfg: dict, start: str | pd.Timestamp, end: str | pd.Time
     def close_position(sym: str, d: pd.Timestamp, price: float, reason: str) -> None:
         nonlocal cash
         pos = positions.pop(sym)
+        got = paid.pop(sym, 0.0)
         proceeds = price * pos.shares * (1 - fee)
         cost = pos.entry_price * pos.shares * (1 + fee)
         cash += proceeds
         trades.append({
             "symbol": sym, "sector": pos.sector, "entry_date": pos.entry_date, "entry_price": pos.entry_price,
             "exit_date": str(d.date()), "exit_price": price, "shares": pos.shares, "days_held": pos.days_held,
-            "pnl": proceeds - cost, "return_pct": proceeds / cost - 1, "reason": reason,
+            "pnl": proceeds + got - cost, "return_pct": (proceeds + got) / cost - 1, "reason": reason,
+            "dividends": got,
         })
 
     for i, d in enumerate(dates):
+        for sym, pos in positions.items():        # held at yesterday's close: today's ex-dividend is paid
+            ind_s = prep.ind[sym]
+            if d in ind_s.index and (div := engine.bar_dividend(ind_s.loc[d])):
+                cash += div * pos.shares
+                paid[sym] = paid.get(sym, 0.0) + div * pos.shares
         filled_today = set()
-        for order in pending:
-            ind_s = prep.ind[order["symbol"]]
+        for order_ in pending:
+            ind_s = prep.ind[order_["symbol"]]
             if d not in ind_s.index:
                 cancelled += 1
                 continue
             bar = ind_s.loc[d]
-            pos, _ = engine.fill_order(order, bar)
+            pos, _ = engine.fill_order(order_, bar)
             if pos is None:
                 cancelled += 1
                 continue
@@ -120,12 +141,12 @@ def run(prep: Prepared, cfg: dict, start: str | pd.Timestamp, end: str | pd.Time
 
         if i == len(dates) - 1:
             break
-        row = prep.buy.loc[d]
+        row = buy_mask.loc[d]
         syms = [s for s in row.index[row.values] if symbols is None or s in symbols]
         if not syms:
             continue
         cands = []
-        for s in sorted(syms, key=lambda s: -prep.score.at[d, s]):
+        for s in sorted(syms, key=lambda s: -priority.at[d, s]):
             ind_row, sf_row = prep.ind[s].loc[d], prep.sf[s].loc[d]
             cands.append({
                 "symbol": s, "sector": prep.sectors.get(s, "Other"), "close": float(ind_row["close"]),
@@ -179,5 +200,6 @@ def metrics(eq: pd.Series, trades: pd.DataFrame, n_pos: list[int], capital: floa
             "avg_loss": float(losses.return_pct.mean()) if len(losses) else 0.0,
             "profit_factor": float(wins.pnl.sum() / -losses.pnl.sum()) if losses.pnl.sum() < 0 else float("inf"),
             "avg_days_held": float(trades.days_held.mean()),
+            "dividends": float(trades.dividends.sum()),
         })
     return m

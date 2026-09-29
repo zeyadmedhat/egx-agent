@@ -44,6 +44,11 @@ DEFAULTS: dict = {
     # money, and skipping new buys while EGX30 is below its 50-day EMA helped in both halves of the test.
     "riskoff_block_buys": True,      # no new buys while EGX30 is below its 50-day EMA
     "setups": ["breakout"],          # also available: "pullback", "macd"
+    # The prediction model's 10-session rank decides which BUYs get money first, and its top picks that pass the
+    # liquidity and uptrend checks are BUYs too (0 = none). Walk-forward 2016–2026 (its test years only, dividends
+    # counted): rules alone 15.3% a year; in the model's order 19.8%; plus its top 3 26.9%, same worst drop (−20%),
+    # better in both halves.
+    "model_picks": 3,
     # Exits
     "atr_stop_mult": 2.0,
     "stop_min_pct": 4.0,

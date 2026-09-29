@@ -2,7 +2,7 @@
 import { html, useApi, useState, startJob, fmt, tone, go, stockHref, STATIC } from '../lib.js';
 import {
   Icon, Badges, Kpi, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, Seg, JobProgress,
-  useJob, StatusChip, Chance, Empty, MarketSwitch,
+  useJob, StatusChip, Chance, Empty, MarketSwitch, Why,
 } from '../ui.js';
 
 const HORIZONS = [{ value: 10, label: '10 sessions (~2 weeks)' }, { value: 20, label: '20 sessions (~1 month)' }];
@@ -17,7 +17,7 @@ export function PredictPage() {
   if (!data) return html`<${PageLoading} error=${error} />`;
   const train = () => startJob('/predict/train');
   const head = html`<${PageHead} title="Predict"
-    sub="A machine-learning model's chance that a trade reaches its target before its stop. Information only: the BUY rules don't use it." />`;
+    sub=${`A machine-learning model ranks every liquid stock after each close. Its rank decides which BUY signals get money first${data.model_picks ? `, and its top ${data.model_picks} picks that pass the liquidity and uptrend checks are BUYs too` : ''}.`} />`;
   if (!data.model) {
     return html`${head}<${Intro} data=${data} onTrain=${train} running=${running} /><${Disclaimer} />`;
   }
@@ -36,7 +36,12 @@ export function PredictPage() {
       <button class="linkish" onClick=${train} disabled=${running}>retrain it now</button>.`}<//></div>`}
     <${Callout} tone=${GRADE_TONE[r.grade] || ''}><b>${hz}-session model: ${r.verdict}</b>${' '}
       Tested on ${fmt.date(r.from)} – ${fmt.date(r.to)}, with each year predicted by a version that had never seen it.<//>
+    <div style="margin-top:10px"><${Health} h=${data.health} /></div>
     ${data.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${data.switch} /></div>`}
+    ${data.combo && data.combo.rules && html`<section class="section">
+      <${SectionHead} title="The BUY rules with and without the model"
+        hint=${`The agent's own backtest, day by day with your sizing and exit rules, on the years the model was tested on (${fmt.date(data.combo.from)} – ${fmt.date(data.combo.to)}), using only the scores it gave before it saw each year.`} />
+      <div class="card flush"><${ComboTable} c=${data.combo} /></div></section>`}
 
     <div class="row" style="margin:16px 0 12px;justify-content:space-between">
       <${Seg} options=${HORIZONS} value=${hz} onChange=${setHz} />
@@ -53,7 +58,16 @@ export function PredictPage() {
       <${Kpi} label="Beat the average stock" value=${`${r.good_years} of ${(r.years || []).length} years`}
         title="AUC measures how well it sorts winners from losers: 0.50 is a coin flip, 1.00 is perfect."
         sub=${`AUC ${fmt.num(r.auc, 2)} (0.50 = coin flip)`} />
+      ${r.portfolio && r.portfolio.cagr != null && html`<${Kpi} label="Its top 5, every ${hz} sessions"
+        value=${`${fmt.pct(r.portfolio.cagr, 0)} a year`} valueClass=${tone(r.portfolio.cagr)}
+        title=${`A test portfolio: its 5 best-ranked stocks bought equally every ${hz} sessions, sized by the market switch. Worst drop ${fmt.pct(r.portfolio.max_drawdown, 0)}.`}
+        sub=${`${fmt.pct(r.portfolio_cost.cagr, 0)} a year with ${fmt.pct(r.extra_cost, 1, false)} more cost per trade · worst drop ${fmt.pct(r.portfolio.max_drawdown, 0)}`} />`}
     </div>
+    <p class="faint" style="font-size:12.5px;margin-top:8px">Trading costs matter: with ${fmt.pct(r.extra_cost, 1, false)} more
+      slippage on every trade than the fees already counted, its top 10% average ${fmt.pct(r.top_ret_cost, 2)} a trade
+      instead of ${fmt.pct(r.top.ret, 2)}.${r.chances && r.chances.useful === false ? html`${' '}<b>Its chance numbers
+      for ${hz} sessions are no more accurate than giving every stock the average chance</b> (checked year by year):
+      trust its <i>rank</i>, not the % itself.` : ''}</p>
 
     <section class="section">
       <${SectionHead} title="Today's chances" count=${data.rows.length}
@@ -76,6 +90,11 @@ export function PredictPage() {
         hint=${`Predictions from this version of the model${m.live_since ? ` (since the ${fmt.date(m.live_since)} close)` : ''}, checked against what really happened, next to its test results. This is the real test.`} />
       <${Live} live=${live} hz=${hz} r=${r} />
     </section>
+
+    ${data.experiment && html`<section class="section">
+      <${SectionHead} title="Experiment: 5-day picks (paper only)"
+        hint="A third model, tested but not trusted yet: its 5 best stocks bought at the next open and sold at the close 5 sessions later, no stop. It's tracked here on paper to see if its test results hold up live. These are not BUY signals." />
+      <${Experiment} ex=${data.experiment} /></section>`}
 
     <section class="section">
       <${SectionHead} title="About this model" />
@@ -129,6 +148,9 @@ function ChanceTable({ rows, hz, base }) {
       render: r => html`<${Chance} p=${r.p10} base=${base[10]} top=${r.top10} />` },
     { key: 'p20', label: '1 month', align: 'r', title: 'Chance of target before stop within 20 sessions',
       render: r => html`<${Chance} p=${r.p20} base=${base[20]} top=${r.top20} />` },
+    { key: 'why', label: 'Why (2 weeks)', sortable: false, width: '340px',
+      title: 'What pushed its score up (green) or down (red)',
+      render: r => html`<div class="why-cell"><${Why} items=${(r.why10 || []).slice(0, 3)} /></div>` },
     { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
     { key: 'stop', label: 'Stop', align: 'r', render: r => html`${fmt.price(r.stop)}
       <div class="faint down" style="font-size:11.5px">${fmt.pct(-r.stop_pct, 1)}</div>` },
@@ -181,6 +203,66 @@ function Live({ live, hz, r }) {
       sub=${`tested ${fmt.pct(r.top.ret, 2)} · all scored stocks ${fmt.pct(live.all.ret, 2)}`} />
     <${Kpi} label="Checked so far" value=${`${fmt.int(live.days)} day${live.days === 1 ? '' : 's'}`}
       sub=${`${fmt.date(live.from)} – ${fmt.date(live.to)} · ${fmt.int(live.n)} predictions`} />
+  </div>`;
+}
+
+// Is it still doing live what it did in its tests? (predict.health: the 10-session model, last 60 decided sessions)
+const HEALTH = {
+  early: 'Too early to tell: it needs at least {min} sessions of results.',
+  ok: 'On track: its top picks keep beating the average stock by at least half as much as in its tests.',
+  weak: 'Weaker than in its tests: its top picks still beat the average stock, but by less than half as much.',
+  bad: "Not working lately: its top picks did no better than the average stock. Until that changes, it adds no BUYs of its own.",
+};
+function Health({ h }) {
+  if (!h || !HEALTH[h.status]) return null;
+  const tone = h.status === 'bad' ? 'warn' : '';
+  return html`<${Callout} tone=${tone}><span class=${`health-dot ${h.status}`}></span><b>Live check</b>${' '}
+    ${HEALTH[h.status].replace('{min}', h.min_days)}${h.edge != null ? html`${' '}Last ${fmt.int(h.days)} sessions: its top 10%
+    ${fmt.pct(h.top, 2)} a trade against ${fmt.pct(h.all, 2)} for all scored stocks (tested gap ${fmt.pct(h.tested_edge, 2)}).` : ''}<//>`;
+}
+
+function ComboTable({ c }) {
+  const rows = [
+    { key: 'rules', label: 'The rules alone', r: c.rules },
+    { key: 'ordered', label: "The rules, in the model's order", r: c.ordered },
+    { key: 'with_picks', label: `The rules plus its top ${c.picks} picks (today's setting)`, r: c.with_picks },
+  ].filter(x => x.r);
+  const best = Math.max(...rows.map(x => x.r.all.cagr));
+  const columns = [
+    { key: 'label', label: 'BUY signals from', sortable: false, render: x => html`<b>${x.label}</b>` },
+    { key: 'cagr', label: 'A year', align: 'r', sortable: false,
+      render: x => html`<b class=${x.r.all.cagr === best ? 'up' : ''}>${fmt.pct(x.r.all.cagr, 1)}</b>` },
+    { key: 'dd', label: 'Worst drop', align: 'r', sortable: false, render: x => html`<span class="down">${fmt.pct(x.r.all.max_drawdown, 0)}</span>` },
+    { key: 'sharpe', label: 'Sharpe', align: 'r', sortable: false, title: 'Return for the ups and downs taken: higher is steadier',
+      render: x => fmt.num(x.r.all.sharpe, 2) },
+    { key: 'first', label: `To ${fmt.date(c.split)}`, align: 'r', sortable: false, render: x => html`<span class=${tone(x.r.first.cagr)}>${fmt.pct(x.r.first.cagr, 1)}</span>` },
+    { key: 'second', label: 'After', align: 'r', sortable: false, render: x => html`<span class=${tone(x.r.second.cagr)}>${fmt.pct(x.r.second.cagr, 1)}</span>` },
+    { key: 'trades', label: 'Trades', align: 'r', sortable: false, render: x => html`<span class="faint">${fmt.int(x.r.all.trades)}</span>` },
+  ];
+  return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${x => x.key} />`;
+}
+
+function Experiment({ ex }) {
+  const t = ex.test || {}, live = ex.live || { n: 0 };
+  const hold = t.hold || {};
+  return html`<div class="grid grid-2" style="align-items:start">
+    <div class="card"><div class="stat-list">
+      <span class="k">Tested: its top 10% (5 days)</span><span class="v"><b class=${tone(hold.top)}>${fmt.pct(hold.top, 2)}</b> a
+        trade${' '}<span class="faint">vs ${fmt.pct(hold.all, 2)} for all</span></span>
+      ${t.portfolio && t.portfolio.cagr != null && html`<span class="k">Tested: its top 5 every 5 days</span><span class="v">
+        ${fmt.pct(t.portfolio.cagr, 0)} a year <span class="faint">· worst drop ${fmt.pct(t.portfolio.max_drawdown, 0)}</span></span>
+      <span class="k">With ${fmt.pct(t.extra_cost, 1, false)} more cost a trade</span><span class="v">${fmt.pct(t.portfolio_cost.cagr, 0)} a year</span>`}
+      <span class="k">Live so far</span><span class="v">${live.n
+        ? html`its daily top 5 <b class=${tone(live.picks.ret)}>${fmt.pct(live.picks.ret, 2)}</b> a trade, all ${fmt.pct(live.all.ret, 2)}
+          <span class="faint">(${fmt.int(live.days)} days)</span>`
+        : html`<span class="faint">nothing decided yet</span>`}</span>
+    </div>
+    <p class="faint" style="font-size:12px;margin-top:10px">It trades every week, so costs weigh twice as much, and it has no
+      stop. It becomes more than an experiment only if its live results match its tests for a few months.</p></div>
+    <div class="card"><div class="card-title"><${Icon} name="target" size=${15} />Its 5 picks from the last close</div>
+      <div class="stat-list">${(ex.picks || []).map(p => html`<span class="k">#${p.rank}</span>
+        <span class="v"><a href=${stockHref(p.symbol)}>${p.symbol}</a> <span class="faint">${fmt.price(p.close)}</span></span>`)}</div>
+      <p class="faint" style="font-size:12px;margin-top:10px">Paper only: not signals, not advice.</p></div>
   </div>`;
 }
 

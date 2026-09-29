@@ -125,6 +125,12 @@ CREATE TABLE IF NOT EXISTS corp_actions (
     first_seen TEXT,
     PRIMARY KEY (symbol, type, announced, effective)
 );
+CREATE TABLE IF NOT EXISTS dividend_history (
+    symbol TEXT NOT NULL,           -- every past cash dividend, from TradingView's dividend-adjusted prices
+    ex_date TEXT NOT NULL,          -- first session without it (data/dividends.py)
+    yield REAL NOT NULL,            -- the dividend ÷ the close the session before (the price drop it explains)
+    PRIMARY KEY (symbol, ex_date)
+);
 CREATE TABLE IF NOT EXISTS dividend_yield (
     symbol TEXT PRIMARY KEY,
     yield_pct REAL,                 -- the last 12 months' cash dividends ÷ the price (%), TradingView's figure
@@ -215,17 +221,25 @@ def _open(path: Path | str) -> sqlite3.Connection:
 
 
 def _add_columns(conn: sqlite3.Connection, pairs) -> None:
-    for table, column in pairs:
+    """Columns added after a table was first made: (table, column) is TEXT, (table, column, type) that type."""
+    for table, column, *kind in pairs:
         cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in cols:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind[0] if kind else 'TEXT'}")
+
+
+# scans.priority: the model's rank that day (1 = its best), the order BUYs get money in; scans.source: why it's a
+# BUY (rules | model); predictions.why: what pushed the model's score up or down; stocks.listed_by: where the stock
+# came from (NULL = Kashif, tradingview = TradingView's EGX list, for stocks Kashif doesn't cover)
+MARKET_COLUMNS = (("stocks", "price_note"), ("stocks", "listed_by"), ("scans", "priority", "REAL"),
+                  ("scans", "source"), ("predictions", "why"))
 
 
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     """One file with everything: the market data and your own portfolio (the dashboard on your Mac)."""
     conn = _open(path)
     conn.executescript(SCHEMA)
-    _add_columns(conn, (("trades", "sector"), ("stocks", "price_note")))
+    _add_columns(conn, (("trades", "sector"), *MARKET_COLUMNS))
     for key in ("telegram_sent_for", "telegram_last_sent", "telegram_error", "telegram_chat_name"):
         # these used to live in meta; now they're yours (user_meta), so bring over the old values once
         conn.execute("INSERT OR IGNORE INTO user_meta(key, value) SELECT key, value FROM meta WHERE key=?", (key,))
@@ -237,7 +251,7 @@ def connect_market(path: Path | str) -> sqlite3.Connection:
     """The shared market file of the website (no personal tables in it)."""
     conn = _open(path)
     conn.executescript(MARKET_SCHEMA)
-    _add_columns(conn, (("stocks", "price_note"),))
+    _add_columns(conn, MARKET_COLUMNS)
     return conn
 
 
@@ -356,10 +370,11 @@ def save_scan(conn: sqlite3.Connection, scan_date: str, rows: list[dict]) -> Non
     conn.execute("DELETE FROM scans WHERE scan_date=?", (scan_date,))
     conn.executemany(
         """INSERT INTO scans(scan_date, symbol, action, score, setup, close, entry_high, stop, target, atr,
-               avg_value, shares, amount, risk_egp, size_note, reasons)
+               avg_value, shares, amount, risk_egp, size_note, reasons, priority, source)
            VALUES (:scan_date, :symbol, :action, :score, :setup, :close, :entry_high, :stop, :target, :atr,
-               :avg_value, :shares, :amount, :risk_egp, :size_note, :reasons)""",
-        [{**r, "scan_date": scan_date, "reasons": json.dumps(r.get("reasons", []), ensure_ascii=False)} for r in rows],
+               :avg_value, :shares, :amount, :risk_egp, :size_note, :reasons, :priority, :source)""",
+        [{"priority": None, "source": "rules", **r, "scan_date": scan_date,
+          "reasons": json.dumps(r.get("reasons", []), ensure_ascii=False)} for r in rows],
     )
     conn.commit()
 

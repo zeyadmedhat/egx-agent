@@ -40,3 +40,14 @@ def _no_news_downloads(monkeypatch):
     def offline(self, url, polite=True, **kw):
         raise ConnectionError("no downloads in tests")
     monkeypatch.setattr(news.Fetcher, "get", offline)
+
+
+@pytest.fixture(autouse=True)
+def _no_tradingview_lists(monkeypatch):
+    """Nor TradingView's stock list or dividend history (tests pass their own rows or fetcher)."""
+    from egx_agent.data import dividends, universe
+
+    def offline(*a, **kw):
+        raise ConnectionError("no downloads in tests")
+    monkeypatch.setattr(universe, "fetch_tradingview", offline)
+    monkeypatch.setattr(dividends, "_feed", offline)

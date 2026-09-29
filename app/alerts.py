@@ -13,12 +13,12 @@ import json
 import re
 import secrets
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 import requests
 
-from egx_agent import breadth, config, db, portfolio, scan
+from egx_agent import breadth, config, db, portfolio, predict, scan
 from egx_agent.data import news
 
 from . import views
@@ -134,7 +134,8 @@ def _caution_lines(items: list[dict], indent: str = "      ") -> list[str]:
         day = views.nice_date(c["date"]) if c.get("date") else ""
         if c["kind"] == "ex_dividend":
             amt = f" ({c['amount']:g} EGP)" if c.get("amount") else ""
-            out.append(f"{indent}⚠️ Ex-dividend {day}{amt}: the price drops by the dividend that morning (it can hit the stop)")
+            out.append(f"{indent}ℹ️ Ex-dividend {day}{amt}: the price drops by it that morning and you get it in cash; "
+                       "lower the stop by the same amount the evening before")
         elif c["kind"] == "bad_news":
             out.append(f"{indent}⚠️ News: {_e(c['title'])} ({_e(c['source'])})")
         elif c["kind"] in ("bonus", "split"):
@@ -180,13 +181,16 @@ def build_message(d: views.Data) -> tuple[str, bool]:
         body.append(f"{ICON[it['kind']]} <b>{_e(it['title'])}</b>")
         body.append(f"      {_e(it['detail'])}")
         if it["kind"] == "buy":
+            if it.get("source") == "model":
+                body.append("      🎯 A prediction-model pick (its top picks that pass the checks are BUYs too)")
             body.append(f"      {_shariah(it['info'])}")
             body += _caution_lines(warn.get(it["symbol"]))
             pr = preds["by_symbol"].get(it["symbol"])
             if pr and pr.get("p10") is not None and preds["base"].get(10):
-                body.append(f"      Model: {pr['p10']:.0%} chance of target before stop in 2 weeks "
+                rank = f"#{pr['rank10']:.0f} of {preds['count']}, " if pr.get("rank10") else ""
+                body.append(f"      Model: {rank}{pr['p10']:.0%} chance of target before stop in 2 weeks "
                             f"(average stock {preds['base'][10]:.0%})" if pr.get("top10") else
-                            "      Model: not one of its top picks today")
+                            f"      Model: {rank}not one of its top picks today")
     if not o["items"]:
         body.append("Nothing to do. " + ("No new buys while EGX30 is below its 50-day average." if o["blocked"]
                                          else "No BUY signals at this close."))
@@ -238,9 +242,10 @@ def build_site_message(d: views.Data, site_url: str = "") -> str:
     preds = views.predictions(d)
     warn = views.cautions_map(d)
     lines += ["", f"<b>BUY signals for {views.nice_date(session, True)}</b>" if buys else "<b>No BUY signals</b> at this close."]
-    for r in buys:
-        lines.append(f"🟢 <b>{_e(r['symbol'])}</b>: buy up to {views.px(r['entry_high'])} · stop {views.px(r['stop'])} · "
-                     f"target {views.px(r['target'])}")
+    for r in sorted(buys, key=views.signal_order):      # the order money goes in: the model's rank first
+        pick = " (model pick)" if r.get("source") == "model" else ""
+        lines.append(f"🟢 <b>{_e(r['symbol'])}</b>{pick}: buy up to {views.px(r['entry_high'])} · "
+                     f"stop {views.px(r['stop'])} · target {views.px(r['target'])}")
         extra = [f"score {r['score']:.0f}", _shariah(d.info(r["symbol"]))]
         pr = preds["by_symbol"].get(r["symbol"])
         if pr and pr.get("p10") is not None and preds["base"].get(10):
@@ -291,12 +296,14 @@ def _reply(token: str, chat_id: str, text: str) -> None:
 WATCH_RE = re.compile(r"^/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?))?\s*$", re.I)
 UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})\s*$", re.I)
 LIST_RE = re.compile(r"^/(?:list|alerts)(?:@\w+)?\s*$", re.I)
+WEEKLY_RE = re.compile(r"^/weekly(?:@\w+)?\s+(on|off)\s*$", re.I)
 MAX_ALERTS = 20
 HELP = ("<b>Alerts for the stocks you follow</b>, checked after each close:\n"
         "/watch COMI: when COMI gets a BUY signal\n"
         "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n"
         "/unwatch COMI: stop COMI's alerts\n"
         "/list: your alerts\n"
+        "/weekly off: no Thursday summary (/weekly on to have it again)\n"
         "/stop: stop all messages\n"
         "I read messages every few hours, so a reply can take up to 3 hours.")
 
@@ -430,6 +437,11 @@ def sync_subscribers(conn: sqlite3.Connection, token: str, code: str) -> dict:
             forget_alerts(conn, cid)
             replies.append((cid, STOPPED))
             left += 1
+        elif cid in subs and (w := WEEKLY_RE.match(text)):
+            subs[cid]["weekly"] = w.group(1).lower() != "off"
+            replies.append((cid, "OK: you'll get the week's summary after Thursday's close." if subs[cid]["weekly"]
+                            else "OK: no weekly summary. Send /weekly on to have it again."))
+            commands += 1
         elif cid in subs and (reply := watch_command(conn, cid, text)):
             replies.append((cid, reply))
             commands += 1
@@ -465,6 +477,115 @@ def send_to_subscribers(conn: sqlite3.Connection, token: str, text: str, data_da
                 failed += 1
     db.set_meta(conn, "site_subscribers", json.dumps(subs))
     return {"sent": sent, "failed": failed, "gone": gone}
+
+
+# ------------------------------------------------------------------ the weekly summary (after Thursday's close)
+
+HEALTH_WORDS = {"ok": "🟢 on track (its top picks keep beating the average stock)",
+                "weak": "🟠 weaker than in its tests (still better than the average stock)",
+                "bad": "🔴 not working lately (it adds no BUYs of its own until it does)",
+                "early": "⚪ too early to judge its live results"}
+
+
+def week_of(day: str) -> str:
+    """The EGX week (Sunday–Thursday) a day belongs to, named by its Sunday."""
+    d = date.fromisoformat(day)
+    return (d - timedelta(days=(d.weekday() + 1) % 7)).isoformat()
+
+
+def weekly_due(data_date: str | None, sent_for: str | None, today: date | None = None) -> bool:
+    """The summary goes once a week: after Thursday's close, or on Friday or Saturday if Thursday's scan came late
+    (or the week ended early for a holiday). Never for an older week's data."""
+    if not data_date:
+        return False
+    today = today or datetime.now(scan.CAIRO).date()
+    week = week_of(data_date)
+    if sent_for == week or week_of(today.isoformat()) != week:
+        return False
+    return date.fromisoformat(data_date).weekday() == 3 or today.weekday() in (4, 5)
+
+
+def build_weekly(d: views.Data, site_url: str = "", mine: bool = True) -> str:
+    """The week in one message: the market, the week's BUY signals, how the last month's signals are doing, the
+    paper account, and whether the prediction model still works. mine: your own positions too (your Mac)."""
+    data_date = db.get_meta(d.conn, "scan_data_date")
+    week = week_of(data_date)
+    lines = [f"📅 <b>EGX Agent · the week of {views.nice_date(week)}</b>"]
+    idx = d.prices(scan.prices.INDEX_SYMBOL)["close"]
+    before = idx[idx.index < pd.Timestamp(week)]
+    if len(idx) and len(before):
+        lines.append(f"EGX30 {idx.iloc[-1]:,.0f}: {idx.iloc[-1] / before.iloc[-1] - 1:+.1%} this week")
+    b = views.breadth_data(d)
+    m = views.market_info(d.conn)
+    if b:
+        lines.append(_switch_line(breadth.verdict(b, m.get("risk_off") if m else None)))
+
+    week_rows = d.conn.execute("SELECT scan_date, symbol, source FROM scans WHERE action='BUY' AND scan_date >= ? "
+                               "ORDER BY scan_date", (week,)).fetchall()
+    first = {}
+    for r in week_rows:
+        first.setdefault(r["symbol"], r)
+    lines += ["", f"<b>BUY signals this week: {len(first)}</b>"]
+    if first:
+        lines.append(", ".join(f"{_e(s)}{' 🎯' if r['source'] == 'model' else ''} ({views.nice_date(r['scan_date'])})"
+                               for s, r in first.items()))
+    month = (date.fromisoformat(week) - timedelta(days=28)).isoformat()
+    past = d.conn.execute("SELECT scan_date, symbol, close FROM scans WHERE action='BUY' AND scan_date >= ? "
+                          "AND scan_date < ?", (month, week)).fetchall()
+    closes = d.closes()
+    moves = [closes[r["symbol"]] / r["close"] - 1 for r in past if r["symbol"] in closes and r["close"]]
+    if moves:
+        up = sum(x > 0 for x in moves)
+        lines.append(f"The {len(moves)} BUY signals of the 4 weeks before: {sum(moves) / len(moves):+.1%} on average "
+                     f"since their signal close, {up} of {len(moves)} up (before stops and targets).")
+
+    if mine:
+        positions = views.open_positions(d)
+        if positions:
+            lines += ["", f"<b>Your {len(positions)} position{'s' if len(positions) != 1 else ''}</b>"]
+            for p in positions:
+                lines.append(f"{_e(p['symbol'])} {p['pnl_pct']:+.1%} · {p['status'].lower()}")
+    paper = portfolio.account_summary(d.conn, "paper", d.cfg, closes)
+    if paper["open_count"] or paper["realized"]:
+        lines += ["", f"Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%} since it started)"]
+    meta = predict.load_meta(predict.model_dir(d.conn))
+    if meta:
+        h = predict.health(d.conn, meta)
+        if h["status"] in HEALTH_WORDS:
+            lines += ["", f"Prediction model: {HEALTH_WORDS[h['status']]}"]
+    lines += ["", (f"{site_url}\n" if site_url else "") + "<i>Rules-based signals, not investment advice.</i>"
+              + ("" if mine else " /weekly off stops this summary.")]
+    text = "\n".join(lines)
+    return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + "\n…"
+
+
+def weekly_after_scan(conn: sqlite3.Connection, cfg: dict) -> str:
+    """Your Mac: the week's summary to your own Telegram, once a week."""
+    token, chat = cfg.get("telegram_token"), cfg.get("telegram_chat_id")
+    data_date = db.get_meta(conn, "scan_data_date")
+    if not (token and chat) or not scan.scan_is_final(conn) \
+            or not weekly_due(data_date, db.get_user_meta(conn, "weekly_sent_for")):
+        return ""
+    send(token, chat, build_weekly(views.Data(conn, cfg, views.Cache())))
+    db.set_user_meta(conn, "weekly_sent_for", week_of(data_date))
+    return "weekly summary sent"
+
+
+def send_weekly_to_subscribers(conn: sqlite3.Connection, token: str, text: str, week: str) -> int:
+    """The website: the week's summary to every connected friend who hasn't turned it off (/weekly off)."""
+    subs = _subscribers(conn)
+    sent = 0
+    for cid, s in subs.items():
+        if s.get("weekly", True) is False or s.get("weekly_for") == week:
+            continue
+        try:
+            send(token, cid, text)
+        except TelegramError:
+            continue            # tried again next run
+        s["weekly_for"] = week
+        sent += 1
+    db.set_meta(conn, "site_subscribers", json.dumps(subs))
+    return sent
 
 
 # ------------------------------------------------------------------ sending after a scan
