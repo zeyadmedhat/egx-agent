@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS prices (
     open REAL, high REAL, low REAL, close REAL, volume REAL,
     PRIMARY KEY (symbol, date)
 );
+CREATE TABLE IF NOT EXISTS fundamentals (
+    symbol TEXT PRIMARY KEY,        -- the company's numbers from TradingView (data/dividends.py FUNDAMENTALS)
+    data TEXT NOT NULL,             -- JSON: market_cap, pe, pb, eps_growth, revenue_growth, net_margin, roe, debt_equity
+    updated TEXT
+);
 CREATE TABLE IF NOT EXISTS intraday (
     symbol TEXT NOT NULL,           -- hourly bars for the 1-hour and 4-hour charts (data/prices.py update_intraday)
     ts     TEXT NOT NULL,           -- YYYY-MM-DD HH:MM, Cairo time, the bar's start

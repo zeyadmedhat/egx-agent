@@ -457,6 +457,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     if sym in preds["by_symbol"]:
         out["prediction"] = {**preds["by_symbol"][sym], **{k: preds.get(k) for k in ("base", "count", "date", "top_n")}}
     out["corporate"] = corporate_history(d.conn, sym, last.close)
+    out["fundamentals"] = dividends.company_numbers(d.conn, sym, d.table["sector"])
     out["news"] = news.stock_news(d.conn, sym, 30)
     out["cautions"] = cautions_map(d).get(sym, [])
     shown = ind if tail is None else ind.tail(tail)

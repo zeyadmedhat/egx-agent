@@ -1,6 +1,7 @@
 """Every company's cash dividends from TradingView's screener, kept as they're seen, and a stock's history."""
 from datetime import date, datetime, timedelta
 
+import pandas as pd
 import pytest
 
 from app import views
@@ -68,3 +69,17 @@ def test_results_dates_come_with_the_dividends(tmp_path):
     h = views.corporate_history(conn, "COMI", 100.0)
     assert h["results"] == {"next": soon, "last": recent}
     assert views.corporate_history(conn, "AIHC", 10.0)["results"]["next"] == soon
+
+
+def test_company_numbers_next_to_their_sector(tmp_path):
+    conn = db.connect(tmp_path / "egx.db")
+    nums = {"COMI": (6.0, 28.0, 0.35), "BANK1": (4.0, 10.0, 0.5), "BANK2": (5.0, 12.0, 0.4), "BANK3": (7.0, 20.0, None),
+            "TECH": (30.0, 50.0, 0.1)}
+    dividends.save(conn, [{**_row(s, None), "price_earnings_ttm": pe, "earnings_per_share_diluted_yoy_growth_ttm": g,
+                           "debt_to_equity_fq": de} for s, (pe, g, de) in nums.items()] + [_row("NONE", None)])
+    sectors = pd.Series({"COMI": "Banks", "BANK1": "Banks", "BANK2": "Banks", "BANK3": "Banks", "TECH": "Tech"})
+    f = dividends.company_numbers(conn, "COMI", sectors)
+    assert f["values"] == {"pe": 6.0, "eps_growth": pytest.approx(0.28), "debt_equity": 0.35}   # percents → fractions
+    assert f["sector"] == "Banks" and f["peers"] == 3
+    assert f["sector_median"] == {"pe": 5.0, "eps_growth": pytest.approx(0.12)}   # debt: only 2 banks report it
+    assert dividends.company_numbers(conn, "NONE", sectors) is None

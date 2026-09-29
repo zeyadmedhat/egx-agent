@@ -31,6 +31,14 @@ URL = "https://scanner.tradingview.com/egypt/scan"
 COLUMNS = ["name", "dividends_yield_current", "dividend_ex_date_recent", "dividend_amount_recent",
            "dividend_payment_date_recent", "dividend_ex_date_upcoming", "dividend_amount_upcoming",
            "dividend_payment_date_upcoming", "earnings_release_date", "earnings_release_next_date"]
+# The company's numbers from the same list (the Stock page's Company numbers card): TradingView column → ours, and
+# what to multiply by (its growth, margin and return figures are percents). In 2026-09 TradingView had P/E and growth
+# for about 80 EGX companies, price/book and debt for about 180, market value for about 240.
+FUNDAMENTALS = {"market_cap_basic": ("market_cap", 1), "price_earnings_ttm": ("pe", 1), "price_book_fq": ("pb", 1),
+                "earnings_per_share_diluted_yoy_growth_ttm": ("eps_growth", 0.01),
+                "total_revenue_yoy_growth_ttm": ("revenue_growth", 0.01), "net_margin_ttm": ("net_margin", 0.01),
+                "return_on_equity_fq": ("roe", 0.01), "debt_to_equity_fq": ("debt_equity", 1)}
+COLUMNS = COLUMNS + list(FUNDAMENTALS)
 EARNINGS_STALE_DAYS = 400     # a company whose last results on TradingView are older gets no expected date: it
                               # doesn't report there regularly, so the estimate would be a guess
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -71,12 +79,34 @@ def save(conn: sqlite3.Connection, rows: list[dict]) -> int:
         if last or nxt:
             conn.execute("INSERT OR REPLACE INTO earnings(symbol, next_date, last_date, updated) VALUES (?,?,?,?)",
                          (sym, nxt or "", last or "", now))
+        nums = {ours: float(r[col]) * k for col, (ours, k) in FUNDAMENTALS.items() if r.get(col) is not None}
+        if nums:
+            conn.execute("INSERT OR REPLACE INTO fundamentals(symbol, data, updated) VALUES (?,?,?)",
+                         (sym, json.dumps(nums), now))
     conn.commit()
     return conn.execute("SELECT COUNT(*) FROM cash_dividends").fetchone()[0] - before
 
 
 def update(conn: sqlite3.Connection) -> int:
     return save(conn, fetch())
+
+
+def company_numbers(conn: sqlite3.Connection, symbol: str, sectors: pd.Series) -> dict | None:
+    """A company's numbers (FUNDAMENTALS) and, for each, the middle value of the other companies in its sector that
+    report it (at least 3). None when TradingView has nothing for it."""
+    rows = {r["symbol"]: json.loads(r["data"]) for r in conn.execute("SELECT symbol, data FROM fundamentals")}
+    mine = rows.get(symbol)
+    if not mine:
+        return None
+    sector = sectors.get(symbol)
+    peers = [v for s, v in rows.items() if s != symbol and sector and sectors.get(s) == sector]
+    median = {}
+    for key in mine:
+        vals = [p[key] for p in peers if p.get(key) is not None]
+        if len(vals) >= 3:
+            median[key] = float(pd.Series(vals).median())
+    updated = conn.execute("SELECT updated FROM fundamentals WHERE symbol=?", (symbol,)).fetchone()["updated"]
+    return {"values": mine, "sector": sector, "sector_median": median, "peers": len(peers), "updated": updated}
 
 
 # ------------------------------------------------------------------ the whole history, from the prices

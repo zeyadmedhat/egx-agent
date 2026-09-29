@@ -108,6 +108,7 @@ export function StockPage({ route }) {
           ${data.chart && html`<${LevelsPanel} c=${data.chart} held=${!!data.position} sym=${data.symbol} tg=${data.telegram} />`}
           <${SignalPanel} data=${data} />
           ${data.prediction && html`<${PredictionPanel} p=${data.prediction} />`}
+          ${data.fundamentals && html`<${CompanyPanel} f=${data.fundamentals} />`}
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
         </aside>
@@ -292,6 +293,41 @@ function CorporatePanel({ c }) {
         <span class="v" style="font-weight:500">${t(a.label)}<span class="faint"> · ${t('announced {date}', { date: fmt.date(a.announced) })}</span></span>`)}</div>`}
     <${More} label="How to read these dates"><p>${t("Dates are ex-dates: buy before that day to get the dividend. Amounts per share, % of today's price, from TradingView. The announcements come from Mubasher's list of the exchange's filings. The next results date is TradingView's estimate from when the company reported before.")}</p><//><//>`;
 }
+
+// The company's numbers from TradingView (data/dividends.py FUNDAMENTALS), next to the middle of its sector.
+const COMPANY = [
+  ['market_cap', 'Market value', v => `${fmt.short(v)} ${t('EGP')}`],
+  ['pe', 'Price / earnings (P/E)', v => (v > 0 ? `${fmt.num(v, 1)}×` : t('loss-making'))],
+  ['pb', 'Price / book', v => `${fmt.num(v, 1)}×`],
+  ['eps_growth', 'Profit growth (1 year)', v => fmt.pct(v, 0)],
+  ['revenue_growth', 'Sales growth (1 year)', v => fmt.pct(v, 0)],
+  ['net_margin', 'Net margin', v => fmt.pct(v, 0, false)],
+  ['roe', 'Return on equity', v => fmt.pct(v, 0, false)],
+  ['debt_equity', 'Debt / equity', v => `${fmt.num(v, 2)}×`],
+];
+const GROWTH = new Set(['eps_growth', 'revenue_growth']);
+
+function CompanyPanel({ f }) {
+  const v = f.values, med = f.sector_median || {};
+  const rows = COMPANY.filter(([k]) => v[k] != null);
+  return html`<${Fold} title="Company numbers"
+      hint=${v.pe > 0 ? t('P/E {pe}', { pe: fmt.num(v.pe, 1) }) : v.market_cap ? t('Worth {v}', { v: `${fmt.short(v.market_cap)} ${t('EGP')}` }) : ''}>
+    <div class="stat-list">${rows.map(([k, label, show]) => html`
+      <span class="k">${t(label)}</span>
+      <span class=${cls('v', GROWTH.has(k) && tone(v[k]))}>${show(v[k])}${k !== 'market_cap' && med[k] != null
+        ? html`<span class="faint" style="font-weight:500"> · ${t('sector')} ${show(med[k])}</span>` : ''}</span>`)}
+    </div>
+    ${rows.length < COMPANY.length && html`<p class="faint" style="font-size:12px;margin-top:8px">${t('TradingView has no figure for the rest.')}</p>`}
+    <${More} label="What these mean"><p>${t(COMPANY_HOW)}</p><//>
+    <p class="faint" style="font-size:11.5px;margin-top:8px">${t('From TradingView, the latest yearly figures, checked {date}. Sector: the middle of {n} companies in {sector}.', {
+      date: fmt.date((f.updated || '').slice(0, 10)), n: fmt.int(f.peers), sector: t(f.sector || 'Other') })}</p><//>`;
+}
+
+const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower is cheaper, but a growing company usually '
+  + 'costs more. Price / book: the price against what the company owns minus what it owes. Growth: the last 12 months '
+  + 'against the 12 before (in EGP, so inflation lifts it too). Net margin: profit from each pound of sales. Return on '
+  + 'equity: yearly profit on the owners\' money. Debt / equity: borrowing against the owners\' money; over 1 is a lot for '
+  + 'most companies except banks. The agent\'s signals don\'t use these: they are here to know the company.';
 
 function PredictionPanel({ p }) {
   return html`<div class="card"><div class="card-title"><${Icon} name="target" size=${15} />${t('Prediction model')}
