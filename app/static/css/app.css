@@ -747,3 +747,13 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .health-dot.ok { background: var(--up); }
 .health-dot.weak { background: var(--warn); }
 .health-dot.bad { background: var(--down); }
+
+/* live prices: TradingView's boxes */
+/* color-scheme normal: in dark mode the browser would paint the box white behind its see-through page */
+.tv-frame { display: block; width: 100%; border: 0; background: transparent; color-scheme: normal; }
+.chart-note { font-size: 12px; padding: 8px 12px 10px; border-top: 1px solid var(--border); }
+.live-card { padding-bottom: 6px; }
+.live-card .card-title { margin-bottom: 4px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--up); display: inline-block;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 25%, transparent); }
+.live-list { padding: 4px 6px 0; }

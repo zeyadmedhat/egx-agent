@@ -2,7 +2,7 @@
 import { html, useApi, useState, useEffect, useMemo, fmt, tone, cls, go, stockHref, remember, todayISO } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, StockPicker, Seg, Disclaimer, DayBar, Chance, WatchStar,
-  Cautions, NewsList, Why,
+  Cautions, NewsList, Why, LiveChart, LiveQuote, LIVE_NOTE,
 } from '../ui.js';
 import { PriceChart } from '../charts.js';
 
@@ -10,6 +10,7 @@ const RANGES = [
   { value: 60, label: '3M' }, { value: 120, label: '6M' }, { value: 250, label: '1Y' }, { value: 500, label: '2Y' },
   { value: 1000, label: '4Y' }, { value: 100000, label: 'All' },
 ];
+const VIEWS = [{ value: 'agent', label: 'Agent chart' }, { value: 'live', label: 'Live (TradingView)' }];
 const PANES = [['ema', 'Averages'], ['volume', 'Volume'], ['rsi', 'RSI'], ['macd', 'MACD']];
 
 export function StockPage({ route }) {
@@ -23,6 +24,8 @@ export function StockPage({ route }) {
   });
   const toggle = k => setShow(s => { const n = { ...s, [k]: !s[k] }; remember('panes', JSON.stringify(n)); return n; });
   const pickRange = v => { setBars(v); remember('bars', v); };
+  const [view, setView] = useState(remember('chart_view') === 'live' ? 'live' : 'agent');
+  const pickView = v => { setView(v); remember('chart_view', v); };
 
   const picker = html`<div class="page-head"><div><h1>Stock</h1><div class="sub">Chart, entry checklist and Shariah details</div></div>
     <div style="width:min(380px,100%)"><${StockPicker} value=${sym} onChange=${s => go(stockHref(s))}
@@ -62,11 +65,15 @@ export function StockPage({ route }) {
         <div class="stack" style="min-width:0">
         <div class="card chart-card">
           <div class="chart-toolbar">
-            <${Seg} options=${RANGES} value=${bars} onChange=${pickRange} />
+            <${Seg} options=${VIEWS} value=${view} onChange=${pickView} />
+            ${view === 'agent' && html`<${Seg} options=${RANGES} value=${bars} onChange=${pickRange} />
             <div class="right">${PANES.map(([k, label]) => html`<button class=${cls('toggle-chip', show[k] && 'on')}
-              onClick=${() => toggle(k)}>${label}</button>`)}</div>
+              onClick=${() => toggle(k)}>${label}</button>`)}</div>`}
           </div>
-          <${PriceChart} series=${data.series} levels=${data.levels} fills=${data.fills} bars=${bars} show=${show} />
+          ${view === 'agent'
+            ? html`<${PriceChart} series=${data.series} levels=${data.levels} fills=${data.fills} bars=${bars} show=${show} />`
+            : html`<${LiveChart} symbol=${data.symbol} />
+              <p class="faint chart-note">${LIVE_NOTE} Your buy, stop and target lines are on the Agent chart.</p>`}
         </div>
         ${data.news && html`<div class="card stock-news"><div class="card-title"><${Icon} name="news" size=${15} />News
             <span class="right faint">Mubasher, Reuters, Zawya</span></div>
@@ -76,6 +83,8 @@ export function StockPage({ route }) {
             rough guess from keywords, not a reading of the article.</p></div>`}
         </div>
         <aside class="stack">
+          <div class="card live-card"><div class="card-title"><span class="live-dot"></span>Live price
+            <span class="right faint">TradingView, ~15 min late</span></div><${LiveQuote} symbol=${data.symbol} /></div>
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />Size a buy with your rules</a>
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />Good to know now</div><${Cautions} items=${data.cautions} /></div>`}

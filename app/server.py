@@ -156,6 +156,7 @@ def _csp() -> str:
                       for m in re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", page, flags=re.S) if m.strip())
     return ("default-src 'self'; script-src 'self' " + hashes + "; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; "
+            "frame-src https://s.tradingview.com https://www.tradingview-widget.com; "
             "form-action 'self'; frame-ancestors 'none'")
 
 

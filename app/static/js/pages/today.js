@@ -2,7 +2,7 @@
 import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, STATIC } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, ScoreRing, ScoreBar, DayBar, Empty, Callout, PageHead, SectionHead,
-  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch, Cautions, Why,
+  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, LiveQuotes, LIVE_NOTE,
 } from '../ui.js';
 import { Sparkline } from '../charts.js';
 
@@ -38,6 +38,8 @@ export function TodayPage() {
 
     ${data.orders && html`<${OrdersCard} o=${data.orders} />`}
 
+    <${LiveNow} positions=${data.positions} buys=${data.buys} />
+
     ${data.positions.length > 0 && html`<${Positions} positions=${data.positions} cfg=${cfg} alerts=${alerts} />`}
 
     <section class="section">
@@ -60,6 +62,20 @@ export function TodayPage() {
       Paper trading at this scan: ${data.paper.last_scan.filled || 0} filled, ${data.paper.last_scan.closed || 0} closed,${' '}
       ${data.paper.last_scan.cancelled || 0} skipped, ${data.paper.last_scan.new_orders || 0} new orders for the next session.</p>`}
     <${Disclaimer} />`;
+}
+
+// EGX30, your stocks and the BUY signals at TradingView's live prices (about 15 minutes late).
+function LiveNow({ positions, buys }) {
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('egx-live-open') !== '0'; } catch { return true; } });
+  const flip = () => setOpen(o => { try { localStorage.setItem('egx-live-open', o ? '0' : '1'); } catch { /* private mode */ } return !o; });
+  const symbols = ['EGX30', ...positions.map(p => p.symbol), ...buys.map(s => s.symbol)];
+  return html`<section class="section">
+    <${SectionHead} title="Live prices" hint="TradingView, about 15 minutes late">
+      <button class="btn sm" onClick=${flip}>${open ? 'Hide' : 'Show'}</button><//>
+    ${open && html`<div class="card flush live-list"><${LiveQuotes} symbols=${symbols}
+      title=${positions.length ? 'EGX30, your stocks and the BUYs' : 'EGX30 and the BUYs'} /></div>
+      <p class="faint" style="font-size:12px;margin-top:6px">${LIVE_NOTE}</p>`}
+  </section>`;
 }
 
 function MarketCard({ m, spark, blocked, b }) {

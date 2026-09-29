@@ -603,3 +603,19 @@ def test_the_mac_watchlist_goes_to_the_site_with_the_portfolio_backup(tmp_path, 
     conn = db.connect(_site_db(tmp_path / "egx.db"))
     db.set_user_meta(conn, "watchlist", json.dumps(["AAA", "BBB"]))
     assert static_site.portfolio_backup(conn, cfg)["book"]["watchlist"] == ["AAA", "BBB"]
+
+
+def test_live_prices_come_only_from_tradingview_boxes():
+    """The live charts and prices are TradingView iframes: the page allows frames from TradingView and nothing else,
+    still runs no outside script, and the browser maps Kashif codes to TradingView's the same way the scan does."""
+    import re as _re
+
+    from app import server
+    from egx_agent.data import prices as _prices
+    for csp in (static_site._csp(static_site.index_html()), server._csp()):
+        frames = _re.search(r"frame-src ([^;]+);", csp).group(1).split()
+        assert frames == ["https://s.tradingview.com", "https://www.tradingview-widget.com"]
+        assert _re.search(r"script-src 'self'( 'sha256-[^']+')*;", csp)
+    ui = (static_site.STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+    js = dict(_re.findall(r"(\w+): '(\w+)'", _re.search(r"export const TV_ALIASES = \{([^}]*)\}", ui).group(1)))
+    assert js == _prices.TV_ALIASES

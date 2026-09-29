@@ -465,3 +465,45 @@ export function JobProgress({ kind, title }) {
     <div class="pbar"><span style=${`width:${Math.max(pct, 3)}%`}></span></div>
     <div class="muted" style="font-size:13px">${job.message}</div></div>`;
 }
+
+// ------------------------------------------------------------------ live prices (TradingView's own boxes)
+// Plain iframes from TradingView, not its script: TradingView's code runs in its own box and can't read this page
+// (your portfolio, the unlocked signals). Its free EGX prices are about 15 minutes late ("D" next to the price).
+// Kashif code → TradingView code where they differ: the same list as TV_ALIASES in egx_agent/data/prices.py.
+export const TV_ALIASES = { AIHC: 'AIH', ANFI: 'TYCN', FCMD: 'EGS3I0S1C019', NAPR: 'EGS370O1C013' };
+export const tvSymbol = sym => `EGX:${TV_ALIASES[sym] || sym}`;
+const TV_WIDGET = 'https://www.tradingview-widget.com/embed-widget/';
+const widgetSrc = (name, opts) => `${TV_WIDGET}${name}/?locale=en#${encodeURIComponent(JSON.stringify(opts))}`;
+
+function TvFrame({ src, height, title }) {
+  return html`<iframe class="tv-frame" src=${src} title=${title} style=${`height:${height}px`} loading="lazy"
+    referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>`;
+}
+
+export function LiveChart({ symbol, height = 520 }) {
+  const theme = useStore(s => s.theme);
+  const q = new URLSearchParams({ symbol: tvSymbol(symbol), interval: 'D', theme, style: '1', locale: 'en',
+    timezone: 'Africa/Cairo', hidesidetoolbar: '1', symboledit: '0', saveimage: '0', withdateranges: '1',
+    hideideas: '1' });
+  return html`<${TvFrame} key=${theme + symbol} src=${`https://s.tradingview.com/widgetembed/?${q}`} height=${height}
+    title=${`${symbol} live chart from TradingView`} />`;
+}
+
+export function LiveQuote({ symbol }) {
+  const theme = useStore(s => s.theme);
+  return html`<${TvFrame} key=${theme + symbol} height=${92} title=${`${symbol} live price from TradingView`}
+    src=${widgetSrc('single-quote', { symbol: tvSymbol(symbol), width: '100%', colorTheme: theme, isTransparent: true })} />`;
+}
+
+// A live price table for a few stocks (EGX30 is "EGX30"). At most 15, so the box stays short.
+export function LiveQuotes({ symbols, title = 'Live' }) {
+  const theme = useStore(s => s.theme);
+  const list = [...new Set(symbols)].slice(0, 15);
+  if (!list.length) return null;
+  const opts = { width: '100%', height: '100%', colorTheme: theme, isTransparent: true, showSymbolLogo: true,
+    symbolsGroups: [{ name: title, symbols: list.map(s => ({ name: tvSymbol(s), displayName: s })) }] };
+  return html`<${TvFrame} key=${theme + list.join()} height=${96 + 38 * list.length} src=${widgetSrc('market-quotes', opts)}
+    title="Live prices from TradingView" />`;
+}
+
+export const LIVE_NOTE = 'Live prices from TradingView, about 15 minutes late. The signals, stops and your P&L still use the last close.';

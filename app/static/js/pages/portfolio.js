@@ -6,7 +6,7 @@ import {
 } from '../lib.js';
 import {
   Icon, StatusChip, Kpi, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, DayBar, Field,
-  StockPicker, Confirm, Callout, Seg, Empty,
+  StockPicker, Confirm, Callout, Seg, Empty, LiveQuotes, LIVE_NOTE,
 } from '../ui.js';
 import { LineChart } from '../charts.js';
 import { equityCurve, correlations, sectorMix, stopRisk, journal } from '../insights.js';
@@ -80,6 +80,9 @@ export function PortfolioPage({ route }) {
         expandedKey=${openId} onRowClick=${r => setOpenId(id => (id === r.id ? null : r.id))}
         renderExpanded=${r => html`<${PositionDetail} p=${r} data=${data} onDone=${() => setOpenId(null)} />`}
         empty="No open positions. After you buy at your broker, log it below." /></div>
+      ${data.positions.length > 0 && html`<div class="card flush live-list" style="margin-top:12px">
+        <${LiveQuotes} symbols=${data.positions.map(p => p.symbol)} title="Your stocks now" /></div>
+        <p class="faint" style="font-size:12px;margin-top:6px">${LIVE_NOTE}</p>`}
       <p class="faint" style="font-size:12px;margin-top:8px">EXIT: sell at the next open · REVIEW: 2 weeks without progress,
         consider exiting · TIGHTEN STOP: move your stop order up · HOLD: nothing to do · UPDATE SHARES: the company
         gave bonus shares or split its shares, so enter your new share count</p>
