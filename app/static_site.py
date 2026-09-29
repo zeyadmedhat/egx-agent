@@ -41,6 +41,7 @@ MIN_PASSWORD = 10
 MAC_ONLY_KEYS = ("paper_capital", "auto_paper")     # settings for the Mac's paper account
 WORKFLOW = "site.yml"       # the GitHub job that scans and publishes the site (.github/workflows/)
 STOCK_COLS = views.SERIES_COLS + ("atr14",)   # the exit rules in the browser need the ATR too
+UNSTAMPED = {"core": ("built",), "news": ("updated",)}   # when a file was built or checked, not what's in it
 
 
 # ------------------------------------------------------------------ encryption
@@ -192,9 +193,11 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
 
     files = public_data(conn, cfg, telegram, scan_url)
     plain = {name: to_json(obj) for name, obj in files.items() if name != "core"}
-    # The stamp changes only when the content does, so browsers reload only after a real update.
-    stamp = hashlib.sha256(b"".join(n.encode() + b"\0" + p for n, p in sorted(plain.items()))
-                           + to_json({**files["core"], "built": None})).hexdigest()[:16]
+    # The stamp changes only when the content does, so browsers reload only after a real update and a scheduled run
+    # publishes only then. The times in UNSTAMPED don't count: every run checks the news, even when nothing new came.
+    same = {n: to_json({**files[n], **dict.fromkeys(UNSTAMPED[n])}) if n in UNSTAMPED else plain[n] for n in files}
+    stamp = hashlib.sha256(b"".join(n.encode() + b"\0" + same[n] for n in sorted(same) if n != "core")
+                           + same["core"]).hexdigest()[:16]
     plain["core"] = to_json({**files["core"], "stamp": stamp})
 
     salt = salt_for(site_id)

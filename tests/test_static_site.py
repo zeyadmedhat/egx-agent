@@ -13,6 +13,7 @@ from cryptography.exceptions import InvalidTag
 
 from app import static_site
 from egx_agent import config, corporate, db, portfolio, risk, scan, strategy
+from egx_agent.data import news
 from egx_agent.data import prices as prices_mod
 from egx_agent.indicators import add_indicators
 from tests.conftest import make_ohlcv
@@ -288,6 +289,11 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
 
     # The stamp only changes when the data does, so browsers don't reload for nothing.
     assert static_site.build(conn, cfg, tmp_path / "site2", PASSWORD, "me/egx")["stamp"] == res["stamp"]
+    db.set_meta(conn, "news_updated", "2026-09-29T10:00:01")        # the news checked again, nothing new came
+    assert static_site.build(conn, cfg, tmp_path / "site2", PASSWORD, "me/egx")["stamp"] == res["stamp"]
+    news.save_news(conn, [{"id": "x:1", "source": "reuters", "lang": "en", "published": news._iso(datetime.now()),
+                           "title": "A new headline", "url": "https://example.com/1"}])
+    assert static_site.build(conn, cfg, tmp_path / "site2", PASSWORD, "me/egx")["stamp"] != res["stamp"]
     db.set_meta(conn, "market", json.dumps({"date": "x", "egx30_close": 1301, "risk_off": False}))
     assert static_site.build(conn, cfg, tmp_path / "site3", PASSWORD, "me/egx")["stamp"] != res["stamp"]
     conn.close()
