@@ -1,6 +1,6 @@
 // Shared building blocks: icons, Shariah badges, KPI tiles, tables, forms, the stock picker, dialogs.
 import {
-  html, Fragment, useState, useEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
+  html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
   stockHref, watchForData, toggleWatch, STATIC,
 } from './lib.js';
 
@@ -98,11 +98,58 @@ export function StatusChip({ status }) {
 }
 
 export function Kpi({ label, value, sub, valueClass, subClass, title, compact, icon }) {
-  return html`<div class=${cls('kpi', compact && 'compact')} title=${title}>
-    <div class="k-label">${icon && html`<${Icon} name=${icon} size=${14} />`}${label}</div>
-    <div class=${cls('k-value', valueClass)}>${value}</div>
+  return html`<div class=${cls('kpi spot', compact && 'compact', icon && 'has-icon')} title=${title}>
+    <div class="k-label">${label}</div>
+    ${icon && html`<span class="k-icon"><${Icon} name=${icon} size=${15} /></span>`}
+    <div class=${cls('k-value', valueClass)}>${Number.isInteger(value) ? html`<${CountUp} value=${value} />` : value}</div>
     ${sub != null && sub !== '' && html`<div class=${cls('k-sub', subClass)}>${sub}</div>`}
   </div>`;
+}
+
+// ------------------------------------------------------------------ motion (count-up numbers, ticker tape)
+const calm = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return true; } };
+
+// A number that counts up to its value when it first shows, and glides to a new value when it changes.
+export function CountUp({ value, format = fmt.int, ms = 700 }) {
+  const ref = useRef(null), last = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const from = last.current == null ? 0 : last.current;
+    last.current = value;
+    if (value == null || !isFinite(value) || calm() || from === value) { el.textContent = format(value); return; }
+    let raf, t0;
+    const step = t => {
+      if (t0 == null) t0 = t;
+      const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = format(from + (value - from) * e);
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    el.textContent = format(from);
+    raf = requestAnimationFrame(step);
+    return () => { cancelAnimationFrame(raf); el.textContent = format(value); };
+  }, [value]);
+  return html`<span ref=${ref}></span>`;
+}
+
+// A strip of prices that scrolls sideways and stops while the mouse is on it. items: [{label, href, price, change}]
+export function TickerTape({ items, label }) {
+  if (!items || !items.length) return null;
+  const row = copy => items.map(it => html`<a class="tape-item" href=${it.href} key=${copy + it.label}
+    tabindex=${copy ? -1 : undefined} aria-hidden=${copy ? 'true' : undefined}>
+    <b>${it.label}</b><span class="muted num">${it.price}</span><${Change} value=${it.change} pill /></a>`);
+  return html`<div class="tape">
+    ${label && html`<span class="tape-label">${label}</span>`}
+    <div class="tape-view"><div class="tape-track" style=${`--dur:${Math.max(24, items.length * 4)}s`}>${row(0)}${row(1)}</div></div>
+  </div>`;
+}
+
+// A coloured tile with the first letters of the symbol; the colour is the same for a stock everywhere.
+export function StockAvatar({ symbol, size = 30 }) {
+  let h = 7;
+  for (const ch of String(symbol)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return html`<span class="avatar" aria-hidden="true"
+    style=${`--h:${h};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.36)}px`}>${String(symbol).slice(0, 2)}</span>`;
 }
 
 export function ScoreRing({ score }) {
@@ -254,18 +301,40 @@ export function MarketSwitch({ sw, compact }) {
     −62% to −22%. Your BUY rules keep their own EGX30 rule.</span><//>`;
 }
 
-export function Change({ value, digits = 2 }) {
-  return html`<span class=${tone(value)}>${fmt.pct(value, digits)}</span>`;
+export function Change({ value, digits = 2, pill }) {
+  if (!pill) return html`<span class=${tone(value)}>${fmt.pct(value, digits)}</span>`;
+  const t = tone(value);
+  return html`<span class=${cls('chg-pill', t)}>${t === 'up' ? '▲ ' : t === 'down' ? '▼ ' : ''}${fmt.pct(Math.abs(value), digits, false)}</span>`;
 }
 
 export function StockCell({ symbol, info, sub }) {
-  return html`<div><a class="sym" href=${stockHref(symbol)} onClick=${e => e.stopPropagation()}>${symbol}</a>
-    ${sub !== false && html`<div class="sub" dir="auto" style="text-align:left">${sub || info?.name_ar || ''}</div>`}</div>`;
+  return html`<div class="stock-cell"><${StockAvatar} symbol=${symbol} size=${28} /><div>
+    <a class="sym" href=${stockHref(symbol)} onClick=${e => e.stopPropagation()}>${symbol}</a>
+    ${sub !== false && html`<div class="sub" dir="auto" style="text-align:left" title=${sub || info?.name_ar || undefined}>${sub || info?.name_ar || ''}</div>`}</div></div>`;
 }
 
 // ------------------------------------------------------------------ segmented control / switch
+// The highlight slides to the chosen option.
 export function Seg({ options, value, onChange }) {
-  return html`<div class="seg">${options.map(o => html`<button type="button" class=${o.value === value ? 'on' : ''}
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const place = () => {
+      const on = box.querySelector('button.on');
+      if (!on || !on.offsetWidth) { box.classList.remove('slid'); return; }
+      for (const [k, v] of [['--x', on.offsetLeft], ['--y', on.offsetTop], ['--w', on.offsetWidth], ['--h', on.offsetHeight]]) {
+        box.style.setProperty(k, `${v}px`);
+      }
+      box.classList.add('slid');
+      if (!box.dataset.ready) requestAnimationFrame(() => { box.dataset.ready = '1'; });
+    };
+    place();
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
+    if (ro) ro.observe(box);
+    return () => ro && ro.disconnect();
+  }, [value, options.length]);
+  return html`<div class="seg" ref=${ref}>${options.map(o => html`<button type="button" class=${o.value === value ? 'on' : ''}
     onClick=${() => onChange(o.value)}>${o.label}</button>`)}</div>`;
 }
 export function Switch({ checked, onChange, label }) {

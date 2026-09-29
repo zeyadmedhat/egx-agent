@@ -3,6 +3,7 @@ import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cl
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, ScoreRing, ScoreBar, DayBar, Empty, Callout, PageHead, SectionHead,
   Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, LiveQuotes, LIVE_NOTE,
+  CountUp, TickerTape, StockAvatar, Change,
 } from '../ui.js';
 import { Sparkline } from '../charts.js';
 
@@ -22,6 +23,7 @@ export function TodayPage() {
   const alerts = data.positions.filter(p => p.status !== 'HOLD').length;
   return html`
     <${PageHead} title="Today" sub=${`Signals for the next session, from the ${fmt.date(m.date)} close`} />
+    <${MoversTape} m=${m} />
     <${MarketCard} m=${m} spark=${data.spark} blocked=${blocked} b=${data.breadth} />
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
       ${m.warnings.map(w => html`<${Callout} tone="warn">${w}<//>`)}</div>`}
@@ -64,6 +66,17 @@ export function TodayPage() {
     <${Disclaimer} />`;
 }
 
+// EGX30 and the day's biggest risers and fallers at the last close, scrolling across the top.
+function MoversTape({ m }) {
+  const { data } = useApi('/market');
+  const mv = data && data.movers && data.movers.chg1;
+  if (!mv) return null;
+  const item = r => ({ label: r.symbol, href: stockHref(r.symbol), price: fmt.price(r.close), change: r.ret });
+  const items = [{ label: 'EGX30', href: '#/market', price: fmt.int(m.egx30_close), change: m.egx30_change },
+    ...(mv.up || []).map(item), ...(mv.down || []).map(item)];
+  return html`<${TickerTape} items=${items} label=${`Biggest moves · ${fmt.date(m.date)}`} />`;
+}
+
 // EGX30, your stocks and the BUY signals at TradingView's live prices (about 15 minutes late).
 function LiveNow({ positions, buys }) {
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('egx-live-open') !== '0'; } catch { return true; } });
@@ -91,8 +104,8 @@ function MarketCard({ m, spark, blocked, b }) {
         ${m.risk_off
           ? html`<span class="chip riskoff"><span class="dot"></span>Risk-off</span>`
           : html`<span class="chip riskon"><span class="dot"></span>Market OK</span>`}</div>
-      <div class="market-price">${fmt.int(m.egx30_close)}
-        <span class=${cls('chg', tone(m.egx30_change))}>${fmt.pct(m.egx30_change, 2)}</span></div>
+      <div class="market-price"><${CountUp} value=${m.egx30_close} />
+        <${Change} value=${m.egx30_change} pill /></div>
       <div class="market-meta">50-day average ${fmt.int(m.egx30_ema50)} · the index is
         <b class=${tone(gap)}> ${fmt.pct(Math.abs(gap), 1, false)} ${gap >= 0 ? 'above' : 'below'}</b> it</div>
       <p class="market-text">${text}</p>
@@ -121,8 +134,8 @@ function Positions({ positions, cfg, alerts }) {
       hint=${alerts ? `${alerts} need${alerts === 1 ? 's' : ''} your attention` : 'Nothing to do: all on hold'}>
       <a class="btn sm" href="#/portfolio">Manage <${Icon} name="chevron" size=${14} /></a><//>
     <div class="card flush alerts">${positions.map(p => html`<div class="alert-row" key=${p.id}>
-      <div><a class="sym-big" style="font-size:15px" href=${stockHref(p.symbol)}>${p.symbol}</a>
-        <div class="faint" style="font-size:12px">${fmt.int(p.shares)} sh · <span class=${tone(p.pnl_pct)}>${fmt.pct(p.pnl_pct)}</span></div></div>
+      <div class="stock-cell"><${StockAvatar} symbol=${p.symbol} size=${34} /><div><a class="sym-big" style="font-size:15px" href=${stockHref(p.symbol)}>${p.symbol}</a>
+        <div class="faint" style="font-size:12px;white-space:nowrap">${fmt.int(p.shares)} sh · <span class=${tone(p.pnl_pct)}>${fmt.pct(p.pnl_pct)}</span></div></div></div>
       <div><${StatusChip} status=${p.status} /></div>
       <div class="reason">${p.reason}${p.cautions && p.cautions.length > 0 && html`<div style="margin-top:4px">
         <${Cautions} items=${p.cautions} compact /></div>`}</div>
@@ -223,10 +236,10 @@ function SignalCard({ s, model }) {
   const risk = s.close - s.stop, reward = s.target - s.close;
   const lossW = (risk / (risk + reward)) * 100;
   const logHref = buyHref(s.symbol, s.entry_high, s.shares);
-  return html`<article class="card signal">
+  return html`<article class="card signal spot">
     <div class="sig-head">
       <div class="who">
-        <div class="sym-line"><a class="sym-big" href=${stockHref(s.symbol)}>${s.symbol}</a><${IndexPills} info=${i} />
+        <div class="sym-line"><${StockAvatar} symbol=${s.symbol} size=${34} /><a class="sym-big" href=${stockHref(s.symbol)}>${s.symbol}</a><${IndexPills} info=${i} />
           ${s.source === 'model'
             ? html`<span class="model-pick" title="One of the prediction model's top picks today that also passes the liquidity and uptrend checks. Same stop, target and sizing as any BUY."><${Icon} name="target" size=${12} />Model pick</span>`
             : s.setup && html`<span class="tag">${s.setup}</span>`}</div>

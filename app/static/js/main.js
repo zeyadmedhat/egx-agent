@@ -21,6 +21,15 @@ import { PaperPage } from './pages/paper.js';
 import { BacktestPage } from './pages/backtest.js';
 import { SettingsPage } from './pages/settings.js';
 
+// Cards with the "spot" class glow softly where the mouse is (see .spot in app.css).
+document.addEventListener('pointermove', e => {
+  const card = e.pointerType === 'mouse' && e.target.closest && e.target.closest('.spot');
+  if (!card) return;
+  const r = card.getBoundingClientRect();
+  card.style.setProperty('--mx', `${e.clientX - r.left}px`);
+  card.style.setProperty('--my', `${e.clientY - r.top}px`);
+}, { passive: true });
+
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
 const PAGES = Object.fromEntries(Object.entries({
   today: TodayPage, market: MarketPage, predict: PredictPage, screener: ScreenerPage, watchlist: WatchlistPage, news: NewsPage, stock: StockPage, calc: CalcPage, dividends: DividendsPage, portfolio: PortfolioPage, paper: PaperPage,

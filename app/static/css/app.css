@@ -223,7 +223,7 @@ a.badge:hover { filter: brightness(1.15); }
 .btn:hover { background: var(--panel-3); color: var(--text); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.btn.primary:hover { background-color: var(--accent-2); border-color: var(--accent-2); }
 .btn.success { background: var(--up); border-color: var(--up); color: #03140c; }
 .btn.danger { background: var(--down); border-color: var(--down); color: #fff; }
 .btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--down) 45%, transparent); color: var(--down); }
@@ -757,3 +757,101 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--up); display: inline-block;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 25%, transparent); }
 .live-list { padding: 4px 6px 0; }
+
+/* ------------------------------------------------------------------ touches inspired by 21st.dev components */
+/* Primary buttons: a light sweeps across on hover. */
+.btn.primary {
+  background-image: linear-gradient(110deg, transparent 35%, rgba(255, 255, 255, .22) 50%, transparent 65%);
+  background-size: 250% 100%; background-position: 130% 0; background-repeat: no-repeat;
+  transition: background-color .12s, background-position .7s ease, border-color .12s;
+}
+.btn.primary:hover { background-position: -30% 0; }
+
+/* Cards that glow softly where the mouse is (main.js sets --mx / --my). */
+.spot { position: relative; isolation: isolate; }
+.spot::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1; opacity: 0;
+  transition: opacity .3s;
+  background: radial-gradient(360px circle at var(--mx, 50%) var(--my, 0%), var(--accent-soft), transparent 55%);
+}
+@media (hover: hover) {
+  .spot:hover::before { opacity: 1; }
+  .spot:hover { border-color: var(--border-2); }
+}
+.card.spot, .kpi.spot { transition: border-color .2s, transform .2s; }
+
+/* KPI tiles: icon in a soft square, value counts up. */
+.kpi { position: relative; overflow: hidden; }
+.kpi.has-icon .k-label { padding-right: 36px; }
+.kpi .k-icon {
+  position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+}
+.kpi.compact .k-icon { top: 9px; width: 26px; height: 26px; }
+.kpi .k-value { margin-top: 8px; }
+
+/* Up / down pill with an arrow. */
+.chg-pill {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px;
+  font-weight: 700; white-space: nowrap; background: var(--muted-soft); color: var(--text-2); letter-spacing: 0;
+}
+.chg-pill.up { background: var(--up-soft); color: var(--up); }
+.chg-pill.down { background: var(--down-soft); color: var(--down); }
+.market-price .chg-pill { font-size: 13px; height: 24px; align-self: center; }
+
+/* Stock badge: coloured initials, same colour for a stock everywhere. */
+.avatar {
+  display: inline-grid; place-items: center; flex: none; border-radius: 9px; font-weight: 800; letter-spacing: -.02em;
+  background: hsl(var(--h) 70% 55% / .15); color: hsl(var(--h) 80% 70%); border: 1px solid hsl(var(--h) 70% 55% / .28);
+}
+[data-theme="light"] .avatar { color: hsl(var(--h) 65% 36%); background: hsl(var(--h) 70% 50% / .1); }
+.stock-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sym-line .avatar { margin-right: 3px; }
+.stock-cell > div { min-width: 0; }
+.table .stock-cell .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+
+/* Ticker tape: prices scroll sideways and stop while the mouse is on them. */
+.tape {
+  display: flex; align-items: stretch; margin-bottom: 14px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); overflow: hidden;
+}
+.tape-label {
+  flex: none; display: flex; align-items: center; padding: 0 14px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-3); border-right: 1px solid var(--border); background: var(--bg-2);
+}
+.tape-view {
+  flex: 1; min-width: 0; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+.tape-track { display: flex; width: max-content; animation: tape var(--dur, 40s) linear infinite; }
+.tape:hover .tape-track, .tape:focus-within .tape-track { animation-play-state: paused; }
+.tape-item {
+  display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; white-space: nowrap; color: var(--text);
+  border-right: 1px solid var(--border); font-size: 13px;
+}
+.tape-item:hover { background: var(--panel-2); color: var(--text); }
+@keyframes tape { to { transform: translateX(-50%); } }
+@media (max-width: 600px) { .tape-label { display: none; } }
+
+/* Segmented control: the highlight slides to the chosen option (ui.js sets --x/--y/--w/--h). */
+.seg { position: relative; }
+.seg button { position: relative; z-index: 1; }
+.seg.slid button.on { background: transparent; box-shadow: none; }
+.seg.slid::before {
+  content: ""; position: absolute; left: 0; top: 0; width: var(--w); height: var(--h); border-radius: 7px;
+  transform: translate(var(--x), var(--y)); background: var(--panel); box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+}
+.seg.slid[data-ready]::before { transition: transform .28s cubic-bezier(.3, .7, .2, 1), width .28s, height .28s; }
+
+/* Market card: a faint dot grid behind the index. */
+.market-main {
+  background-image: radial-gradient(var(--grid) 1.2px, transparent 1.2px); background-size: 16px 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tape-view { overflow-x: auto; -webkit-mask-image: none; mask-image: none; }
+  .tape-track { animation: none; }
+  .tape-track > [aria-hidden] { display: none; }
+  .seg.slid[data-ready]::before, .btn.primary, .spot::before { transition: none; }
+}
