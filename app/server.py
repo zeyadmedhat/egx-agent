@@ -443,6 +443,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def stock(symbol: str, d: views.Data = Depends(get_data)):
         return JSON(views.stock_detail(d, symbol))
 
+    @app.get("/api/stock/{symbol}/intraday")
+    def stock_intraday(symbol: str, d: views.Data = Depends(get_data)):
+        return JSON(views.stock_intraday(d, symbol))
+
     @app.get("/api/watchlist")
     def watchlist(d: views.Data = Depends(get_data)):
         return JSON({"symbols": views.watchlist(d)})

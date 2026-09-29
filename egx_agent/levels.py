@@ -42,6 +42,21 @@ def _swings(x: np.ndarray, k: int, low: bool) -> list[int]:
     return list(np.flatnonzero(x[k:len(x) - k] == ext) + k)
 
 
+def _fib_leg(o: dict) -> dict | None:
+    """The latest big rise the Fibonacci levels are measured on: the lowest low before the ~6-month top, up to that
+    top. None when it rose less than 5%."""
+    hi, lo = o["high"], o["low"]
+    start = max(0, len(hi) - LEG)
+    h_i = start + int(np.nanargmax(hi[start:]))
+    l_i = start + int(np.nanargmin(lo[start:h_i + 1]))
+    top, bottom = float(hi[h_i]), float(lo[l_i])
+    if not top > bottom * 1.05:
+        return None
+    return {"top": top, "bottom": bottom, "top_date": o["dates"][h_i], "bottom_date": o["dates"][l_i],
+            "levels": [{"r": r, "price": top - r * (top - bottom)} for r in FIB_RET]
+            + [{"r": e, "price": bottom + e * (top - bottom)} for e in FIB_EXT]}
+
+
 def _candidates(o: dict) -> list[tuple[float, float, str]]:
     """(price, weight, what) for every level the tools mark."""
     hi, lo, cl, vol = o["high"], o["low"], o["close"], o["volume"]
@@ -51,12 +66,9 @@ def _candidates(o: dict) -> list[tuple[float, float, str]]:
         out.append((lo[j], 2.0, f"swing low {o['dates'][j]}"))
     for j in _swings(hi, SWING, False):
         out.append((hi[j], 2.0, f"swing high {o['dates'][j]}"))
-    # Fibonacci on the latest big rise: the lowest low before the ~6-month top, up to that top.
-    start = max(0, n - LEG)
-    h_i = start + int(np.nanargmax(hi[start:]))
-    l_i = start + int(np.nanargmin(lo[start:h_i + 1]))
-    top, bottom = hi[h_i], lo[l_i]
-    if top > bottom * 1.05:
+    fib = _fib_leg(o)
+    if fib:
+        top, bottom = fib["top"], fib["bottom"]
         for r in FIB_RET:
             out.append((top - r * (top - bottom), 1.5 if r in (0.382, 0.5, 0.618) else 1.0, f"Fibonacci {r:.1%}"))
         for e in FIB_EXT:
@@ -156,11 +168,13 @@ def chart_plan(o: dict, cfg: dict) -> dict | None:
         # every level down to the stop's and up to the target's (at least 3 each side), nearest first
         "supports": [_public(z) for i, z in enumerate(supports) if i < 3 or z["high"] >= stop][:8],
         "resistances": [_public(z) for i, z in enumerate(resist) if i < 3 or z["low"] <= target + atr][:8],
+        "fib": _fib_leg(o),
     }
 
 
 def _public(z: dict) -> dict:
-    return {"price": z["price"], "strength": round(z["strength"], 1), "sources": z["sources"][:4]}
+    return {"price": z["price"], "low": z["low"], "high": z["high"], "strength": round(z["strength"], 1),
+            "sources": z["sources"][:4]}
 
 
 def arrays(ind: pd.DataFrame) -> dict:
@@ -176,6 +190,32 @@ def plan_at(ind: pd.DataFrame, cfg: dict, day=None) -> dict | None:
     return chart_plan(arrays(ind.tail(LOOKBACK)), cfg)
 
 
+FRAME_COLS = ("stop", "target", "near_support", "near_resist", "support_strength")
+
+
+def frame(ind: pd.DataFrame, cfg: dict, rows: np.ndarray | None = None) -> pd.DataFrame:
+    """chart_plan on each given row (a boolean mask; default every row), each from the bars up to that row only:
+    the stop, the target, how far the nearest support is under the close and the nearest resistance above it (as
+    fractions of the close) and that support's strength. NaN on other rows and where the chart gives no plan."""
+    n = len(ind)
+    out = {k: np.full(n, np.nan) for k in FRAME_COLS}
+    if rows is None:
+        rows = np.ones(n, dtype=bool)
+    full = arrays(ind) if n else {}
+    for i in np.flatnonzero(rows):
+        a = max(0, i + 1 - LOOKBACK)
+        p = chart_plan({k: v[a:i + 1] for k, v in full.items()}, cfg)
+        if p:
+            c = p["close"]
+            out["stop"][i], out["target"][i] = p["stop"], p["target"]
+            if p["supports"]:
+                out["near_support"][i] = 1 - p["supports"][0]["price"] / c
+                out["support_strength"][i] = p["supports"][0]["strength"]
+            if p["resistances"]:
+                out["near_resist"][i] = p["resistances"][0]["price"] / c - 1
+    return pd.DataFrame(out, index=ind.index)
+
+
 def apply(ind: pd.DataFrame, sf: pd.DataFrame, cfg: dict, rows: np.ndarray | None = None) -> pd.DataFrame:
     """Replace the ATR stop/target in a signal frame with the chart's on the given rows (a boolean mask; default the
     last row). Does nothing unless cfg['levels_mode'] is 'chart'."""
@@ -184,15 +224,11 @@ def apply(ind: pd.DataFrame, sf: pd.DataFrame, cfg: dict, rows: np.ndarray | Non
     if rows is None:
         rows = np.zeros(len(ind), dtype=bool)
         rows[-1] = True
-    full = arrays(ind)
-    stop, target = sf["stop"].to_numpy(float).copy(), sf["target"].to_numpy(float).copy()
-    for i in np.flatnonzero(rows):
-        a = max(0, i + 1 - LOOKBACK)
-        p = chart_plan({k: v[a:i + 1] for k, v in full.items()}, cfg)
-        if p:
-            stop[i], target[i] = p["stop"], p["target"]
+    lv = frame(ind, cfg, rows)
+    ok = lv["stop"].notna().to_numpy()
     sf = sf.copy()
-    sf["stop"], sf["target"] = stop, target
+    sf["stop"] = np.where(ok, lv["stop"], sf["stop"])
+    sf["target"] = np.where(ok, lv["target"], sf["target"])
     return sf
 
 

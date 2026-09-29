@@ -57,19 +57,37 @@ class TvProvider:
     def fetch(self, symbol: str, n_bars: int, exchange: str = "EGX") -> pd.DataFrame | None:
         from tvDatafeed import Interval
 
+        raw = self._hist(symbol, n_bars, Interval.in_daily, exchange)
+        if raw is not None:
+            df = raw.reset_index()[["datetime", "open", "high", "low", "close", "volume"]]
+            df["date"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d")
+            df = df.drop(columns="datetime").drop_duplicates("date", keep="last")
+            return df[["date", "open", "high", "low", "close", "volume"]].dropna()
+        return None
+
+    def fetch_hourly(self, symbol: str, n_bars: int) -> pd.DataFrame | None:
+        """Hourly bars: columns ts (YYYY-MM-DD HH:MM, the bar's start in the machine's time zone, Cairo on the
+        Mac and on the website's runs), open, high, low, close, volume; oldest first."""
+        from tvDatafeed import Interval
+
+        raw = self._hist(symbol, n_bars, Interval.in_1_hour)
+        if raw is None:
+            return None
+        df = raw.reset_index()[["datetime", "open", "high", "low", "close", "volume"]]
+        df["ts"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d %H:%M")
+        df = df.drop(columns="datetime").drop_duplicates("ts", keep="last")
+        return df[["ts", "open", "high", "low", "close", "volume"]].dropna()
+
+    def _hist(self, symbol: str, n_bars: int, interval, exchange: str = "EGX"):
         tv_symbol = self.aliases.get(symbol, symbol) if exchange == "EGX" else symbol
         for attempt in range(self.retries):
             try:
-                raw = self._client().get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily,
-                                              n_bars=n_bars)
+                raw = self._client().get_hist(symbol=tv_symbol, exchange=exchange, interval=interval, n_bars=n_bars)
             except Exception as exc:  # network errors inside the library
                 log.debug("fetch %s failed: %s", symbol, exc)
                 raw = None
             if raw is not None and len(raw):
-                df = raw.reset_index()[["datetime", "open", "high", "low", "close", "volume"]]
-                df["date"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d")
-                df = df.drop(columns="datetime").drop_duplicates("date", keep="last")
-                return df[["date", "open", "high", "low", "close", "volume"]].dropna()
+                return raw
             time.sleep(self.pause * (attempt + 1))
         return None
 
@@ -192,6 +210,39 @@ def update_prices(
     conn.commit()
     return {"updated": len(updated), "failed": sorted(failed), "readjusted": sorted(readjusted),
             "not_traded": sorted(not_traded), "events": events}
+
+
+HOURLY_BARS = 1000   # about 8 months of hourly bars (EGX trades 5 a day), so about 400 four-hour bars
+
+
+def update_intraday(conn: sqlite3.Connection, symbols: list[str], provider=None, workers: int = 4,
+                    aliases: dict[str, str] | None = None) -> dict:
+    """Download each stock's hourly bars for the 1-hour and 4-hour charts, replacing the stored ones. Only a chart
+    needs them, so a stock that fails keeps what it had."""
+    provider = provider or TvProvider(aliases=aliases)
+    got, failed = 0, []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(provider.fetch_hourly, s, HOURLY_BARS): s for s in symbols}
+        for fut in as_completed(futures):
+            df = fut.result()
+            if df is None or df.empty:
+                failed.append(futures[fut])
+            else:
+                db.replace_intraday(conn, futures[fut], df)
+                got += 1
+    return {"updated": got, "failed": sorted(failed)}
+
+
+def four_hour(hourly: pd.DataFrame, session_start: int = 10) -> pd.DataFrame:
+    """4-hour bars from hourly ones, as TradingView makes them for EGX: one from the 10:00 open to 14:00, then
+    14:00 to the close."""
+    if hourly.empty:
+        return hourly
+    ts = hourly.index
+    start = ts.normalize() + pd.to_timedelta(session_start + (ts.hour - session_start) // 4 * 4, unit="h")
+    g = hourly.groupby(start)
+    return pd.DataFrame({"open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
+                         "close": g["close"].last(), "volume": g["volume"].sum()})
 
 
 DEEP_YEARS = 10  # the prediction model learns from this much history

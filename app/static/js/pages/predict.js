@@ -1,5 +1,5 @@
 // Predict: a machine-learning model's chance that a trade reaches its target before its stop. Information only.
-import { html, useApi, useState, startJob, fmt, tone, go, stockHref, STATIC } from '../lib.js';
+import { html, useApi, useState, startJob, fmt, tone, cls, go, stockHref, STATIC } from '../lib.js';
 import {
   Icon, Badges, Kpi, Callout, More, PageHead, SectionHead, PageLoading, DataTable, StockCell, Seg, JobProgress,
   useJob, StatusChip, Chance, Empty, MarketSwitch, Fold, ShariahNote,
@@ -38,6 +38,7 @@ export function PredictPage() {
     <${Callout} tone=${GRADE_TONE[r.grade] || ''}><b>${hz}-session model: ${r.verdict}</b>${' '}
       Tested on ${fmt.date(r.from)} – ${fmt.date(r.to)}, with each year predicted by a version that had never seen it.<//>
     <div style="margin-top:10px"><${Health} h=${data.health} /></div>
+    <${Recent} rec=${(data.recent || {})[String(hz)]} hz=${hz} />
     ${data.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${data.switch} /></div>`}
 
     <div class="row" style="margin:18px 0 12px;justify-content:space-between">
@@ -56,7 +57,7 @@ export function PredictPage() {
 
     <section class="section">
       <${SectionHead} title="Today's chances" count=${data.rows.length}
-        hint=${`From the ${fmt.date(data.date)} close, sorted by the model's rank. A chance is shown only for its top ${fmt.int(data.top_n)} stocks.`}>
+        hint=${`From the ${fmt.date(data.date)} close, sorted by the model's rank. A chance is shown only for its top ${fmt.int(data.top_n)} stocks.${data.prev_date ? ` ▲▼ is the move in rank since the ${fmt.date(data.prev_date)} close.` : ''}`}>
         <${ShariahNote} mode=${data.shariah_filter} /><${Seg} options=${SHOW} value=${show} onChange=${setShow} /><//>
       <div class="card flush"><${ChanceTable} rows=${rows} hz=${hz} base=${base} /></div>
     </section>
@@ -110,9 +111,10 @@ function Intro({ data, onTrain, running }) {
   return html`<div class="card predict-intro">
     <${JobProgress} kind="train" title="Training the prediction model…" />
     <h3>${t('What it predicts')}</h3>
-    <p>For every liquid stock, after each close: if you bought at the next open with the agent's usual plan (stop ${lv.atr_stop_mult}×
-      the average daily range below, kept ${lv.stop_min_pct}–${lv.stop_max_pct}% under the price; target ${lv.target_r}× the
-      risk above), what is the chance the <b>target is reached before the stop</b>, within 10 sessions (~2 weeks) and within
+    <p>For every liquid stock, after each close: if you bought at the next open with the agent's usual plan (${lv.levels_mode === 'chart'
+      ? `the stop just under the nearest solid support and the target just under resistance, kept ${lv.stop_min_pct}–${lv.stop_max_pct}% under the price`
+      : `stop ${lv.atr_stop_mult}× the average daily range below, kept ${lv.stop_min_pct}–${lv.stop_max_pct}% under the price; target ${lv.target_r}× the risk above`}),
+      what is the chance the <b>target is reached before the stop</b>, within 10 sessions (~2 weeks) and within
       20 sessions (~1 month)?</p>
     <h3>${t('How it learns')}</h3>
     <ul class="reasons">
@@ -134,15 +136,35 @@ function Intro({ data, onTrain, running }) {
   </div>`;
 }
 
+// What trades it scored like this averaged in its tests, after fees (predict.ret_calibrator): wins, stops and the
+// ones that ran out of time together. Only for the stocks it gives a chance for.
+export const expected = (r, hz) => (r[`top${hz}`] && r[`exp${hz}`] != null ? r[`exp${hz}`] : null);
+
+function RankMove({ now, before }) {
+  if (!now || !before || now === before) return null;
+  const up = now < before;
+  return html`<span class=${cls('rank-move', up ? 'up' : 'down')} title=${t('#{n} at the close before', { n: fmt.int(before) })}>
+    ${up ? '▲' : '▼'}${fmt.int(Math.abs(before - now))}</span>`;
+}
+
 function ChanceTable({ rows, hz, base }) {
   const columns = [
-    { key: `rank${hz}`, label: '#', align: 'r', width: '44px', fmt: v => html`<span class="faint">${fmt.int(v)}</span>` },
+    { key: `rank${hz}`, label: '#', align: 'r', width: '64px',
+      render: r => html`<span class="faint">${fmt.int(r[`rank${hz}`])}</span> <${RankMove} now=${r[`rank${hz}`]} before=${r[`prev_rank${hz}`]} />` },
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
     { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
     { key: 'p10', label: '2 weeks', align: 'r', title: 'Chance of target before stop within 10 sessions',
       render: r => html`<${Chance} p=${r.p10} base=${base[10]} top=${r.top10} />` },
     { key: 'p20', label: '1 month', align: 'r', title: 'Chance of target before stop within 20 sessions',
       render: r => html`<${Chance} p=${r.p20} base=${base[20]} top=${r.top20} />` },
+    { key: 'ev', label: 'Expected', align: 'r', sortValue: r => expected(r, hz) ?? -1,
+      title: 'What trades it scored like this averaged in its tests, after fees: wins, stops and time-outs together',
+      render: r => { const v = expected(r, hz); return v == null ? html`<span class="faint">–</span>` : html`<b class=${tone(v)}>${fmt.pct(v, 1)}</b>`; } },
+    { key: 'stop_pct', label: 'Stop / target', align: 'r', title: "The chart's stop-loss and target for a buy at this close",
+      render: r => html`<span class="down">${fmt.pct(-r.stop_pct, 1)}</span> <span class="faint">/</span> <span class="up">${fmt.pct(r.target_pct, 1)}</span>` },
+    { key: 'rr', label: 'R/R', align: 'r', sortValue: r => (r.stop_pct ? r.target_pct / r.stop_pct : 0),
+      title: 'Reward / risk: the target gain for each 1 of possible loss',
+      render: r => html`<span class="faint">${r.stop_pct ? `${fmt.num(r.target_pct / r.stop_pct, 1)}×` : '–'}</span>` },
     { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
     { key: 'action', label: 'Agent', sortValue: r => (r.action === 'BUY' ? 0 : r.action ? 1 : r.held ? 2 : 3),
       render: r => html`<div class="row" style="gap:6px">${r.action && html`<${StatusChip} status=${r.action} />`}
@@ -151,6 +173,16 @@ function ChanceTable({ rows, hz, base }) {
   return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol} key=${hz} limit=${10}
     sort=${{ key: `rank${hz}`, dir: 'asc' }} onRowClick=${r => go(stockHref(r.symbol))}
     empty="None of today's BUY signals, watchlist stocks or your holdings are liquid enough to be scored." />`;
+}
+
+// Lately, in one line: its daily top 10 over the last 30 decided sessions.
+function Recent({ rec, hz }) {
+  if (!rec || !rec.n) return null;
+  return html`<p class="recent-line"><${Icon} name="history" size=${14} />
+    ${t('Last {days} sessions: of its daily top {top}, {hits} reached the target first and {misses} did not, averaging {ret} a trade (all scored stocks {all}).', {
+      days: fmt.int(rec.days), top: fmt.int(rec.top), hits: fmt.int(rec.hits), misses: fmt.int(rec.misses),
+      ret: fmt.pct(rec.ret, 2), all: fmt.pct(rec.all_ret, 2) })}
+    <span class="faint"> ${fmt.date(rec.from)} – ${fmt.date(rec.to)}, ${t('{n} sessions each', { n: hz })}</span></p>`;
 }
 
 function GroupsTable({ groups }) {

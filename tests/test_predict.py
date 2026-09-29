@@ -134,6 +134,8 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
 
     lt = predict.latest(conn)
     assert len(lt) == 10 and lt["p10"].between(0, 1).all() and set(lt["rank10"]) <= set(range(1, 11))
+    # what trades it scored like this averaged in its tests: never higher for a lower-ranked stock
+    assert lt["exp10"].notna().all() and lt.sort_values("rank10")["exp10"].is_monotonic_decreasing
     day = lt["date"].iloc[0]
     assert conn.execute("SELECT COUNT(*) FROM predictions WHERE resolved IS NULL").fetchone()[0] == 30
     # why it scored each stock as it did: plain words, up and down

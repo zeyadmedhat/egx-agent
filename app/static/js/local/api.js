@@ -258,6 +258,7 @@ async function stockDetail(c, symbol) {
       { label: 'Stop', price: pos[0].stop, kind: 'stop' }, { label: 'Target', price: pos[0].target, kind: 'target' }];
   }
   out.levels = levels;
+  out.telegram = c.core.telegram || null;     // the site's bot: /watch SYMBOL levels (app/alerts.py)
   const real = new Set(c.book.trades.filter(t => t.account === 'real').map(t => t.id));
   const groups = new Map();
   for (const f of c.book.fills) {
@@ -586,7 +587,8 @@ export async function localApi(path, { method = 'GET', body } = {}) {
       case 'status': return status(c, await openPositions(c));
       case 'stocks': return c.core.stocks;
       case 'today': return today(c);
-      case 'stock': return stockDetail(c, decodeURIComponent(b || ''));
+      case 'stock': return x === 'intraday' ? load(`intraday/${decodeURIComponent(b || '').toUpperCase()}`).catch(() => ({}))
+        : stockDetail(c, decodeURIComponent(b || ''));
       case 'portfolio': return b === 'history' ? historyView(c) : portfolioView(c);
       case 'calc': return calcView(c);
       case 'screener': return screenerView(c);

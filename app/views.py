@@ -467,6 +467,23 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     return out
 
 
+INTRADAY_SHOWN = {"1h": 700, "4h": 400}     # bars per chart: about 5½ months of hours, 8 months of 4-hour bars
+
+
+def stock_intraday(d: Data, symbol: str) -> dict:
+    """The 1-hour and 4-hour charts: {"1h": series, "4h": series} like stock_public's, with `time` in seconds and
+    Cairo's clock read as UTC (so the chart labels show the exchange's hours). Empty when there are no hourly bars."""
+    hourly = db.load_intraday(d.conn, symbol.upper())
+    out = {}
+    for key, df in (("1h", hourly), ("4h", prices.four_hour(hourly))):
+        if len(df) < 30:
+            continue
+        shown = add_indicators(df).tail(INTRADAY_SHOWN[key])
+        out[key] = {"time": ((shown.index - pd.Timestamp(0)) // pd.Timedelta(seconds=1)).tolist(),
+                    **{c: column(shown[c]) for c in SERIES_COLS}}
+    return clean(out)
+
+
 def screener(d: Data) -> dict:
     """Every stock's numbers for the screener, the same for everyone: the site publishes this, and your own marks
     (your Shariah filter's effect on signals, what you hold) are added where you look (screener_view)."""
@@ -876,7 +893,7 @@ def predictions(d: Data) -> dict:
             "SELECT symbol, horizon, why FROM predictions WHERE date=?", (lt["date"].iloc[0],))}
         by = {}
         for sym, r in lt.iterrows():
-            by[sym] = {f"{k}{hz}": r.get(f"{k}{hz}") for hz in predict.HORIZONS for k in ("p", "rank")}
+            by[sym] = {f"{k}{hz}": r.get(f"{k}{hz}") for hz in predict.HORIZONS for k in ("p", "rank", "exp")}
             by[sym].update({f"top{hz}": bool(r.get(f"rank{hz}", cut + 1) <= cut) for hz in predict.HORIZONS})
             # what pushed its score up or down (predict.explain): [{f, up, text}, …]
             by[sym].update({f"why{hz}": json.loads(why.get((sym, hz)) or "null") for hz in predict.HORIZONS})
@@ -900,7 +917,8 @@ def predict_public(d: Data) -> dict:
     out: dict = {"model": None, "rows": [], "deep": deep, "deep_years": prices.DEEP_YEARS,
                  "horizons": list(predict.HORIZONS), "retrain_days": predict.RETRAIN_DAYS,
                  "features": {str(hz): len(predict.HORIZON_FEATURES[hz]) for hz in predict.HORIZONS},
-                 "levels": {k: d.cfg[k] for k in ("atr_stop_mult", "stop_min_pct", "stop_max_pct", "target_r")}}
+                 "levels": {k: d.cfg.get(k) for k in ("atr_stop_mult", "stop_min_pct", "stop_max_pct", "target_r",
+                                                      "levels_mode")}}
     if not meta or not predict.model_path(root).exists():
         return out
     out["model"] = {
@@ -920,6 +938,15 @@ def predict_public(d: Data) -> dict:
             **preds["by_symbol"].get(sym, {}),
         })
     out["live"] = predict.live_record(d.conn, since=meta.get("live_since"))
+    out["recent"] = predict.recent_record(d.conn, since=meta.get("live_since"))
+    # each stock's rank at the close before, for the ▲▼ next to today's rank
+    prev = d.conn.execute("SELECT MAX(date) FROM predictions WHERE date < ?", (preds["date"],)).fetchone()[0]
+    if prev:
+        before = {hz: predict.ranks_for(d.conn, prev, hz) for hz in predict.HORIZONS}
+        for row in out["rows"]:
+            for hz in predict.HORIZONS:
+                row[f"prev_rank{hz}"] = (before[hz].get(row["symbol"]) or {}).get("rank")
+        out["prev_date"] = prev
     b = breadth_data(d)
     out["switch"] = breadth.switch(b["above50"]) if b else None
     # the BUY rules with and without it on its test years, whether it still works live, and the 5-day experiment

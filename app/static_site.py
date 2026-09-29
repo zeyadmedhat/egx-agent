@@ -140,9 +140,12 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
                               "screener": views.screener(d), "history": views.history_data(d),
                               "dividends": views.dividend_calendar(d), "news": views.news_feed(d)}
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
+    hourly = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM intraday")}
     for sym in d.table.index:
         if sym in with_prices:
             out[f"stock/{sym}"] = views.stock_public(d, sym, STOCK_COLS, SERIES_TAIL)
+        if sym in hourly:      # the 1-hour and 4-hour charts, loaded only when someone picks them
+            out[f"intraday/{sym}"] = views.stock_intraday(d, sym)
     return out
 
 

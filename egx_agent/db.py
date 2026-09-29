@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS prices (
     open REAL, high REAL, low REAL, close REAL, volume REAL,
     PRIMARY KEY (symbol, date)
 );
+CREATE TABLE IF NOT EXISTS intraday (
+    symbol TEXT NOT NULL,           -- hourly bars for the 1-hour and 4-hour charts (data/prices.py update_intraday)
+    ts     TEXT NOT NULL,           -- YYYY-MM-DD HH:MM, Cairo time, the bar's start
+    open REAL, high REAL, low REAL, close REAL, volume REAL,
+    PRIMARY KEY (symbol, ts)
+);
 CREATE TABLE IF NOT EXISTS stocks (
     symbol TEXT PRIMARY KEY,
     name_ar TEXT,
@@ -235,10 +241,11 @@ def _add_columns(conn: sqlite3.Connection, pairs) -> None:
 
 
 # scans.priority: the model's rank that day (1 = its best), the order BUYs get money in; scans.source: why it's a
-# BUY (rules | model); predictions.why: what pushed the model's score up or down; stocks.listed_by: where the stock
+# BUY (rules | model); predictions.why: what pushed the model's score up or down; predictions.exp_ret: what trades it
+# scored like that averaged in its tests (predict.ret_calibrator); stocks.listed_by: where the stock
 # came from (NULL = Kashif, tradingview = TradingView's EGX list, for stocks Kashif doesn't cover)
 MARKET_COLUMNS = (("stocks", "price_note"), ("stocks", "listed_by"), ("scans", "priority", "REAL"),
-                  ("scans", "source"), ("predictions", "why"))
+                  ("scans", "source"), ("predictions", "why"), ("predictions", "exp_ret", "REAL"))
 
 
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
@@ -343,6 +350,24 @@ def load_prices(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     )
     df["date"] = pd.to_datetime(df["date"])
     return df.set_index("date")
+
+
+def replace_intraday(conn: sqlite3.Connection, symbol: str, df: pd.DataFrame) -> int:
+    """A stock's hourly bars, replaced as a whole (a bonus share re-bases them all)."""
+    conn.execute("DELETE FROM intraday WHERE symbol=?", (symbol,))
+    conn.executemany(
+        "INSERT OR REPLACE INTO intraday(symbol, ts, open, high, low, close, volume) VALUES (?,?,?,?,?,?,?)",
+        [(symbol, ts, float(r.open), float(r.high), float(r.low), float(r.close), float(r.volume))
+         for ts, r in zip(df["ts"], df.itertuples(index=False))])
+    conn.commit()
+    return len(df)
+
+
+def load_intraday(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
+    df = pd.read_sql_query("SELECT ts, open, high, low, close, volume FROM intraday WHERE symbol=? ORDER BY ts",
+                           conn, params=(symbol,))
+    df["ts"] = pd.to_datetime(df["ts"])
+    return df.set_index("ts")
 
 
 def last_price_date(conn: sqlite3.Connection, symbol: str) -> str | None:

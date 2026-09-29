@@ -198,7 +198,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             if data_date and final and subs["connected"]:
                 text = alerts.build_site_message(views.Data(conn, cfg, views.Cache()), site_url)
                 sent = alerts.send_to_subscribers(conn, token, text, data_date)
-                fired = alerts.fire_watch_alerts(conn, token, data_date)
+                fired = alerts.fire_watch_alerts(conn, token, data_date, cfg)
                 week = alerts.week_of(data_date)
                 if alerts.weekly_due(data_date, None) and any(     # each friend once a week (they can turn it off)
                         s.get("weekly", True) and s.get("weekly_for") != week for s in alerts._subscribers(conn).values()):

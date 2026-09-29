@@ -43,11 +43,11 @@ The ⚙ button (**More** on a phone) holds Settings, Admin, the language and the
 | **Today → Signals** | The BUY signals (each with **Log buy**, **Size it** and **Why this signal**) and the stocks close to a BUY |
 | **Today → News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month |
 | **Market → Overview** | Breadth: how many stocks are above their 50-day average, up/down counts, 1-year highs/lows, the biggest movers (day, week, month), a sector table and the market switch for the model's picks. The 1-year breadth chart and the 20-/200-day counts open on a tap. Context only: it doesn't change the BUY rules |
-| **Market → Predictions** | A machine-learning model's chance that each liquid stock reaches its target before its stop within 2 weeks and 1 month. How it did on years it never saw, its live track record and the experiment open on a tap. Information only |
+| **Market → Predictions** | A machine-learning model's chance that each liquid stock reaches its target before its stop within 2 weeks and 1 month, with each stock's expected result a trade, its chart stop/target and reward/risk, and ▲▼ for its move in rank since the day before. One line on how its daily top 10 did over the last 30 sessions; how it did on years it never saw, its live track record and the experiment open on a tap. Information only |
 | **Market → Dividends & results** | Every EGX company's cash dividends from TradingView (coming up, highest yields), the companies whose results are expected in the next 6 weeks, and the bonus shares, rights issues and splits announced on Mubasher. Recent dividends and last year's bonus shares open on a tap |
-| **Stocks → Stock** | The live price, and a switch between the agent's chart and TradingView's live chart. The agent's chart has averages, volume, RSI, MACD, your levels and your buys/sells marked; a *Stop-loss & target* card gives every stock's stop and target from the chart with the support and resistance behind them; why a stock does or doesn't qualify; the model's chance and rank; news and anything to know now; dividends and Shariah details open on a tap |
+| **Stocks → Stock** | A one-line verdict on top (Buy / Hold / Sell / Wait / Avoid, and why: a summary of the cards below). The live price, and the agent's chart (always first) or TradingView's live chart. The agent's chart has daily, 4-hour and 1-hour candles, the support and resistance zones shaded, Fibonacci levels on a tap, averages, volume, RSI, MACD, your levels and your buys/sells marked; a *Stop-loss & target* card gives every stock's stop and target from the chart with the support and resistance behind them; why a stock does or doesn't qualify; the model's chance and rank; news and anything to know now; dividends and Shariah details open on a tap |
 | **Stocks → Screener** | Every stock in one table: trend (above its 20/50/200-day averages), RSI, 1- and 3-month returns, the model's top picks, dividend yield and signal. Quick presets, the main filters, and **More filters**, remembered on the device |
-| **Stocks → Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/unwatch COMI` and `/list`, checked after each close |
+| **Stocks → Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/watch COMI levels` (a close near a strong support, or at resistance), `/unwatch COMI` and `/list`, checked after each close |
 | **Portfolio → My portfolio** | Three tabs. **Positions**: log real buys and sells. Click a position to sell some or all of it, record a cash dividend, see its transactions, or delete it if it was logged by mistake. Buying more of a stock you hold joins it at the average price. See status, days held (of 20) and P&L after fees and dividends. **Health**: your account against EGX30 since your first buy, money by sector, what you'd lose if every stop were hit, and how closely your stocks move together. **Journal**: win rate, average win and loss, profit factor, results by signal setup, exit reason and month, and your profit after Egypt's inflation |
 | **Portfolio → Paper** | A virtual 100k account the agent trades by itself. Watch it for 3–4 weeks before using real money |
 | **Portfolio → Calculator** | How many shares to buy with your own risk rules (the same sizing as the BUY signals): amount, fees, loss at the stop, gain at the target, and a check against your portfolio limits. Full or half size |
@@ -174,9 +174,12 @@ Be honest with yourself about these numbers:
 ## The prediction model (Predict page)
 
 **What it predicts.** After each close, for every liquid stock: if you bought at the next open with the agent's usual
-plan (stop 2× the average daily range below, kept 4–12% under the price; target 2× the risk above), what is the
-chance the **target is reached before the stop** within 10 sessions (~2 weeks) and within 20 sessions (~1 month)?
-If both are touched on the same day it counts as a loss.
+plan (the stop and target from that day's chart: just under the nearest solid support and resistance, as on the
+stock page; with *Settings → Exits → Stop & target from* set to the ATR rule, stop 2× the average daily range below
+and target 2× the risk above), what is the chance the **target is reached before the stop** within 10 sessions
+(~2 weeks) and within 20 sessions (~1 month)? If both are touched on the same day it counts as a loss. Trained on the
+chart's trades, the rules-plus-its-picks backtest made 26.5% a year against 24.4% when it learnt the ATR ones.
+*Expected* on the Predict page is what trades it scored like this averaged in its tests, after fees.
 
 **How it learns.** Press *Train the model* on the Predict page once. The first time it downloads 10 years of prices
 (about 4 minutes); then it trains for about 2 minutes. One gradient-boosting model per horizon learns from every
@@ -328,6 +331,8 @@ skip or resize for results, because the tests didn't cover them.
 - **Prices:** TradingView via the free, unofficial `tvdatafeed` library. It sometimes drops connections, so the
   agent retries. Some renamed companies use a different code on TradingView than on Kashif (e.g. AIHC → AIH,
   ANFI → TYCN); these are translated automatically, and you can add more under *Settings → TradingView code overrides*.
+  Each scan also downloads about 8 months of hourly bars per stock for the 1-hour and 4-hour charts (the 4-hour
+  bars are made from them, 10:00–14:00 and 14:00 to the close, as on TradingView); only the charts use them.
 - **Stocks with no prices anywhere** (listed in *Settings → Data*):
   - **Listed but never traded:** ACFR, ANCC, DCCC, EFAC, GEOS, KNGC, NMIN, POCO, SIEG. They show only a par-value quote
     with zero volume, so no website has a price history for them. The agent re-checks weekly and adds them once

@@ -11,8 +11,16 @@ const RANGES = [
   { value: 60, label: '3M' }, { value: 120, label: '6M' }, { value: 250, label: '1Y' }, { value: 500, label: '2Y' },
   { value: 1000, label: '4Y' }, { value: 100000, label: 'All' },   // labels go through t() in Seg
 ];
+// Bars shown for each range on the 4-hour (2 bars a session) and 1-hour (5 a session) charts.
+const INTRADAY_RANGES = {
+  '4h': [{ value: 44, label: '1M' }, { value: 130, label: '3M' }, { value: 260, label: '6M' }, { value: 100000, label: 'All' }],
+  '1h': [{ value: 25, label: '1W' }, { value: 110, label: '1M' }, { value: 330, label: '3M' }, { value: 100000, label: 'All' }],
+};
+const FRAMES = [{ value: '1d', label: '1D' }, { value: '4h', label: '4H' }, { value: '1h', label: '1H' }];
 const VIEWS = [{ value: 'agent', label: 'Agent chart' }, { value: 'live', label: 'Live (TradingView)' }];
-const PANES = [['ema', 'Averages'], ['volume', 'Volume'], ['rsi', 'RSI'], ['macd', 'MACD']];
+const PANES = [['zones', 'Support & resistance'], ['fib', 'Fibonacci'], ['ema', 'Averages'], ['volume', 'Volume'],
+  ['rsi', 'RSI'], ['macd', 'MACD']];
+const PANES_ON = { zones: true, fib: false, ema: true, volume: true, rsi: true, macd: true };
 
 export function StockPage({ route }) {
   const sym = (route.arg || remember('symbol') || 'COMI').toUpperCase();
@@ -20,13 +28,16 @@ export function StockPage({ route }) {
   const { data, error } = useApi(`/stock/${encodeURIComponent(sym)}`);
   const [bars, setBars] = useState(Number(remember('bars')) || 250);
   const [show, setShow] = useState(() => {
-    try { return { ema: true, volume: true, rsi: true, macd: true, ...JSON.parse(remember('panes') || '{}') }; }
-    catch { return { ema: true, volume: true, rsi: true, macd: true }; }
+    try { return { ...PANES_ON, ...JSON.parse(remember('panes') || '{}') }; }
+    catch { return { ...PANES_ON }; }
   });
   const toggle = k => setShow(s => { const n = { ...s, [k]: !s[k] }; remember('panes', JSON.stringify(n)); return n; });
   const pickRange = v => { setBars(v); remember('bars', v); };
-  const [view, setView] = useState(remember('chart_view') === 'live' ? 'live' : 'agent');
-  const pickView = v => { setView(v); remember('chart_view', v); };
+  const [view, setView] = useState('agent');          // the agent's chart first, every time
+  const [frame, setFrame] = useState(() => (FRAMES.some(f => f.value === remember('frame')) ? remember('frame') : '1d'));
+  const pickFrame = v => { setFrame(v); remember('frame', v); };
+  const [ibars, setIbars] = useState({ '4h': 130, '1h': 110 });
+  const hourly = useApi(view === 'agent' && frame !== '1d' ? `/stock/${encodeURIComponent(sym)}/intraday` : null);
 
   if (!data) return html`<${PageLoading} error=${error} />`;
 
@@ -52,6 +63,7 @@ export function StockPage({ route }) {
 
     ${!data.has_data ? html`<div style="margin-top:14px"><${Callout} tone="warn"><b>${t('No price data.')}</b> ${data.message}<//></div>`
       : html`
+      <${Verdict} data=${data} />
       <div class="kpis" style="margin-top:14px">
         <${Kpi} compact label="Traded per day (20d avg)" value=${`${fmt.short(st.value_avg20)} EGP`} />
         <${Kpi} compact label=${html`<${Term} k="rsi">RSI (14)<//>`} value=${fmt.num(st.rsi14, 0)} sub=${st.rsi14 > 70 ? 'overbought' : st.rsi14 < 30 ? 'oversold' : 'neutral'} />
@@ -63,13 +75,20 @@ export function StockPage({ route }) {
         <div class="stack" style="min-width:0">
         <div class="card chart-card">
           <div class="chart-toolbar">
-            <${Seg} options=${VIEWS} value=${view} onChange=${pickView} />
-            ${view === 'agent' && html`<${Seg} options=${RANGES} value=${bars} onChange=${pickRange} />
+            <${Seg} options=${VIEWS} value=${view} onChange=${setView} />
+            ${view === 'agent' && html`<${Seg} options=${FRAMES} value=${frame} onChange=${pickFrame} />
+            ${frame === '1d' ? html`<${Seg} options=${RANGES} value=${bars} onChange=${pickRange} />`
+              : html`<${Seg} options=${INTRADAY_RANGES[frame]} value=${ibars[frame]} onChange=${v => setIbars(b => ({ ...b, [frame]: v }))} />`}
             <div class="right">${PANES.map(([k, label]) => html`<button class=${cls('toggle-chip', show[k] && 'on')}
               onClick=${() => toggle(k)}>${t(label)}</button>`)}</div>`}
           </div>
-          ${view === 'agent'
-            ? html`<${PriceChart} series=${data.series} levels=${data.levels} fills=${data.fills} bars=${bars} show=${show} />`
+          ${view === 'agent' ? (frame === '1d'
+            ? html`<${PriceChart} series=${data.series} levels=${data.levels} fills=${data.fills} bars=${bars} show=${show} chart=${data.chart} />`
+            : hourly.data && hourly.data[frame]
+              ? html`<${PriceChart} series=${hourly.data[frame]} levels=${data.levels} bars=${ibars[frame]} show=${show} chart=${data.chart} />`
+              : html`<div class="chart-box chart-wait">${hourly.data || hourly.error
+                ? html`<p class="faint">${t('No hourly prices for this stock yet. They download with each scan.')}</p>`
+                : html`<p class="faint">${t('Loading…')}</p>`}</div>`)
             : html`<${LiveChart} symbol=${data.symbol} />
               <p class="faint chart-note">${t(LIVE_NOTE)} ${t('Your buy, stop and target lines are on the Agent chart.')}</p>`}
         </div>
@@ -86,13 +105,73 @@ export function StockPage({ route }) {
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
           ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} />`}
-          ${data.chart && html`<${LevelsPanel} c=${data.chart} held=${!!data.position} />`}
+          ${data.chart && html`<${LevelsPanel} c=${data.chart} held=${!!data.position} sym=${data.symbol} tg=${data.telegram} />`}
           <${SignalPanel} data=${data} />
           ${data.prediction && html`<${PredictionPanel} p=${data.prediction} />`}
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
         </aside>
       </div>`}`;
+}
+
+// The page in one line: Buy / Hold / Sell / Wait / Avoid, from the signal, the checklist, your position, the model
+// and the chart levels. A summary of the cards below, not a new rule.
+export function verdictFor(data) {
+  const st = data.stats || {}, ch = data.chart, pr = data.prediction, pos = data.position, sig = data.signal;
+  const close = st.close;
+  const notes = [];
+  const modelNote = () => {
+    if (!pr) return;
+    if (pr.top10) notes.push(t('The model ranks it in its top 10% (#{rank} of {n}).', { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
+    else if (pr.rank10 && pr.count && pr.rank10 > pr.count / 2) notes.push(t('The model ranks it in its bottom half (#{rank} of {n}).', { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
+  };
+  if (pos) {
+    if (pos.status === 'EXIT') return { kind: 'sell', label: 'Sell', line: pos.reason, notes };
+    const line = t('{a} above your stop ({stop}), {b} to your target ({target}).', {
+      a: fmt.pct(close / pos.stop - 1, 1, false), stop: fmt.price(pos.stop),
+      b: fmt.pct(pos.target / close - 1, 1, false), target: fmt.price(pos.target) });
+    if (pos.status && pos.status !== 'HOLD') notes.push(pos.reason);
+    modelNote();
+    return { kind: 'hold', label: 'Hold', line, notes };
+  }
+  if (sig && sig.action === 'BUY') {
+    modelNote();
+    if (ch && ch.hurdle) notes.push(t('Resistance at {price} comes before the target.', { price: fmt.price(ch.hurdle.price) }));
+    return { kind: 'buy', label: 'Buy', notes, line: t('A BUY signal{setup}: buy up to {price}, stop {stop}, target {target}.', {
+      setup: sig.setup ? ` (${t(sig.setup)})` : '', price: fmt.price(sig.entry_high), stop: fmt.price(sig.stop), target: fmt.price(sig.target) }) };
+  }
+  const list = data.checklist || [];
+  if (list.length && !list[0].ok) {
+    return { kind: 'avoid', label: 'Avoid', notes, line: t('Too thinly traded or its price history is unreliable, so the agent never buys it.') };
+  }
+  if (!sig && list.length > 1 && !list[1].ok) {
+    modelNote();
+    return { kind: 'avoid', label: 'Avoid for now', notes, line: t('Not in an uptrend: the price is under its 20- or 50-day average.') };
+  }
+  const missing = list.filter(c => !c.ok).length;
+  let line = sig ? t('A strong uptrend, but no entry trigger yet.')
+    : t('An uptrend, but {n} of the entry checks are not met yet.', { n: missing });
+  const sup = ch && (ch.supports || [])[0];
+  if (sup && close) {
+    const gap = 1 - sup.price / close;
+    if (gap > 0.05) notes.push(t('The price is {gap} above the nearest support; a better entry is near {price}.', { gap: fmt.pct(gap, 1, false), price: fmt.price(sup.price) }));
+    else notes.push(t('The price is close to support at {price}.', { price: fmt.price(sup.price) }));
+  }
+  if (ch && ch.rr < 1.5) notes.push(t('Reward/risk is only {rr}× from here.', { rr: fmt.num(ch.rr, 1) }));
+  modelNote();
+  return { kind: 'wait', label: 'Wait', line, notes };
+}
+
+const VERDICT_ICON = { buy: 'checkCircle', hold: 'briefcase', sell: 'sell', wait: 'history', avoid: 'xCircle' };
+
+function Verdict({ data }) {
+  const v = verdictFor(data);
+  return html`<div class=${cls('card verdict', v.kind)}>
+    <div class="verdict-head"><span class="verdict-chip"><${Icon} name=${VERDICT_ICON[v.kind]} size=${15} />${t(v.label)}</span>
+      <span class="verdict-line">${v.line}</span></div>
+    ${v.notes.length > 0 && html`<ul class="verdict-notes">${v.notes.map(n => html`<li>${n}</li>`)}</ul>`}
+    <p class="faint verdict-foot">${t('A summary of the cards below, not advice.')}</p>
+  </div>`;
 }
 
 function SignalPanel({ data }) {
@@ -139,7 +218,7 @@ function tagFor(z, c) {
 }
 
 // Stop-loss and target from the chart's support and resistance (egx_agent/levels.py), for every stock.
-function LevelsPanel({ c, held }) {
+function LevelsPanel({ c, held, sym, tg }) {
   const zones = [...(c.resistances || []).slice().reverse().map(z => ({ ...z, side: 'up' })),
     { price: c.close, now: true }, ...(c.supports || []).map(z => ({ ...z, side: 'down' }))];
   return html`<div class="card levels-card">
@@ -172,6 +251,8 @@ function LevelsPanel({ c, held }) {
             <span class="w">${sources(z.sources)}${tagFor(z, c)}</span></div>`)}</div>
       <p class="faint" style="font-size:12px;margin-top:8px">${t('More dots: more tools agree on the level.')}</p><//>
     <${More} label="How these are worked out"><p>${t(LEVELS_HOW)}</p><//>
+    ${tg && tg.bot && html`<p class="faint tg-hint"><${Icon} name="bell" size=${13} />${' '}
+      ${t('A Telegram message when it nears support or reaches resistance: send {cmd} to @{bot}.', { cmd: `/watch ${sym} levels`, bot: tg.bot })}</p>`}
   </div>`;
 }
 

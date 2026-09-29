@@ -153,6 +153,16 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         if prices.INDEX_SYMBOL in res["failed"] or len(res["failed"]) > PRICES_FAILING * len(syms):
             failed.append(checked[-1])
         events = res.get("events", [])
+        say(0.805, "Downloading hourly prices for the 1-hour and 4-hour charts…")
+        checked.append("TradingView hourly prices")
+        try:
+            hourly = prices.update_intraday(conn, [s for s in syms if s != prices.INDEX_SYMBOL],
+                                            aliases=cfg.get("symbol_aliases"))
+            if hourly["failed"] and len(hourly["failed"]) > PRICES_FAILING * len(syms):
+                failed.append(checked[-1])
+        except Exception as exc:  # only the hourly charts need them: they show what was downloaded before
+            warnings.append(f"Hourly prices not updated ({type(exc).__name__})")
+            failed.append(checked[-1])
         say(0.81, "Downloading the dollar rate, interest rates and inflation…")
         try:
             missed = macro.update(conn)

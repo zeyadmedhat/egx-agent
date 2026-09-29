@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import requests
 
-from egx_agent import breadth, config, db, portfolio, predict, scan
+from egx_agent import breadth, config, db, levels, portfolio, predict, scan
 from egx_agent.data import news
 
 from . import views
@@ -293,7 +293,7 @@ def _reply(token: str, chat_id: str, text: str) -> None:
 
 
 # Alerts for the stocks a friend follows: sent after a close, when the stock gets a BUY signal or closes past a price.
-WATCH_RE = re.compile(r"^/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?))?\s*$", re.I)
+WATCH_RE = re.compile(r"^/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?|levels))?\s*$", re.I)
 UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})\s*$", re.I)
 LIST_RE = re.compile(r"^/(?:list|alerts)(?:@\w+)?\s*$", re.I)
 WEEKLY_RE = re.compile(r"^/weekly(?:@\w+)?\s+(on|off)\s*$", re.I)
@@ -301,6 +301,8 @@ MAX_ALERTS = 20
 HELP = ("<b>Alerts for the stocks you follow</b>, checked after each close:\n"
         "/watch COMI: when COMI gets a BUY signal\n"
         "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n"
+        "/watch COMI levels: when COMI closes near a strong support (a place to buy) or reaches resistance "
+        "(a place to take profit)\n"
         "/unwatch COMI: stop COMI's alerts\n"
         "/list: your alerts\n"
         "/weekly off: no Thursday summary (/weekly on to have it again)\n"
@@ -326,6 +328,8 @@ def forget_alerts(conn: sqlite3.Connection, chat_id: str, symbol: str | None = N
 def _alert_text(a) -> str:
     if a["kind"] == "buy":
         return f"{a['symbol']}: a BUY signal"
+    if a["kind"] == "levels":
+        return f"{a['symbol']}: near support or resistance"
     return f"{a['symbol']}: a close {a['kind']} {views.px(a['price'])}"
 
 
@@ -357,6 +361,10 @@ def watch_command(conn: sqlite3.Connection, chat_id: str, text: str) -> str | No
     if m.group(2) is None:
         kind, price = "buy", None
         reply = f"OK: I'll tell you when {sym} gets a BUY signal, after any close."
+    elif m.group(2).lower() == "levels":
+        kind, price = "levels", None
+        reply = (f"OK: I'll tell you when {sym} closes near a strong support or reaches resistance "
+                 "(the levels on its page on the website).")
     else:
         price = float(m.group(2).replace(",", "."))
         if last is None:
@@ -370,10 +378,39 @@ def watch_command(conn: sqlite3.Connection, chat_id: str, text: str) -> str | No
     return reply
 
 
-def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str) -> int:
+NEAR_SUPPORT = 0.015    # a close this close above a strong support zone's top (or inside it) is "near support"
+
+
+def level_touch(d: views.Data, symbol: str, data_date: str) -> dict | None:
+    """Did the close on `data_date` come near a strong support or reach a strong resistance (levels.py)?
+    {key, text}: the key names the zone, so the same touch isn't sent again day after day."""
+    ind = d.indicators(symbol)
+    if ind.empty or str(ind.index[-1].date()) != data_date:
+        return None
+    p = levels.plan_at(ind, d.cfg)
+    if not p:
+        return None
+    c, name = p["close"], _e(symbol)
+    sup = next((z for z in p["supports"] if z["strength"] >= levels.SOLID), None)
+    res = next((z for z in p["resistances"] if z["strength"] >= levels.SOLID), None)
+    if sup and c <= sup["high"] * (1 + NEAR_SUPPORT):
+        return {"key": f"support {sup['price']:.2f}", "text": (
+            f"🔔 <b>{name}</b> closed at {views.px(c)} on {views.nice_date(data_date)}, near support at "
+            f"{views.px(sup['price'])} ({_e(', '.join(sup['sources'][:2]))}). Buyers stepped in there before; a close "
+            f"well under it would break it. Chart stop {views.px(p['stop'])}, target {views.px(p['target'])}.")}
+    if res and c >= res["low"] * 0.99:
+        return {"key": f"resistance {res['price']:.2f}", "text": (
+            f"🔔 <b>{name}</b> closed at {views.px(c)} on {views.nice_date(data_date)}, at resistance "
+            f"{views.px(res['price'])} ({_e(', '.join(res['sources'][:2]))}). Sellers stepped in there before: "
+            "a place to take some profit, or to wait for a clear close above it.")}
+    return None
+
+
+def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str, cfg: dict | None = None) -> int:
     """After a close: tell each connected friend about the stocks they follow. A BUY alert stays (it fires once per
     close with a BUY); a price alert is done once it fires. Returns how many were sent."""
     subs = _subscribers(conn)
+    cache = views.Cache()
     _, df = views.current_scan(conn)
     buys = {r["symbol"]: r for r in views.records(df) if r["action"] == "BUY"}
     sent = 0
@@ -388,6 +425,10 @@ def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str) -> i
                 text = (f"🔔 <b>{_e(a['symbol'])}</b> got a BUY signal at the {views.nice_date(data_date)} close: buy up "
                         f"to {views.px(b['entry_high'])} · stop {views.px(b['stop'])} · target {views.px(b['target'])}."
                         f"\nYour share count is on the website. /unwatch {_e(a['symbol'])} to stop these.")
+        elif a["kind"] == "levels":
+            hit = level_touch(views.Data(conn, cfg or config.DEFAULTS, cache), a["symbol"], data_date)
+            if hit and a["fired"] != hit["key"]:
+                text = hit["text"] + f"\n/unwatch {_e(a['symbol'])} to stop these."
         else:
             row = conn.execute("SELECT close FROM prices WHERE symbol=? AND date=?", (a["symbol"], data_date)).fetchone()
             if row and (row["close"] >= a["price"] if a["kind"] == "above" else row["close"] <= a["price"]):
@@ -400,9 +441,9 @@ def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str) -> i
         except TelegramError:
             continue            # tried again after the next run
         sent += 1
-        if a["kind"] == "buy":
+        if a["kind"] in ("buy", "levels"):      # standing alerts: remember what was sent, so it isn't sent twice
             conn.execute("UPDATE watch_alerts SET fired=? WHERE chat_id=? AND symbol=? AND kind=?",
-                         (data_date, *_alert_key(a)))
+                         (data_date if a["kind"] == "buy" else hit["key"], *_alert_key(a)))
         else:
             _drop_alert(conn, _alert_key(a))
     conn.commit()

@@ -46,8 +46,42 @@ function baseOptions(t, extra = {}) {
 const points = (time, values) => time.map((t, i) => (values[i] == null ? { time: t } : { time: t, value: values[i] }));
 const showRange = (chart, n, bars) => chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - bars), to: n + 2 });
 
+// Shaded price bands across the whole chart, behind the candles: support and resistance zones.
+// bands: [{ low, high, color }]
+class Bands {
+  constructor(bands) { this.bands = bands; this.series = null; }
+  attached({ series }) { this.series = series; }
+  detached() { this.series = null; }
+  updateAllViews() {}
+  paneViews() {
+    const self = this;
+    const draw = target => target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, verticalPixelRatio: vr }) => {
+      if (!self.series) return;
+      for (const b of self.bands) {
+        const pad = b.high === b.low ? b.low * 0.002 : 0;      // a zone from one level: a thin band around it
+        const y1 = self.series.priceToCoordinate(b.high + pad), y2 = self.series.priceToCoordinate(b.low - pad);
+        if (y1 == null || y2 == null) continue;
+        const top = Math.round(Math.min(y1, y2) * vr);
+        ctx.fillStyle = b.color;
+        ctx.fillRect(0, top, bitmapSize.width, Math.max(Math.round(Math.abs(y2 - y1) * vr), Math.round(2 * vr)));
+      }
+    });
+    return [{ zOrder: () => 'bottom', renderer: () => ({ draw() {}, drawBackground: draw }) }];
+  }
+}
+
+// A bar's time for the legend: a date for daily bars, a date and the hour for the 1-hour and 4-hour charts (their
+// times are Cairo's clock written as UTC seconds).
+function barTime(time) {
+  if (typeof time !== 'number') return fmt.date(time);
+  const iso = new Date(time * 1000).toISOString();
+  return `${fmt.date(iso.slice(0, 10))} ${iso.slice(11, 16)}`;
+}
+
 // ------------------------------------------------------------------ price chart (candles, averages, volume, RSI, MACD)
-export function PriceChart({ series, levels = [], fills = [], bars = 250, show }) {
+// chart: the stock's support/resistance plan (levels.py): its zones are shaded when show.zones, its Fibonacci
+// levels drawn when show.fib.
+export function PriceChart({ series, levels = [], fills = [], bars = 250, show, chart: plan = null }) {
   const box = useRef();
   const legend = useRef();
   const chartRef = useRef();
@@ -57,7 +91,9 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show }
     const t = palette();
     const T = series.time;
     const n = T.length;
-    const chart = LWC.createChart(box.current, baseOptions(t));
+    const intraday = typeof T[0] === 'number';
+    const chart = LWC.createChart(box.current, baseOptions(t, intraday
+      ? { timeScale: { borderColor: t.border, rightOffset: 3, timeVisible: true, secondsVisible: false } } : {}));
     chartRef.current = chart;
 
     const candles = chart.addSeries(LWC.CandlestickSeries, {
@@ -85,7 +121,19 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show }
         axisLabelVisible: true, title: l.label,
       });
     }
-    if (fills.length) {
+    if (plan && show.zones) {
+      const shade = (z, color) => ({ low: z.low ?? z.price, high: z.high ?? z.price,
+        color: alpha(color, Math.min(0.05 + z.strength * 0.02, 0.2)) });
+      candles.attachPrimitive(new Bands([...(plan.supports || []).map(z => shade(z, t.up)),
+        ...(plan.resistances || []).map(z => shade(z, t.down))]));
+    }
+    if (plan && plan.fib && show.fib) {
+      for (const f of plan.fib.levels) candles.createPriceLine({
+        price: f.price, color: t.violet, lineWidth: 1, lineStyle: LWC.LineStyle.Dashed,
+        axisLabelVisible: true, title: `Fib ${(f.r * 100).toFixed(1)}%`,
+      });
+    }
+    if (fills.length && !intraday) {
       LWC.createSeriesMarkers(candles, [...fills].sort((a, b) => (a.date < b.date ? -1 : 1)).map(f => ({
         time: f.date, position: f.side === 'buy' ? 'belowBar' : 'aboveBar', color: f.side === 'buy' ? t.up : t.down,
         shape: f.side === 'buy' ? 'arrowUp' : 'arrowDown', text: `${f.side === 'buy' ? 'Buy' : 'Sell'} ${fmt.int(f.shares)}`,
@@ -128,7 +176,7 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show }
       const chg = prev ? series.close[i] / prev - 1 : null;
       const c = chg == null ? '' : chg >= 0 ? 'up' : 'down';
       const parts = [
-        `<span>${fmt.date(T[i])}</span>`,
+        `<span>${barTime(T[i])}</span>`,
         `<span>O <b>${fmt.price(series.open[i])}</b></span>`, `<span>H <b>${fmt.price(series.high[i])}</b></span>`,
         `<span>L <b>${fmt.price(series.low[i])}</b></span>`,
         `<span>C <b>${fmt.price(series.close[i])}</b> <span class="${c}">${fmt.pct(chg, 2)}</span></span>`,
@@ -144,7 +192,7 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show }
     chart.subscribeCrosshairMove(p => writeLegend(p.logical == null ? n - 1 : Math.round(p.logical)));
     showRange(chart, n, bars);
     return () => { chart.remove(); chartRef.current = null; };
-  }, [series, levels, fills, show.ema, show.volume, show.rsi, show.macd, theme]);
+  }, [series, levels, fills, plan, show.ema, show.volume, show.rsi, show.macd, show.zones, show.fib, theme]);
 
   useEffect(() => { if (chartRef.current) showRange(chartRef.current, series.time.length, bars); }, [bars]);
 
