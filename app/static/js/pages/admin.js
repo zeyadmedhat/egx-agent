@@ -1,6 +1,6 @@
 // Admin (the website only): invite friends, look after their accounts, and download a backup.
 import { html, useApi, useState, api, toast, refreshAll, fmt, copyText } from '../lib.js';
-import { Icon, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, Confirm, Field, Empty } from '../ui.js';
+import { Icon, Callout, PageHead, SectionHead, PageLoading, DataTable, Confirm, Field, Empty } from '../ui.js';
 import { t } from '../i18n.js';
 
 function LinkBox({ link, text }) {
@@ -106,6 +106,5 @@ export function AdminPage() {
       text=${confirm.disabled ? 'They can log in again with their password.'
         : "They're signed out and can't log in. Their data is kept, and you can switch them back on any time."}
       onConfirm=${() => run(() => api(`/admin/users/${confirm.id}/disable`, { method: 'POST', body: { disabled: !confirm.disabled } }))}
-      onClose=${() => setConfirm(null)} />`}
-    <${Disclaimer} />`;
+      onClose=${() => setConfirm(null)} />`}`;
 }

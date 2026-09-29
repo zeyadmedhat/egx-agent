@@ -1,8 +1,9 @@
-// Market: breadth (how many stocks rise with the index) and which sectors lead. Context only; the BUY rules don't use it.
+// Market overview: breadth (how many stocks rise with the index), the biggest movers and which sectors lead. Context
+// only; the BUY rules don't use it. The coming results dates are on the Dividends & results tab.
 import { html, useApi, useState, useStore, fmt, tone, stockHref } from '../lib.js';
 import {
-  Kpi, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, Empty, MarketSwitch, Seg, Term, More, StockCell,
-  SessionBadge,
+  Kpi, Callout, PageHead, SectionHead, PageLoading, DataTable, Empty, MarketSwitch, Seg, Term, SessionBadge,
+  Fold,
 } from '../ui.js';
 import { t, tp } from '../i18n.js';
 import { BreadthChart } from '../charts.js';
@@ -18,7 +19,7 @@ function Heat({ v }) {
 
 function Gauge({ v }) {
   const tn = v >= 0.6 ? 'up' : v >= 0.4 ? 'warn' : 'down';
-  return html`<div class="gauge"><b style="width:38px;text-align:right">${fmt.pct(v, 0, false)}</b>
+  return html`<div class="gauge"><b class="gauge-v">${fmt.pct(v, 0, false)}</b>
     <div class=${`bar ${tn}`}><span style=${`width:${v * 100}%`}></span></div></div>`;
 }
 
@@ -27,7 +28,7 @@ export function MarketPage() {
   if (!data) return html`<${PageLoading} error=${error} />`;
   const b = data.breadth;
   if (!b) {
-    return html`<${PageHead} title="Market" /><${Results} rows=${data.results} /><div class="card"><${Empty} icon="bars" title="No price data yet"
+    return html`<${PageHead} title="Market" /><div class="card"><${Empty} icon="bars" title="No price data yet"
       text="Run a scan first. The breadth numbers are calculated from every stock's price history." /></div>`;
   }
   const v = data.verdict;
@@ -43,8 +44,7 @@ export function MarketPage() {
       ${r.leaders.map(l => html`<a href=${stockHref(l.symbol)} title=${`${fmt.pct(l.r21, 1)} in a month`}>${l.symbol}</a>`)}</div>` },
   ];
   return html`
-    <${PageHead} title="Market"
-      sub=${t("How many EGX stocks are rising along with the index, from the {date} close. Context for you: it doesn't change the BUY rules.", { date: fmt.date(b.date) })}>
+    <${PageHead} title="Market" sub=${t('How many stocks rise with the index, from the {date} close.', { date: fmt.date(b.date) })}>
       <${SessionBadge} dataDate=${b.date} /><//>
     <${Callout} tone=${TONE[v.tone]}><b>${t(v.text)}</b>${change != null
       ? ' ' + t(change >= 0 ? '{pct} of {n} stocks are above their 50-day average, up {pts} points in a week.'
@@ -53,11 +53,9 @@ export function MarketPage() {
       : ''}<//>
     ${v.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${v.switch} /></div>`}
     <div class="kpis" style="margin-top:14px">
-      <${Kpi} label=${html`<${Term} k="breadth">${t('Above 50-day average')}<//>`} icon="bars" value=${fmt.pct(b.above50, 0, false)}
+      <${Kpi} label=${html`<${Term} k="breadth">${t('Above 50-day average')}<//>`} value=${fmt.pct(b.above50, 0, false)}
         valueClass=${b.above50 >= 0.6 ? 'up' : b.above50 < 0.4 ? 'down' : 'warn'}
         sub=${b.above50_week_ago != null ? t('{pct} a week ago', { pct: fmt.pct(b.above50_week_ago, 0, false) }) : 'medium-term trend'} />
-      <${Kpi} label="Above 20-day average" value=${fmt.pct(b.above20, 0, false)} sub="short-term trend" />
-      <${Kpi} label="Above 200-day average" value=${fmt.pct(b.above200, 0, false)} sub="long-term trend" />
       <${Kpi} label="Up / down last session" value=${html`<span class="up">${b.advancers}</span> / <span class="down">${b.decliners}</span>`}
         sub=${t('{n} unchanged', { n: b.unchanged })} />
       <${Kpi} label="52-week highs / lows" value=${html`<span class="up">${b.new_highs}</span> / <span class="down">${b.new_lows}</span>`}
@@ -66,20 +64,19 @@ export function MarketPage() {
 
     ${data.movers && html`<${Movers} data=${data} />`}
 
-    <${Results} rows=${data.results} />
-
-    <section class="section">
-      <${SectionHead} title="Breadth vs EGX30" hint="1 year. When most stocks are above their averages, breakouts have more support." />
-      <div class="card flush"><${BreadthChart} h=${b.history} /></div>
-    </section>
-
     <section class="section">
       <${SectionHead} title="Sectors" count=${b.sectors.length}
         hint="Median return of the sector's stocks. Sectors with one or two stocks move with those names alone." />
       <div class="card flush"><${DataTable} columns=${columns} rows=${b.sectors} rowKey=${r => r.sector}
         sort=${{ key: 'r21', dir: 'desc' }} /></div>
     </section>
-    <${Disclaimer} />`;
+    <${Fold} title="Breadth vs EGX30" hint="1 year. When most stocks are above their averages, breakouts have more support." flush>
+      <${BreadthChart} h=${b.history} /><//>
+    <${Fold} title="Short- and long-term trend" hint="How many stocks are above their 20- and 200-day averages.">
+      <div class="kpis">
+        <${Kpi} label="Above 20-day average" value=${fmt.pct(b.above20, 0, false)} sub="short-term trend" />
+        <${Kpi} label="Above 200-day average" value=${fmt.pct(b.above200, 0, false)} sub="long-term trend" />
+      </div><//>`;
 }
 
 const PERIODS = [{ value: 'chg1', label: 'Last session' }, { value: 'ret5', label: '1 week' }, { value: 'ret21', label: '1 month' }];
@@ -105,34 +102,9 @@ function Movers({ data }) {
         <div class="card"><div class="card-title down">${t('Fell most')}</div>${list(m.down)}</div>
       </div>
     </section>
-    <section class="section">
-      <${SectionHead} title="At a 1-year high or low" hint="Stocks that closed at their highest or lowest price of the last year." />
+    <${Fold} title="At a 1-year high or low" hint=${`${data.highs.length} ${t('1-year highs')} · ${data.lows.length} ${t('1-year lows')}`}>
       <div class="grid grid-2">
         <div class="card"><div class="card-title up">${t('1-year highs')} · ${data.highs.length}</div>${chips(data.highs)}</div>
         <div class="card"><div class="card-title down">${t('1-year lows')} · ${data.lows.length}</div>${chips(data.lows)}</div>
-      </div>
-    </section>`;
-}
-
-// When companies are expected to publish results in the next few weeks (TradingView's estimates).
-function Results({ rows }) {
-  if (!rows) return null;
-  const today = new Date(new Date().toDateString());
-  const days = d => Math.round((new Date(d + 'T00:00:00') - today) / 864e5);
-  const columns = [
-    { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} sub=${r.name} />` },
-    { key: 'date', label: 'Expected', render: r => html`<b>${fmt.date(r.date)}</b>` },
-    { key: 'in', label: 'In', align: 'r', sortValue: r => r.date, render: r => {
-      const n = days(r.date);
-      return html`<span class="muted">${n <= 0 ? t('Today') : n === 1 ? t('tomorrow') : t('{n} days', { n })}</span>`;
-    } },
-  ];
-  return html`<section class="section">
-    <${SectionHead} title=${html`<${Term} k="results">${t('Results coming')}<//>`} count=${rows.length}
-      hint="Expected dates from TradingView (estimates). Prices can move a lot on results day." />
-    <div class="card flush"><${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol}
-      sort=${{ key: 'date', dir: 'asc' }} empty="No results expected in the next 6 weeks." limit=${10} /></div>
-    <${More} label="Where these dates come from">
-      <p>${t("TradingView estimates each company's next results date from when it reported before; EGX companies often publish a few days earlier or later. Only companies that reported on TradingView in the last 13 months are listed.")}</p><//>
-  </section>`;
+      </div><//>`;
 }

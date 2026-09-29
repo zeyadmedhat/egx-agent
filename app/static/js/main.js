@@ -1,14 +1,15 @@
-// App shell: sidebar navigation, stock search, scan progress and page routing.
+// App shell: the top bar (sections, stock search, EGX30, scan progress, the ⚙ menu), each section's tabs, the phone's
+// bottom bar, and page routing.
 import {
-  html, render, useState, useEffect, useStore, useRoute, pollStatus, loadStocks, setTheme, fmt, tone, cls, go, stockHref,
+  html, render, useState, useEffect, useStore, useRoute, pollStatus, loadStocks, setTheme, fmt, cls, go, stockHref,
   loadMe, api, toast, setStore, setLang, STATIC,
 } from './lib.js';
 import { t } from './i18n.js';
-import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm } from './ui.js';
+import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm, Change, Disclaimer } from './ui.js';
 import { AuthScreen } from './pages/login.js';
 import { UnlockScreen } from './pages/unlock.js';
 import { AdminPage } from './pages/admin.js';
-import { TodayPage } from './pages/today.js';
+import { TodayPage, SignalsPage } from './pages/today.js';
 import { MarketPage } from './pages/market.js';
 import { PredictPage } from './pages/predict.js';
 import { StockPage } from './pages/stock.js';
@@ -22,72 +23,127 @@ import { PaperPage } from './pages/paper.js';
 import { BacktestPage } from './pages/backtest.js';
 import { SettingsPage } from './pages/settings.js';
 
-// Cards with the "spot" class glow softly where the mouse is (see .spot in app.css).
-document.addEventListener('pointermove', e => {
-  const card = e.pointerType === 'mouse' && e.target.closest && e.target.closest('.spot');
-  if (!card) return;
-  const r = card.getBoundingClientRect();
-  card.style.setProperty('--mx', `${e.clientX - r.left}px`);
-  card.style.setProperty('--my', `${e.clientY - r.top}px`);
-}, { passive: true });
-
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
 const PAGES = Object.fromEntries(Object.entries({
-  today: TodayPage, market: MarketPage, predict: PredictPage, screener: ScreenerPage, watchlist: WatchlistPage, news: NewsPage, stock: StockPage, calc: CalcPage, dividends: DividendsPage, portfolio: PortfolioPage, paper: PaperPage,
-  backtest: BacktestPage, settings: SettingsPage, admin: AdminPage,
+  today: TodayPage, signals: SignalsPage, news: NewsPage, market: MarketPage, predict: PredictPage, dividends: DividendsPage,
+  stock: StockPage, screener: ScreenerPage, watchlist: WatchlistPage, portfolio: PortfolioPage, paper: PaperPage,
+  calc: CalcPage, backtest: BacktestPage, settings: SettingsPage, admin: AdminPage,
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
-const NAV = [
-  ['today', 'Today', 'activity'], ['market', 'Market', 'bars'], ['predict', 'Predict', 'target'], ['screener', 'Screener', 'search'], ['watchlist', 'Watchlist', 'eye'], ['news', 'News', 'news'], ['stock', 'Stock', 'chart'], ['calc', 'Calculator', 'coins'], ['dividends', 'Dividends', 'percent'],
-  ['portfolio', 'My Portfolio', 'briefcase'],
-  ['paper', 'Paper Trading', 'flask'], ['backtest', 'Backtest', 'history'], ['settings', 'Settings', 'sliders'],
-].filter(([id]) => id in PAGES);
 
-function Sidebar({ page, onNav }) {
+// The top bar's four sections and their tabs. Every page keeps its own #/address, so links from Telegram and old
+// bookmarks still work. Settings and Admin sit in the ⚙ menu.
+const SECTIONS = [
+  { id: 'today', label: 'Today', icon: 'activity', tabs: [['today', 'Summary'], ['signals', 'Signals'], ['news', 'News']] },
+  { id: 'market', label: 'Market', icon: 'bars',
+    tabs: [['market', 'Overview'], ['predict', 'Predictions'], ['dividends', 'Dividends & results']] },
+  { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist']] },
+  { id: 'portfolio', label: 'Portfolio', icon: 'briefcase',
+    tabs: [['portfolio', 'My portfolio'], ['paper', 'Paper'], ['calc', 'Calculator'], ['backtest', 'Backtest']] },
+].map(s => ({ ...s, tabs: s.tabs.filter(([id]) => id in PAGES) }));
+const sectionOf = page => SECTIONS.find(s => s.tabs.some(([id]) => id === page));
+const pageTitle = page => {
+  for (const s of SECTIONS) for (const [id, label] of s.tabs) if (id === page) return label;
+  return { settings: 'Settings', admin: 'Admin' }[page] || 'Summary';
+};
+
+// Counts on the sections: BUY signals for the next session, and your positions that need action.
+function useCounts() {
   const status = useStore(s => s.status);
+  const m = status && status.market;
+  return { today: (m && m.buys) || 0, signals: (m && m.buys) || 0, portfolio: (status && status.alerts) || 0 };
+}
+function Count({ id, counts }) {
+  const n = counts[id];
+  if (!n) return null;
+  const alert = id === 'portfolio';
+  return html`<span class=${cls('count', alert ? 'alert' : 'hot')}
+    title=${t(alert ? 'Positions that need action' : 'BUY signals')}>${n}</span>`;
+}
+
+function TopBar({ page, onMenu, menuOpen }) {
+  const lang = useStore(s => s.lang);
+  const counts = useCounts();
+  const sec = sectionOf(page);
+  return html`<header class="topbar">
+    <a class="brand" href="#/today" title="EGX Trading Agent"><span class="logo">EGX</span>
+      <span class="brand-name">${t('Trading Agent')}</span></a>
+    <nav class="sections">${SECTIONS.map(s => html`<a href=${`#/${s.tabs[0][0]}`} class=${cls(sec === s && 'active')}
+      aria-current=${sec === s ? 'page' : undefined}><${Icon} name=${s.icon} /><span>${t(s.label)}</span>
+      <${Count} id=${s.id} counts=${counts} /></a>`)}</nav>
+    <div class="top-search"><${StockPicker} search hotkey value=${null} onChange=${sym => go(stockHref(sym))}
+      placeholder=${t('Search stocks: symbol or Arabic name')} key=${lang} /></div>
+    <${IndexChip} />
+    <div class="top-right"><${JobControl} />
+      <button class=${cls('icon-btn menu-btn', menuOpen && 'on')} onClick=${onMenu} aria-haspopup="menu"
+        aria-expanded=${menuOpen} title=${t('Settings')} aria-label=${t('Settings')}><${Icon} name="sliders" /></button></div>
+  </header>`;
+}
+
+// EGX30 at the last close, in the top bar.
+function IndexChip() {
+  const m = useStore(s => s.status && s.status.market);
+  if (!m || m.egx30_close == null) return null;
+  return html`<a class="index-chip" href="#/market" title=${t('Data: {date} close', { date: fmt.date(m.date) })}>
+    <span class=${cls('dot', m.risk_off ? 'warn' : 'up')} title=${t(m.risk_off ? 'Risk-off' : 'Market OK')}></span>
+    <span class="faint">EGX30</span><b class="num">${fmt.int(m.egx30_close)}</b><${Change} value=${m.egx30_change} /></a>`;
+}
+
+// The section's tabs, under the top bar.
+function SubNav({ page }) {
+  const counts = useCounts();
+  const sec = sectionOf(page);
+  if (!sec || sec.tabs.length < 2) return null;
+  return html`<nav class="subnav" aria-label=${t(sec.label)}>${sec.tabs.map(([id, label]) => html`<a href=${`#/${id}`}
+    class=${cls(id === page && 'on')} aria-current=${id === page ? 'page' : undefined}>${t(label)}
+    ${id === 'signals' && html`<${Count} id="signals" counts=${counts} />`}</a>`)}</nav>`;
+}
+
+// On a phone the sections move to a bar at the bottom of the screen, within reach of your thumb.
+function BottomBar({ page, onMenu, menuOpen }) {
+  const counts = useCounts();
+  const sec = sectionOf(page);
+  return html`<nav class="bottombar">${SECTIONS.map(s => html`<a href=${`#/${s.tabs[0][0]}`} class=${cls(sec === s && 'active')}
+      aria-current=${sec === s ? 'page' : undefined}><span class="bb-icon"><${Icon} name=${s.icon} />
+      <${Count} id=${s.id} counts=${counts} /></span><span>${t(s.label)}</span></a>`)}
+    <button type="button" class=${cls((menuOpen || page === 'settings' || page === 'admin') && 'active')} onClick=${onMenu}
+      aria-haspopup="menu" aria-expanded=${menuOpen}><span class="bb-icon"><${Icon} name="sliders" /></span><span>${t('More')}</span></button>
+  </nav>`;
+}
+
+// The ⚙ menu: settings, admin, language, theme, and your account (or locking the site on this device).
+function Menu({ onClose }) {
   const theme = useStore(s => s.theme);
   const lang = useStore(s => s.lang);
   const me = useStore(s => s.me);
-  const [account, setAccount] = useState(false);
+  const [dialog, setDialog] = useState(null);
   const website = me && me.multi_user;
-  const nav = website && me.user.is_admin ? [...NAV, ['admin', 'Admin', 'users']] : NAV;
-  const m = status && status.market;
-  const badge = id => {
-    if (id === 'today' && m && m.buys) return html`<span class="count hot" title=${t('BUY signals')}>${m.buys}</span>`;
-    if (id === 'portfolio' && status && status.alerts) {
-      return html`<span class="count alert" title=${t('Positions that need action')}>${status.alerts}</span>`;
-    }
-    return null;
-  };
-  return html`<aside class="sidebar">
-    <div class="brand"><div class="logo">EGX</div>
-      <div><div class="brand-name">${t('Trading Agent')}</div><div class="brand-sub">${t('Swing trades · 2–4 weeks')}</div></div></div>
-    <nav class="nav">${nav.map(([id, label, icon]) => html`<a href=${`#/${id}`} class=${page === id ? 'active' : ''}
-      onClick=${onNav}><${Icon} name=${icon} />${t(label)}${badge(id)}</a>`)}</nav>
-    ${m && html`<div class="side-market">
-      <div class="label">EGX30</div>
-      <div class="value">${fmt.int(m.egx30_close)} <span class=${tone(m.egx30_change)} style="font-size:13px">${fmt.pct(m.egx30_change, 2)}</span></div>
-      <div style="margin-top:6px">${m.risk_off
-        ? html`<span class="chip riskoff"><span class="dot"></span>${t('Risk-off')}</span>`
-        : html`<span class="chip riskon"><span class="dot"></span>${t('Market OK')}</span>`}</div>
-      <div class="meta">${t('Data: {date} close', { date: fmt.date(m.date) })}</div>
-    </div>`}
-    <div class="side-foot">${website
-      ? html`<button class="account-btn" onClick=${() => setAccount(true)} title="Your account">
-          <span class="avatar">${(me.user.display_name || '?').slice(0, 1).toUpperCase()}</span>
-          <span class="who">${me.user.display_name}</span></button>`
-      : html`<small>${t('Not investment advice')}</small>`}
-      <button class="icon-btn lang-btn" title=${lang === 'ar' ? 'English' : 'العربية'} lang=${lang === 'ar' ? 'en' : 'ar'}
-        onClick=${() => setLang(lang === 'ar' ? 'en' : 'ar')}>${lang === 'ar' ? 'EN' : 'ع'}</button>
-      ${STATIC && html`<button class="icon-btn" title="Lock: forget the password on this device"
-        onClick=${() => setAccount(true)}><${Icon} name="shield" /></button>`}
-      <button class="icon-btn" title=${t(theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme')}
-        onClick=${() => setTheme(theme === 'dark' ? 'light' : 'dark')}><${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} /></button></div>
-    ${account && (STATIC
-      ? html`<${Confirm} title="Lock the site on this device?" confirmLabel="Lock"
-          text="You'll need the group password to open it again. Your portfolio stays saved in this browser."
-          onConfirm=${lockSite} onClose=${() => setAccount(false)} />`
-      : html`<${AccountDialog} me=${me} onClose=${() => setAccount(false)} />`)}
-  </aside>`;
+  useEffect(() => {
+    const onKey = e => e.key === 'Escape' && onClose();
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, []);
+  if (dialog === 'account') return html`<${AccountDialog} me=${me} onClose=${onClose} />`;
+  if (dialog === 'lock') {
+    return html`<${Confirm} title="Lock the site on this device?" confirmLabel="Lock"
+      text="You'll need the group password to open it again. Your portfolio stays saved in this browser."
+      onConfirm=${lockSite} onClose=${onClose} />`;
+  }
+  return html`<div class="menu-scrim" onClick=${onClose}></div>
+    <div class="menu" role="menu">
+      ${website && html`<button class="menu-item who" role="menuitem" onClick=${() => setDialog('account')}>
+        <span class="avatar me">${(me.user.display_name || '?').slice(0, 1).toUpperCase()}</span>
+        <span><b>${me.user.display_name}</b><small>${t('Password and sign out')}</small></span></button>`}
+      <a class="menu-item" role="menuitem" href="#/settings" onClick=${onClose}><${Icon} name="sliders" />${t('Settings')}</a>
+      ${website && me.user.is_admin && html`<a class="menu-item" role="menuitem" href="#/admin" onClick=${onClose}>
+        <${Icon} name="users" />${t('Admin')}</a>`}
+      <button class="menu-item" role="menuitem" lang=${lang === 'ar' ? 'en' : 'ar'} onClick=${() => { setLang(lang === 'ar' ? 'en' : 'ar'); onClose(); }}>
+        <span class="menu-glyph">${lang === 'ar' ? 'EN' : 'ع'}</span>${lang === 'ar' ? 'English' : 'العربية'}</button>
+      <button class="menu-item" role="menuitem" onClick=${() => { setTheme(theme === 'dark' ? 'light' : 'dark'); onClose(); }}>
+        <${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} />${t(theme === 'dark' ? 'Light theme' : 'Dark theme')}</button>
+      ${STATIC && html`<button class="menu-item" role="menuitem" onClick=${() => setDialog('lock')}>
+        <${Icon} name="shield" />${t('Lock this device')}</button>`}
+      <div class="menu-note">${t('Not investment advice')}</div>
+    </div>`;
 }
 
 export async function lockSite() {
@@ -151,29 +207,23 @@ function App() {
   const lang = useStore(s => s.lang);
   useEffect(() => { pollStatus(); }, []);
   useEffect(() => { if (version) loadStocks(); }, [version, tick]);
+  const page = PAGES[route.page] ? route.page : 'today';
   useEffect(() => {
-    const title = t((NAV.find(([id]) => id === route.page) || NAV[0])[1]);
-    document.title = `${route.page === 'stock' && route.arg ? route.arg : title} · EGX Trading Agent`;
+    document.title = `${page === 'stock' && route.arg ? route.arg : t(pageTitle(page))} · EGX Trading Agent`;
     setMenu(false);
-  }, [route.page, route.arg, lang]);
-  const Page = PAGES[route.page] || TodayPage;
-  return html`<div class=${cls('shell', menu && 'menu-open')}>
-    <${Sidebar} page=${PAGES[route.page] ? route.page : 'today'} onNav=${() => setMenu(false)} />
-    <div class="scrim" onClick=${() => setMenu(false)}></div>
-    <main class="main">
-      <header class="topbar">
-        <button class="icon-btn only-mobile" onClick=${() => setMenu(true)} aria-label="Menu"><${Icon} name="menu" /></button>
-        <${StockPicker} search hotkey value=${null} onChange=${sym => go(stockHref(sym))}
-          placeholder=${t('Search stocks: symbol or Arabic name')} key=${lang} />
-        <div class="topbar-right"><${JobControl} /></div>
-      </header>
-      ${offline && (STATIC
-        ? html`<div class="offline"><b>Can't reach the site.</b> Check your internet connection; your own data is safe
-            in this browser.</div>`
-        : html`<div class="offline"><b>Can't reach the agent.</b> It may have been stopped. Double-click
-            “Start Trading Agent.command” in the project folder, then reload this page.</div>`)}
-      <div class="content"><${Page} route=${route} key=${route.page + lang} /></div>
-    </main>
+  }, [page, route.arg, lang]);
+  const Page = PAGES[page];
+  const flip = () => setMenu(m => !m);
+  return html`<div class="shell">
+    <${TopBar} page=${page} onMenu=${flip} menuOpen=${menu} />
+    ${offline && (STATIC
+      ? html`<div class="offline"><b>Can't reach the site.</b> Check your internet connection; your own data is safe
+          in this browser.</div>`
+      : html`<div class="offline"><b>Can't reach the agent.</b> It may have been stopped. Double-click
+          “Start Trading Agent.command” in the project folder, then reload this page.</div>`)}
+    <main class="content"><${SubNav} page=${page} /><${Page} route=${route} key=${page + lang} /><${Disclaimer} /></main>
+    <${BottomBar} page=${page} onMenu=${flip} menuOpen=${menu} />
+    ${menu && html`<${Menu} onClose=${() => setMenu(false)} />`}
     <${Toasts} />
   </div>`;
 }

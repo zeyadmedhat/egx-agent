@@ -34,26 +34,34 @@ If macOS says the file can't be opened, right-click it → **Open** → **Open**
 
 ## The pages
 
-| Page | What it's for |
+The site has four sections, along the top on a computer and in a bar at the bottom of a phone. Each section has tabs.
+The ⚙ button (**More** on a phone) holds Settings, Admin, the language and the light/dark theme.
+
+| Section → tab | What it's for |
 |---|---|
-| **Today** | "Today in one minute" (the market, the signals and your positions in a few plain sentences), a badge saying whether the session is open and the numbers are final, a strip of the day's biggest movers, market mood with a 6-month EGX30 chart, the orders checklist for the next session, live prices for EGX30, your stocks and the BUYs, BUY signals (each with a **Log buy** button), alerts for your positions, watchlist |
-| **Market** | Breadth: how many stocks are above their 20-, 50- and 200-day averages, up/down counts, 1-year highs/lows, a 1-year chart against EGX30 and a sector table, the biggest movers (day, week, month), the stocks at a 1-year high or low, the companies whose results are expected in the next 6 weeks, and the market switch for the model's picks. Context only: it doesn't change the BUY rules |
-| **Predict** | A machine-learning model's chance that each liquid stock reaches its target before its stop within 2 weeks and 1 month, how it did on years it never saw, and its live track record. Information only: it doesn't change the BUY rules |
-| **Screener** | Every stock in one table: trend (above its 20/50/200-day averages), RSI, volume, distance from its 1-year high, 1- and 3-month returns, the model's top picks, dividend yield and signal. Filters and quick presets, remembered on the device |
-| **Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/unwatch COMI` and `/list`, checked after each close |
-| **Stock** | The live price, and a switch between the agent's chart and TradingView's live chart (with 1-minute to daily bars). The agent's chart has averages, volume, RSI, MACD, your levels and your buys/sells marked; why a stock does or doesn't qualify; the model's chance and rank; cash dividends, yield, bonus shares and the next results date; Shariah details |
-| **Calculator** | How many shares to buy with your own risk rules (the same sizing as the BUY signals): amount, fees, loss at the stop, gain at the target, and a check against your portfolio limits. Full or half size |
-| **News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month. Each stock's page shows its own news and anything to know now (an ex-dividend date within a month, bonus shares, bad news) |
-| **Dividends** | Every EGX company's cash dividends from TradingView: coming up (ex-dates), the highest yields, recent payouts, your own stocks, the last year's bonus shares and splits, and the bonus shares, rights issues and splits announced on Mubasher |
-| **My Portfolio** | Three tabs. **Positions**: live prices of your stocks; log real buys and sells. Click a position to sell some or all of it, record a cash dividend, see its transactions, or delete it if it was logged by mistake. Buying more of a stock you hold joins it at the average price. See status, days held (of 20) and P&L after fees and dividends. **Health**: your account against EGX30 since your first buy, money by sector, what you'd lose if every stop were hit, and how closely your stocks move together. **Journal**: win rate, average win and loss, profit factor, results by signal setup, exit reason and month, and your profit after Egypt's inflation |
-| **Paper Trading** | A virtual 100k account the agent trades by itself. Watch it for 3–4 weeks before using real money |
-| **Backtest** | Replays the exact rules on 1–4 years of history and compares with EGX30. The last result is kept |
-| **Settings** | Telegram alerts and the daily scan, then every number the agent uses: capital, risk, fees, filters, Shariah filter, exits. Plus the data status and refresh buttons |
+| **Today → Summary** | "Today in one minute" (the market, the signals and your positions in a few plain sentences), a badge saying whether the session is open and the numbers are final, the orders checklist for the next session, your open positions and what to do with each, the market with a 6-month EGX30 chart, and live prices (tap to open) |
+| **Today → Signals** | The BUY signals (each with **Log buy**, **Size it** and **Why this signal**) and the stocks close to a BUY |
+| **Today → News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month |
+| **Market → Overview** | Breadth: how many stocks are above their 50-day average, up/down counts, 1-year highs/lows, the biggest movers (day, week, month), a sector table and the market switch for the model's picks. The 1-year breadth chart and the 20-/200-day counts open on a tap. Context only: it doesn't change the BUY rules |
+| **Market → Predictions** | A machine-learning model's chance that each liquid stock reaches its target before its stop within 2 weeks and 1 month. How it did on years it never saw, its live track record and the experiment open on a tap. Information only |
+| **Market → Dividends & results** | Every EGX company's cash dividends from TradingView (coming up, highest yields), the companies whose results are expected in the next 6 weeks, and the bonus shares, rights issues and splits announced on Mubasher. Recent dividends and last year's bonus shares open on a tap |
+| **Stocks → Stock** | The live price, and a switch between the agent's chart and TradingView's live chart. The agent's chart has averages, volume, RSI, MACD, your levels and your buys/sells marked; why a stock does or doesn't qualify; the model's chance and rank; news and anything to know now; dividends and Shariah details open on a tap |
+| **Stocks → Screener** | Every stock in one table: trend (above its 20/50/200-day averages), RSI, 1- and 3-month returns, the model's top picks, dividend yield and signal. Quick presets, the main filters, and **More filters**, remembered on the device |
+| **Stocks → Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/unwatch COMI` and `/list`, checked after each close |
+| **Portfolio → My portfolio** | Three tabs. **Positions**: log real buys and sells. Click a position to sell some or all of it, record a cash dividend, see its transactions, or delete it if it was logged by mistake. Buying more of a stock you hold joins it at the average price. See status, days held (of 20) and P&L after fees and dividends. **Health**: your account against EGX30 since your first buy, money by sector, what you'd lose if every stop were hit, and how closely your stocks move together. **Journal**: win rate, average win and loss, profit factor, results by signal setup, exit reason and month, and your profit after Egypt's inflation |
+| **Portfolio → Paper** | A virtual 100k account the agent trades by itself. Watch it for 3–4 weeks before using real money |
+| **Portfolio → Calculator** | How many shares to buy with your own risk rules (the same sizing as the BUY signals): amount, fees, loss at the stop, gain at the target, and a check against your portfolio limits. Full or half size |
+| **Portfolio → Backtest** | Replays the exact rules on 1–4 years of history and compares with EGX30. The last result is kept |
+| **⚙ → Settings** | Telegram alerts and the daily scan, then every number the agent uses: capital, risk, fees, filters, Shariah filter, exits. Plus the data status and refresh buttons |
 
-Handy: press **/** to search any stock by symbol or Arabic name. The sun/moon button at the bottom of the sidebar
-switches between the dark and light themes. On the chart, use the 3M…All buttons to zoom and drag to move.
+Old links (from Telegram or bookmarks) still open the same page. Handy: press **/** to search any stock by symbol or
+Arabic name. On the chart, use the 3M…All buttons to zoom and drag to move.
 
-**Arabic.** The ع button at the bottom of the menu switches the whole site to Arabic, right to left (EN switches
+**Look.** Graphite and gold: dark by default, with a light theme in the ⚙ menu. Gold marks what you can press and
+where you are; green and red only mean up and down. Each page shows the main thing first; details, caveats and
+history open on a tap.
+
+**Arabic.** العربية in the ⚙ menu switches the whole site to Arabic, right to left (English switches
 back); each device remembers its choice. Menus, titles, labels, buttons and explanations are translated
 (`app/static/js/i18n.js`); the agent's own detailed notes (a signal's reasons, an order's details, sector names) stay
 in English for now.

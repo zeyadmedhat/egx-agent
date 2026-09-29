@@ -1,8 +1,8 @@
 // Stock: TradingView-style chart with your levels, why it does or doesn't qualify, your position, Shariah details.
-import { html, useApi, useState, useEffect, useMemo, fmt, tone, cls, go, stockHref, remember, todayISO } from '../lib.js';
+import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO } from '../lib.js';
 import {
-  Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, StockPicker, Seg, Disclaimer, DayBar, Chance, WatchStar,
-  Cautions, NewsList, Why, LiveChart, LiveQuote, LIVE_NOTE, Term, More, Change, StockAvatar,
+  Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, Chance, WatchStar,
+  Cautions, NewsList, Why, LiveChart, LiveQuote, LIVE_NOTE, Term, More, Change, StockAvatar, Fold,
 } from '../ui.js';
 import { t } from '../i18n.js';
 import { PriceChart } from '../charts.js';
@@ -28,14 +28,11 @@ export function StockPage({ route }) {
   const [view, setView] = useState(remember('chart_view') === 'live' ? 'live' : 'agent');
   const pickView = v => { setView(v); remember('chart_view', v); };
 
-  const picker = html`<div class="page-head"><div><h1>${t('Stock')}</h1><div class="sub">${t('Chart, entry checklist and Shariah details')}</div></div>
-    <div style="width:min(380px,100%)"><${StockPicker} value=${sym} onChange=${s => go(stockHref(s))}
-      placeholder="Switch stock (symbol or name)…" /></div></div>`;
-  if (!data) return html`${picker}<${PageLoading} error=${error} />`;
+  if (!data) return html`<${PageLoading} error=${error} />`;
 
   const info = data.info || {};
   const st = data.stats;
-  return html`${picker}
+  return html`
     <div class="card stock-head">
       <div class="who">
         <div class="sym-line"><${StockAvatar} symbol=${data.symbol} size=${40} /><span class="sym-big" style="font-size:26px">${data.symbol}</span>
@@ -58,8 +55,6 @@ export function StockPage({ route }) {
       <div class="kpis" style="margin-top:14px">
         <${Kpi} compact label="Traded per day (20d avg)" value=${`${fmt.short(st.value_avg20)} EGP`} />
         <${Kpi} compact label=${html`<${Term} k="rsi">RSI (14)<//>`} value=${fmt.num(st.rsi14, 0)} sub=${st.rsi14 > 70 ? 'overbought' : st.rsi14 < 30 ? 'oversold' : 'neutral'} />
-        <${Kpi} compact label=${html`<${Term} k="adx">${t('ADX trend strength')}<//>`} value=${fmt.num(st.adx14, 0)} sub=${st.adx14 >= 25 ? 'strong trend' : st.adx14 >= 20 ? 'moderate' : 'weak'} />
-        <${Kpi} compact label=${html`<${Term} k="atr">${t('Daily range (ATR)')}<//>`} value=${fmt.pct(st.atr_pct, 1, false)} sub="average move per day" />
         <${Kpi} compact label="3-month return" value=${fmt.pct(st.ret63, 0)} valueClass=${tone(st.ret63)}
           sub=${st.index_ret63 != null ? `EGX30 ${fmt.pct(st.index_ret63, 0)}` : ''} />
         <${Kpi} compact label="1-year range" value=${`${fmt.price(st.low52)} – ${fmt.price(st.high52)}`} />
@@ -96,8 +91,7 @@ export function StockPage({ route }) {
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
         </aside>
-      </div>`}
-    <${Disclaimer} />`;
+      </div>`}`;
 }
 
 function SignalPanel({ data }) {
@@ -136,8 +130,8 @@ function CorporatePanel({ c }) {
   const bonus = c.bonus || [];
   const acts = c.actions || [];
   const r = c.results;
-  return html`<div class="card"><div class="card-title"><${Icon} name="coins" size=${15} />${t('Dividends, bonus shares & results')}
-      ${c.yield != null && html`<span class="right faint">${t('Yield {pct} a year', { pct: fmt.pct(c.yield, 1, false) })}</span>`}</div>
+  return html`<${Fold} title="Dividends, bonus shares & results"
+      hint=${c.yield != null ? t('Yield {pct} a year', { pct: fmt.pct(c.yield, 1, false) }) : ''}>
     ${r && (r.next || r.last) && html`<div class="stat-list" style="margin-bottom:12px">
       ${r.next && html`<span class="k"><${Term} k="results">${t('Next results')}<//></span>
         <span class="v">${fmt.date(r.next)} <span class="tag">${t('expected')}</span></span>`}
@@ -153,7 +147,7 @@ function CorporatePanel({ c }) {
       <div class="stat-list" style="margin-top:6px">${acts.slice(0, 8).map(a => html`
         <span class="k">${a.effective ? fmt.date(a.effective) : '–'}${a.effective > todayISO() ? html` <span class="tag">${t('coming')}</span>` : ''}</span>
         <span class="v" style="font-weight:500">${t(a.label)}<span class="faint"> · ${t('announced {date}', { date: fmt.date(a.announced) })}</span></span>`)}</div>`}
-    <${More} label="How to read these dates"><p>${t("Dates are ex-dates: buy before that day to get the dividend. Amounts per share, % of today's price, from TradingView. The announcements come from Mubasher's list of the exchange's filings. The next results date is TradingView's estimate from when the company reported before.")}</p><//></div>`;
+    <${More} label="How to read these dates"><p>${t("Dates are ex-dates: buy before that day to get the dividend. Amounts per share, % of today's price, from TradingView. The announcements come from Mubasher's list of the exchange's filings. The next results date is TradingView's estimate from when the company reported before.")}</p><//><//>`;
 }
 
 function PredictionPanel({ p }) {
@@ -170,9 +164,8 @@ function PredictionPanel({ p }) {
     </div>
     ${p.top_n && html`<p class="faint" style="font-size:12px;margin-top:10px">It gives a chance only for its top${' '}
       ${fmt.int(p.top_n)} stocks each day (its best 10%): its test results are about those.</p>`}
-    ${p.why10 && p.why10.length > 0 && html`<div style="margin-top:14px">
-      <div class="faint" style="font-size:12px;margin-bottom:6px">Why it ranks it #${fmt.int(p.rank10)} (2 weeks):
-        green pushed it up, red down</div><${Why} items=${p.why10} /></div>`}
+    ${p.why10 && p.why10.length > 0 && html`<${More} label="Why it ranks it here">
+      <div class="faint" style="font-size:12px;margin-bottom:6px">Green pushed it up, red down (2 weeks).</div><${Why} items=${p.why10} /><//>`}
     <a class="btn sm block" style="margin-top:14px" href="#/predict">${t('How reliable is it?')}</a></div>`;
 }
 
@@ -194,7 +187,7 @@ function PositionPanel({ p, hold }) {
 }
 
 function ShariahPanel({ info }) {
-  return html`<div class="card"><div class="card-title"><${Icon} name="shield" size=${15} />${t('Shariah details')}</div>
+  return html`<${Fold} title="Shariah details" hint=${info.kashif_label || ''}>
     <div class="stat-list">
       <span class="k">${t('Kashif status')}</span><span class="v" dir="auto">${info.kashif_label || 'not listed'}</span>
       <span class="k">${t('Purity grade')}</span><span class="v">${info.purity || '–'}</span>
@@ -204,5 +197,5 @@ function ShariahPanel({ info }) {
       <span class="k">${t('Last checked')}</span><span class="v">${info.kashif_updated ? fmt.date(info.kashif_updated) : '–'}</span>
     </div>
     <a class="btn sm block" style="margin-top:14px" href=${info.kashif_url} target="_blank" rel="noopener">
-      ${t('Open on kasheif.com')} <${Icon} name="external" size=${14} /></a></div>`;
+      ${t('Open on kasheif.com')} <${Icon} name="external" size=${14} /></a><//>`;
 }

@@ -2,7 +2,7 @@
 // Al Borsa News, Daily News Egypt), and the dividends, bonus shares and rights issues coming up. Headlines link to the
 // publisher; the good/bad dot is a rough keyword guess. Filters are remembered on this device.
 import { html, useApi, useState, useMemo, useStore, fmt, stockHref, remember } from '../lib.js';
-import { Icon, PageHead, PageLoading, Seg, Disclaimer, Callout, NewsList, TAG_LABELS } from '../ui.js';
+import { Icon, PageHead, PageLoading, Seg, Callout, NewsList, TAG_LABELS, More } from '../ui.js';
 import { t } from '../i18n.js';
 
 const SHOW = [{ value: 'stocks', label: 'Stock news' }, { value: 'mine', label: 'My stocks' },
@@ -44,8 +44,7 @@ export function NewsPage() {
   const changed = Object.keys(DEFAULTS).some(k => f[k] !== DEFAULTS[k]);
   const sourcesUsed = [...new Set(data.items.map(n => n.source))];
 
-  return html`<${PageHead} title="News"
-      sub="Headlines about EGX stocks and the market from Mubasher, Reuters, Zawya, Al Borsa News and Daily News Egypt, and the dividends and bonus shares coming up.">
+  return html`<${PageHead} title="News" sub="Headlines about EGX stocks and the market, and what companies announced.">
       <${Seg} options=${SHOW} value=${f.show} onChange=${set('show')} /><//>
     ${!data.items.length && html`<div style="margin-bottom:14px"><${Callout}><b>No news downloaded yet.</b> It comes with
       the next scan after the close.<//></div>`}
@@ -72,10 +71,10 @@ export function NewsPage() {
           <${NewsList} items=${items} sources=${data.sources} showSymbol limit=${60}
             empty="No headline matches these filters." />
         </div>
-        <p class="faint" style="font-size:12px;margin-top:8px">Only headlines are kept here: each links to the publisher's
+        <${More} label="About these headlines"><p>Only headlines are kept here: each links to the publisher's
           article. The topics and the green/red dot come from keyword rules in Arabic and English. They're a quick guide,
           not a reading of the article. The agent reads each stock's Mubasher page every few days, and Reuters and Zawya
-          every run.</p>
+          every run.</p><//>
       </div>
       <aside class="stack">
         <div class="card"><div class="card-title"><${Icon} name="coins" size=${15} />${t('Coming ex-dates')}</div>
@@ -94,6 +93,5 @@ export function NewsPage() {
             : html`<p class="muted" style="font-size:13px">Nothing new this month.</p>`}
           <p class="faint" style="font-size:12px;margin-top:10px">From Mubasher's list of the exchange's filings.</p></div>
       </aside>
-    </div>
-    <${Disclaimer} />`;
+    </div>`;
 }

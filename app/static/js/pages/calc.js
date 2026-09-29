@@ -2,7 +2,7 @@
 // Nothing is saved or ordered. The sizing is the BUY signals' own (sizing.js → risk.py's rule).
 import { html, useApi, useState, useEffect, fmt, go, cls } from '../lib.js';
 import {
-  Icon, PageLoading, StockPicker, Field, Seg, Callout, MarketSwitch, StatusChip, Chance, Disclaimer, Empty,
+  Icon, PageLoading, StockPicker, Field, Seg, Callout, MarketSwitch, StatusChip, Chance, Empty,
 } from '../ui.js';
 import { t } from '../i18n.js';
 import { planTrade } from '../sizing.js';
@@ -17,8 +17,8 @@ export function CalcPage({ route }) {
   const [form, setForm] = useState(null);          // null: the defaults below; your edits otherwise
   useEffect(() => { setForm(null); }, [sym]);
 
-  const head = html`<div class="page-head"><div><h1>Size calculator</h1>
-      <div class="sub">How many shares to buy with your own risk rules. Nothing is saved or ordered.</div></div>
+  const head = html`<div class="page-head"><div><h1>${t('Size calculator')}</h1>
+      <div class="sub">${t('How many shares to buy with your own risk rules. Nothing is saved or ordered.')}</div></div>
     <div style="width:min(380px,100%)"><${StockPicker} value=${sym} onChange=${s => go(`#/calc/${encodeURIComponent(s)}`)}
       placeholder="Pick a stock (symbol or name)…" /></div></div>`;
   if (!acct) return html`${head}<${PageLoading} error=${error} />`;
@@ -82,8 +82,7 @@ export function CalcPage({ route }) {
     </div>
     ${res.ok && html`<div class="card" style="margin-top:14px"><div class="card-title">${t('Your portfolio limits')}</div>
       <ul class="checklist">${res.checks.map(c => html`<li>
-        <span class=${LEVEL[c.level][1]}><${Icon} name=${LEVEL[c.level][0]} /></span><span>${c.text}</span></li>`)}</ul></div>`}
-    <${Disclaimer} />`;
+        <span class=${LEVEL[c.level][1]}><${Icon} name=${LEVEL[c.level][0]} /></span><span>${c.text}</span></li>`)}</ul></div>`}`;
 }
 
 function Result({ res, sym, entry }) {

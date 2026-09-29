@@ -1,8 +1,8 @@
 // Backtest: replay the agent's exact rules over past EGX data and compare with EGX30.
 import { html, useApi, useState, useEffect, useMemo, startJob, fmt, tone, STATIC } from '../lib.js';
 import {
-  Icon, Kpi, Empty, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, Seg, Field,
-  JobProgress, useJob,
+  Icon, Kpi, Empty, Callout, PageHead, SectionHead, PageLoading, DataTable, StockCell, Seg, Field,
+  JobProgress, useJob, More,
 } from '../ui.js';
 import { LineChart } from '../charts.js';
 
@@ -35,7 +35,7 @@ export function BacktestPage() {
       <${Field} label="Period"><${Seg} options=${YEARS} value=${years} onChange=${setYears} /><//>
       <${Field} label="Stocks"><select class="input" style="min-width:240px" value=${universe}
         onChange=${e => setUniverse(e.target.value)}>${UNIVERSES.map(u => html`<option value=${u.value}>${u.label}</option>`)}</select><//>
-      <button class="btn primary" onClick=${run} disabled=${running} style="margin-left:auto">
+      <button class="btn primary" onClick=${run} disabled=${running} style="margin-inline-start:auto">
         <${Icon} name="play" />${mine ? 'Running…' : 'Run backtest'}</button>
     </div>
     <p class="faint" style="font-size:12.5px;margin-top:12px">Uses your current Settings: signals at each close, buys at the
@@ -50,12 +50,12 @@ export function BacktestPage() {
     ${!res && !mine && html`<div class="card" style="margin-top:14px"><${Empty} icon="history" title="No backtest yet"
       text=${STATIC ? "The first one appears after the site's weekly backtest." : 'Pick a period and press Run backtest.'} /></div>`}
     ${res && html`<${Results} res=${res} equity=${equity} drawdown=${drawdown} />`}
-    <div style="margin-top:18px"><${Callout} tone="warn"><b>Read these results with care.</b>${' '}
-      (1) Only stocks listed today are tested, so companies that collapsed or delisted are missing, which flatters results.
-      (2) Returns are in nominal EGP; much of EGX30's rise since 2022 reflects the pound's devaluation.
-      (3) Real fills can be worse than the open price, especially in thin stocks.
-      (4) Shariah status is today's, not what it was at the time. A backtest is a sanity check, not a promise.<//></div>
-    <${Disclaimer} />`;
+    <div style="margin-top:18px"><${Callout} tone="warn"><b>Read these results with care.</b>${' '}A backtest is a sanity
+      check, not a promise.<${More} label="Four caveats"><ul class="reasons">
+        <li>Only stocks listed today are tested, so companies that collapsed or delisted are missing, which flatters results.</li>
+        <li>Returns are in nominal EGP; much of EGX30's rise since 2022 reflects the pound's devaluation.</li>
+        <li>Real fills can be worse than the open price, especially in thin stocks.</li>
+        <li>Shariah status is today's, not what it was at the time.</li></ul><//><//></div>`;
 }
 
 function Results({ res, equity, drawdown }) {

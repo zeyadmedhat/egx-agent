@@ -2,7 +2,7 @@
 // The list is yours: on your Mac it's kept with your portfolio; on the website, in this browser (and its backups).
 import { html, useApi, useMemo, useStore, fmt, tone, go, stockHref, cls, toggleWatch, STATIC } from '../lib.js';
 import {
-  Icon, PageLoading, DataTable, StockCell, StatusChip, Chance, Disclaimer, Empty, StockPicker, WatchStar,
+  Icon, PageLoading, DataTable, StockCell, StatusChip, Chance, Empty, StockPicker, WatchStar, Fold,
 } from '../ui.js';
 import { t } from '../i18n.js';
 
@@ -12,8 +12,8 @@ export function WatchlistPage() {
   const { data, error } = useApi('/screener');
   const info = useMemo(() => new Map(stocks.map(s => [s.symbol, s])), [stocks]);
   const add = sym => { if (sym && !(list || []).includes(sym)) toggleWatch(sym); };
-  const head = html`<div class="page-head"><div><h1>Watchlist</h1>
-      <div class="sub">The stocks you follow. Star any stock (☆) on its page or in the Screener to add it.</div></div>
+  const head = html`<div class="page-head"><div><h1>${t('Watchlist')}</h1>
+      <div class="sub">${t('The stocks you follow. Star any stock (☆) on its page or in the Screener to add it.')}</div></div>
     <div style="width:min(380px,100%)"><${StockPicker} value="" onChange=${add} placeholder="Add a stock (symbol or name)…" /></div></div>`;
   if (!data || list == null) return html`${head}<${PageLoading} error=${error} />`;
   const bySym = new Map(data.rows.map(r => [r.symbol, r]));
@@ -45,8 +45,7 @@ export function WatchlistPage() {
     <p class="faint" style="font-size:12px;margin-top:8px">${STATIC
       ? 'Kept in this browser with your portfolio, and in your backups (Settings → Download a backup).'
       : 'Kept with your portfolio on this Mac.'}</p>
-    <div class="card" style="margin-top:16px">
-      <div class="card-title"><${Icon} name="bell" size=${15} />${t('Alerts in Telegram')}</div>
+    <${Fold} title="Alerts in Telegram" hint="Get a message when a stock gets a BUY signal or closes past a price.">
       <p class="muted" style="font-size:13px;margin-bottom:10px">The website's Telegram bot can tell you after a close
         when a stock gets a BUY signal or closes past a price. Connect it on the website (Settings → Connect Telegram),
         then send it:</p>
@@ -57,7 +56,5 @@ export function WatchlistPage() {
         <span class="k"><code>/list</code></span><span class="v" style="font-weight:500">your alerts</span>
       </div>
       <p class="faint" style="font-size:12px;margin-top:10px">The bot reads messages every few hours, so its reply can
-        take up to 3 hours. Telegram alerts are set in the chat, separately from this list.</p>
-    </div>
-    <${Disclaimer} />`;
+        take up to 3 hours. Telegram alerts are set in the chat, separately from this list.</p><//>`;
 }

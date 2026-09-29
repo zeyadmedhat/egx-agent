@@ -3,7 +3,7 @@ import {
   html, useApi, useState, useEffect, useStore, api, toast, refreshAll, startJob, fmt, cls, todayISO, setOwner, watchForData,
 } from '../lib.js';
 import {
-  Icon, Kpi, Callout, PageHead, Disclaimer, PageLoading, Field, Switch, Confirm, JobProgress, useJob,
+  Icon, Kpi, Callout, PageHead, PageLoading, Field, Switch, Confirm, JobProgress, useJob,
 } from '../ui.js';
 import { t } from '../i18n.js';
 
@@ -111,8 +111,7 @@ export function SettingsPage() {
       confirmLabel=${admin ? 'Restore defaults' : 'Reset'}
       text=${admin ? `All rules go back to the tested defaults${website ? ' for everyone' : ''}. Your capital, paper capital and fees are kept.`
         : `Your risk limits${data.static ? ' and Shariah filter' : ', Shariah filter and paper-trading choice'} go back to the defaults. Your capital and fees are kept.`}
-      onConfirm=${restore} onClose=${() => setConfirmReset(false)} />`}
-    <${Disclaimer} />`;
+      onConfirm=${restore} onClose=${() => setConfirmReset(false)} />`}`;
 }
 
 function SettingField({ f, value, onChange, error }) {
@@ -330,7 +329,7 @@ function AlertsCard() {
   } else {
     body = html`<ol class="steps">
         <li><div><b>Open the bot through your link.</b>${' '}${link
-          ? html`<a class="btn sm primary" style="margin-left:6px" href=${link} target="_blank" rel="noopener">
+          ? html`<a class="btn sm primary" style="margin-inline-start:6px" href=${link} target="_blank" rel="noopener">
               <${Icon} name="send" />Open @${bot} in Telegram</a>`
           : html`<span class="faint">Preparing your link…</span>`}</div></li>
         <li><div><b>Press Start</b> at the bottom of the chat.</div></li>

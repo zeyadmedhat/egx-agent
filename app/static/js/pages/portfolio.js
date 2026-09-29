@@ -5,8 +5,8 @@ import {
   html, useApi, useState, useEffect, useStore, api, toast, refreshAll, fmt, tone, cls, go, todayISO,
 } from '../lib.js';
 import {
-  Icon, StatusChip, Kpi, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, DayBar, Field,
-  StockPicker, Confirm, Callout, Seg, Empty, LiveQuotes, LIVE_NOTE,
+  Icon, StatusChip, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, DayBar, Field,
+  StockPicker, Confirm, Callout, Seg, Empty, LiveQuotes, LIVE_NOTE, Fold, More,
 } from '../ui.js';
 import { t } from '../i18n.js';
 import { LineChart } from '../charts.js';
@@ -61,9 +61,9 @@ export function PortfolioPage({ route }) {
       or another app can open a different browser. Open the site there, or bring your portfolio here with${' '}
       <a href="#/settings">Settings → Restore from a backup</a>.<//></div>`}
     <div class="kpis">
-      <${Kpi} label="Account value" icon="wallet" value=${fmt.short(s.equity)} sub=${`${fmt.pct(s.return_pct)} since start`} subClass=${tone(s.return_pct)} />
-      <${Kpi} label="Cash" value=${fmt.short(s.cash)} valueClass=${s.cash < 0 ? 'down' : ''}
-        sub=${s.cash < 0 ? 'you bought more than your capital' : 'not invested'} subClass=${s.cash < 0 ? 'warn' : ''} />
+      <${Kpi} label="Account value" value=${fmt.short(s.equity)}
+        sub=${`${fmt.pct(s.return_pct)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
+        subClass=${s.cash < 0 ? 'warn' : tone(s.return_pct)} />
       <${Kpi} label="Open P&L" value=${fmt.signed(s.unrealized)} valueClass=${tone(s.unrealized)} sub="EGP, before selling fees" />
       <${Kpi} label="Realized P&L" value=${fmt.signed(s.realized)} valueClass=${tone(s.realized)}
         sub=${s.dividends ? `EGP, after fees · incl. ${fmt.int(s.dividends)} dividends` : 'EGP, after fees'} />
@@ -81,12 +81,12 @@ export function PortfolioPage({ route }) {
         expandedKey=${openId} onRowClick=${r => setOpenId(id => (id === r.id ? null : r.id))}
         renderExpanded=${r => html`<${PositionDetail} p=${r} data=${data} onDone=${() => setOpenId(null)} />`}
         empty="No open positions. After you buy at your broker, log it below." /></div>
-      ${data.positions.length > 0 && html`<div class="card flush live-list" style="margin-top:12px">
-        <${LiveQuotes} symbols=${data.positions.map(p => p.symbol)} title="Your stocks now" /></div>
-        <p class="faint" style="font-size:12px;margin-top:6px">${LIVE_NOTE}</p>`}
-      <p class="faint" style="font-size:12px;margin-top:8px">EXIT: sell at the next open · REVIEW: 2 weeks without progress,
+      <${More} label="What the statuses mean"><p>EXIT: sell at the next open · REVIEW: 2 weeks without progress,
         consider exiting · TIGHTEN STOP: move your stop order up · HOLD: nothing to do · UPDATE SHARES: the company
-        gave bonus shares or split its shares, so enter your new share count</p>
+        gave bonus shares or split its shares, so enter your new share count</p><//>
+      ${data.positions.length > 0 && html`<${Fold} title="Live prices" hint="TradingView, about 15 minutes late">
+        <div class="live-list"><${LiveQuotes} symbols=${data.positions.map(p => p.symbol)} title="Your stocks now" /></div>
+        <p class="faint note">${t(LIVE_NOTE)}</p><//>`}
     </section>
 
     <section class="section" id="buy-form" style="scroll-margin-top:80px">
@@ -99,8 +99,7 @@ export function PortfolioPage({ route }) {
         hint=${cs.count ? `Win rate ${fmt.pct(cs.win_rate, 0, false)} · total ${fmt.signed(cs.total)} EGP` : ''} />
       <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
         empty="Nothing closed yet." /></div>
-    </section>`}
-    <${Disclaimer} />`;
+    </section>`}`;
 }
 
 // ------------------------------------------------------------------ Health tab
@@ -143,7 +142,7 @@ function HealthTab({ data }) {
         <${SectionHead} title="Where your money is" hint="Each sector's share of your account, at the last close." />
         <div class="card">${mix.map(m => html`<div class="mix-row">
           <div class="mix-label"><b>${m.sector}</b><span class="faint">${m.symbols.join(', ')}</span></div>
-          <div class="gauge"><b style="width:44px;text-align:right">${fmt.pct(m.pct, 0, false)}</b>
+          <div class="gauge"><b class="gauge-v">${fmt.pct(m.pct, 0, false)}</b>
             <div class=${cls('bar', m.sector === 'Cash' ? '' : m.pct > 0.4 ? 'warn' : 'up')}><span style=${`width:${(m.pct / top) * 100}%`}></span></div></div>
           <span class="faint mix-value">${fmt.short(m.value)}</span></div>`)}
           ${mix.some(m => m.sector !== 'Cash' && m.pct > 0.4) && html`<p class="faint" style="font-size:12px;margin-top:10px">
@@ -217,7 +216,7 @@ function JournalTab({ data }) {
   return html`
     <section class="section">
       <div class="kpis">
-        <${Kpi} label="Closed trades" icon="listCheck" value=${fmt.int(j.n)} sub=${`held ${fmt.num(j.avg_days, 0)} days on average`} />
+        <${Kpi} label="Closed trades" value=${fmt.int(j.n)} sub=${`held ${fmt.num(j.avg_days, 0)} days on average`} />
         <${Kpi} label="Won" value=${fmt.pct(j.win_rate, 0, false)} valueClass=${j.win_rate >= 0.5 ? 'up' : ''}
           sub=${`avg win ${fmt.pct(j.avg_win, 1)} · avg loss ${fmt.pct(j.avg_loss, 1)}`} />
         <${Kpi} label="Profit factor" value=${j.profit_factor == null ? 'no losses' : fmt.num(j.profit_factor, 2)}

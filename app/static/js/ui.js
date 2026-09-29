@@ -101,63 +101,18 @@ export function StatusChip({ status }) {
   return html`<span class=${`chip ${STATUS[status] || 'nodata'}`}><span class="dot"></span>${t(STATUS_LABEL[status] || status)}</span>`;
 }
 
-export function Kpi({ label, value, sub, valueClass, subClass, title, compact, icon }) {
-  return html`<div class=${cls('kpi spot', compact && 'compact', icon && 'has-icon')} title=${title}>
+export function Kpi({ label, value, sub, valueClass, subClass, title, compact }) {
+  return html`<div class=${cls('kpi', compact && 'compact')} title=${title}>
     <div class="k-label">${tx(label)}</div>
-    ${icon && html`<span class="k-icon"><${Icon} name=${icon} size=${15} /></span>`}
-    <div class=${cls('k-value', valueClass)}>${Number.isInteger(value) ? html`<${CountUp} value=${value} />` : value}</div>
+    <div class=${cls('k-value', valueClass)}>${Number.isInteger(value) ? fmt.int(value) : value}</div>
     ${sub != null && sub !== '' && html`<div class=${cls('k-sub', subClass)}>${tx(sub)}</div>`}
   </div>`;
 }
 
-// ------------------------------------------------------------------ motion (count-up numbers, ticker tape)
-const calm = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return true; } };
-
-// A number that counts up to its value when it first shows, and glides to a new value when it changes.
-export function CountUp({ value, format = fmt.int, ms = 700 }) {
-  const ref = useRef(null), last = useRef(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const from = last.current == null ? 0 : last.current;
-    last.current = value;
-    if (value == null || !isFinite(value) || calm() || from === value || document.hidden) {
-      el.textContent = format(value);
-      return undefined;
-    }
-    let raf, t0;
-    const step = now => {
-      if (t0 == null) t0 = now;
-      const k = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - k, 3);
-      el.textContent = format(from + (value - from) * e);
-      if (k < 1) raf = requestAnimationFrame(step);
-    };
-    el.textContent = format(from);
-    raf = requestAnimationFrame(step);
-    const done = setTimeout(() => { cancelAnimationFrame(raf); el.textContent = format(value); }, ms + 400);  // tab hidden
-    return () => { cancelAnimationFrame(raf); clearTimeout(done); el.textContent = format(value); };
-  }, [value]);
-  return html`<span ref=${ref}></span>`;
-}
-
-// A strip of prices that scrolls sideways and stops while the mouse is on it. items: [{label, href, price, change}]
-export function TickerTape({ items, label }) {
-  if (!items || !items.length) return null;
-  const row = copy => items.map(it => html`<a class="tape-item" href=${it.href} key=${copy + it.label}
-    tabindex=${copy ? -1 : undefined} aria-hidden=${copy ? 'true' : undefined}>
-    <b>${it.label}</b><span class="muted num">${it.price}</span><${Change} value=${it.change} pill /></a>`);
-  return html`<div class="tape">
-    ${label && html`<span class="tape-label">${label}</span>`}
-    <div class="tape-view"><div class="tape-track" style=${`--dur:${Math.max(24, items.length * 4)}s`}>${row(0)}${row(1)}</div></div>
-  </div>`;
-}
-
-// A coloured tile with the first letters of the symbol; the colour is the same for a stock everywhere.
+// A small tile with the first letters of the symbol.
 export function StockAvatar({ symbol, size = 30 }) {
-  let h = 7;
-  for (const ch of String(symbol)) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return html`<span class="avatar" aria-hidden="true"
-    style=${`--h:${h};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.36)}px`}>${String(symbol).slice(0, 2)}</span>`;
+    style=${`width:${size}px;height:${size}px;font-size:${Math.round(size * 0.36)}px`}>${String(symbol).slice(0, 2)}</span>`;
 }
 
 export function ScoreRing({ score }) {
@@ -282,6 +237,15 @@ export function SessionBadge({ dataDate }) {
           'Final closing prices of {date}. The next session opens at 10:00 Cairo time.'];
   return html`<div class=${cls('session', tn)} title=${t(text, { date })}>
     <span class="dot"></span><b>${t(label)}</b>${sub && html`<span>· ${t(sub)}</span>`}</div>`;
+}
+
+// A section that stays closed until you open it: the title and a short hint show, the rest is one tap away. What's
+// inside is drawn only once it's open (a chart needs its width).
+export function Fold({ title, hint, open: first, flush, children }) {
+  const [open, setOpen] = useState(!!first);
+  return html`<details class="fold card" open=${open} onToggle=${e => setOpen(e.currentTarget.open)}>
+    <summary><${Icon} name="chevron" size=${16} /><b>${tx(title)}</b>${hint && html`<span class="hint">${tx(hint)}</span>`}</summary>
+    ${open && html`<div class=${cls('fold-body', flush && 'flush')}>${children}</div>`}</details>`;
 }
 
 // Short main text, the fine print one tap away.
@@ -601,11 +565,11 @@ export function JobControl() {
     const url = STATIC && owner && scanUrl;
     return url ? html`${pill}<a class="btn primary" href=${url} target="_blank" rel="noopener noreferrer"
       onClick=${() => watchForData()} title="Opens the scan on GitHub: press Run workflow there. The new data shows here in about 5 minutes.">
-      <${Icon} name="refresh" /> ${t('Run scan')}</a>` : pill;
+      <${Icon} name="refresh" /><span class="btn-label">${t('Run scan')}</span></a>` : pill;
   }
   return html`<button class="btn primary" onClick=${() => startJob('/jobs/scan', { update_data: true })}
     title=${`Download the latest closing prices and look for signals${market ? ` (data now: ${fmt.date(market.date)} close)` : ''}`}>
-    <${Icon} name="refresh" /> ${t('Run scan')}</button>`;
+    <${Icon} name="refresh" /><span class="btn-label">${t('Run scan')}</span></button>`;
 }
 
 export function JobProgress({ kind, title }) {
@@ -613,7 +577,7 @@ export function JobProgress({ kind, title }) {
   if (!mine) return null;
   const pct = Math.round((job.progress || 0) * 100);
   return html`<div class="card progress-card">
-    <div class="row"><span class="spinner"></span><b>${title || job.label}</b><span class="faint" style="margin-left:auto">${pct}%</span></div>
+    <div class="row"><span class="spinner"></span><b>${title || job.label}</b><span class="faint" style="margin-inline-start:auto">${pct}%</span></div>
     <div class="pbar"><span style=${`width:${Math.max(pct, 3)}%`}></span></div>
     <div class="muted" style="font-size:13px">${job.message}</div></div>`;
 }

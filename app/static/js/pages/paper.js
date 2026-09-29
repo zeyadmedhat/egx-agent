@@ -1,7 +1,7 @@
 // Paper Trading: the virtual account the agent trades by itself, compared with EGX30.
 import { html, useApi, useState, useMemo, api, toast, refreshAll, fmt, tone } from '../lib.js';
 import {
-  Icon, Kpi, Empty, Callout, PageHead, Disclaimer, PageLoading, DataTable, StockCell, Confirm,
+  Icon, Kpi, Empty, Callout, PageHead, PageLoading, DataTable, StockCell, Confirm,
 } from '../ui.js';
 import { LineChart } from '../charts.js';
 
@@ -78,7 +78,7 @@ export function PaperPage() {
     ${!data.auto_paper && html`<div style="margin-bottom:14px"><${Callout} tone="warn">Automatic paper trading is off.
       <a href="#/settings">Turn it on in Settings.</a><//></div>`}
     <div class="kpis">
-      <${Kpi} label="Paper account" icon="flask" value=${fmt.short(s.equity)} sub=${`${fmt.pct(s.return_pct)} since start`} subClass=${tone(s.return_pct)} />
+      <${Kpi} label="Paper account" value=${fmt.short(s.equity)} sub=${`${fmt.pct(s.return_pct)} since start`} subClass=${tone(s.return_pct)} />
       <${Kpi} label="Cash" value=${fmt.short(s.cash)} />
       <${Kpi} label="Open positions" value=${s.open_count} />
       <${Kpi} label="Closed trades" value=${data.closed.length} />
@@ -104,6 +104,5 @@ export function PaperPage() {
     </div>
     ${confirmReset && html`<${Confirm} title="Reset the paper account?" danger confirmLabel="Delete all paper trades"
       text="Every paper trade (open, closed, pending and skipped) is deleted. Your real portfolio is not touched."
-      onConfirm=${reset} onClose=${() => setConfirmReset(false)} />`}
-    <${Disclaimer} />`;
+      onConfirm=${reset} onClose=${() => setConfirmReset(false)} />`}`;
 }

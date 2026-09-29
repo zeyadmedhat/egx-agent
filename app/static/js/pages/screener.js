@@ -1,7 +1,8 @@
 // Screener: every stock's trend, momentum, volume, model rank and dividend yield in one table, with filters.
 // Filters are remembered on this device. Information only: the BUY rules decide the signals.
 import { html, useApi, useState, useMemo, useStore, fmt, tone, go, stockHref, remember, cls } from '../lib.js';
-import { Icon, PageHead, PageLoading, DataTable, StockCell, StatusChip, Chance, Disclaimer, WatchStar } from '../ui.js';
+import { Icon, PageHead, PageLoading, DataTable, StockCell, StatusChip, Chance, WatchStar, Fold } from '../ui.js';
+import { t } from '../i18n.js';
 
 const DEFAULTS = {
   q: '', sector: '', trend: 'any', rsi: 'any', volume: 'any', high: 'any', model: 'any', shariah: 'any',
@@ -72,8 +73,9 @@ export function ScreenerPage() {
   const pick = k => html`<select class="input" value=${f[k]} onChange=${set(k)}>
     ${OPTIONS[k].map(([v, label]) => html`<option value=${v}>${label}</option>`)}</select>`;
 
+  const more = ['trend', 'rsi', 'volume', 'high', 'model', 'yield'].filter(k => f[k] !== 'any').length + (f.liquid ? 0 : 1);
   return html`<${PageHead} title="Screener"
-      sub=${`Every stock's numbers from the ${fmt.date(data.date)} close. Filter and sort; click a stock for its chart. Information only: the BUY rules decide the signals.`} />
+      sub=${t("Every stock's numbers from the {date} close. Filter, sort, and tap a stock for its chart.", { date: fmt.date(data.date) })} />
     <div class="row" style="margin-bottom:12px">
       ${PRESETS.map(([label, p]) => html`<button class="btn sm" onClick=${() => save({ ...DEFAULTS, ...p })}>${label}</button>`)}
       ${changed && html`<button class="linkish" onClick=${() => save({ ...DEFAULTS })}>Clear filters</button>`}
@@ -83,20 +85,17 @@ export function ScreenerPage() {
         <input class="input" placeholder="Symbol or name…" value=${f.q} onInput=${set('q')} />
         <select class="input" value=${f.sector} onChange=${set('sector')}>
           <option value="">All sectors</option>${sectors.map(s => html`<option value=${s}>${s}</option>`)}</select>
-        ${pick('trend')}${pick('rsi')}${pick('volume')}${pick('high')}${pick('model')}${pick('signal')}${pick('yield')}
-        ${pick('shariah')}
+        ${pick('signal')}${pick('shariah')}
       </div>
+    </div>
+    <${Fold} title="More filters" hint=${more ? t('{n} on', { n: more }) : t('Trend, RSI, volume, 1-year high, model, dividend')}>
+      <div class="form-grid">${pick('trend')}${pick('rsi')}${pick('volume')}${pick('high')}${pick('model')}${pick('yield')}</div>
       <label class="check" style="margin-top:12px"><input type="checkbox" checked=${f.liquid} onChange=${set('liquid')} />
-        Only liquid stocks that traded recently (at least ${fmt.short(data.min_value)} EGP a day, like the BUY rules)</label>
-    </div>
-    <div class="row" style="margin:14px 0 8px;justify-content:space-between">
-      <b>${fmt.int(rows.length)} of ${fmt.int(data.rows.length)} stocks</b>
-      <span class="faint" style="font-size:12.5px">Your filters are remembered on this device.</span>
-    </div>
+        Only liquid stocks that traded recently (at least ${fmt.short(data.min_value)} EGP a day, like the BUY rules)</label><//>
+    <div class="row" style="margin:16px 0 8px"><b>${t('{k} of {n} stocks', { k: fmt.int(rows.length), n: fmt.int(data.rows.length) })}</b></div>
     <div class="card flush"><${DataTable} columns=${COLUMNS} rows=${rows} rowKey=${r => r.symbol} limit=${50}
       sort=${{ key: 'ret63', dir: 'desc' }} onRowClick=${r => go(stockHref(r.symbol))}
-      empty="No stock matches all of these filters. Try removing one." /></div>
-    <${Disclaimer} />`;
+      empty="No stock matches all of these filters. Try removing one." /></div>`;
 }
 
 const pctCell = (v, d = 1) => html`<span class=${tone(v)}>${fmt.pct(v, d)}</span>`;
@@ -106,7 +105,6 @@ const above = (v, label) => html`<span class=${cls('trend-dot', v > 0 ? 'up' : v
 const COLUMNS = [
   { key: 'star', label: '', sortable: false, width: '34px', render: r => html`<${WatchStar} symbol=${r.symbol} />` },
   { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
-  { key: 'sector', label: 'Sector', sortValue: r => r.info.sector || '', render: r => html`<span class="muted">${r.info.sector || ''}</span>` },
   { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
   { key: 'chg1', label: 'Day', align: 'r', render: r => pctCell(r.chg1) },
   { key: 'ret21', label: '1 month', align: 'r', render: r => pctCell(r.ret21, 0) },
@@ -115,9 +113,6 @@ const COLUMNS = [
     title: 'Above (green) or below (red) its 20-, 50- and 200-day averages',
     render: r => html`<span class="trend-dots">${above(r.vs_ema20, 20)}${above(r.vs_ema50, 50)}${above(r.vs_ema200, 200)}</span>` },
   { key: 'rsi', label: 'RSI', align: 'r', fmt: v => html`<span class=${v > 70 ? 'warn' : v < 30 ? 'down' : ''}>${fmt.num(v, 0)}</span>` },
-  { key: 'vol_ratio', label: 'Volume', align: 'r', title: 'Last session vs its 20-day average',
-    fmt: v => html`<span class=${v >= 1.5 ? 'up' : 'muted'}>${fmt.num(v, 1)}×</span>` },
-  { key: 'from_high', label: 'From 1-yr high', align: 'r', render: r => pctCell(r.from_high, 0) },
   { key: 'p10', label: 'Model 2 wk', align: 'r', sortValue: r => (r.top10 ? r.p10 : -1),
     title: "The model's chance of target before stop, shown for its top 10% each day",
     render: r => html`<${Chance} p=${r.p10} top=${r.top10} />` },

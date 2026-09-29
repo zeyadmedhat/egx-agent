@@ -1,73 +1,73 @@
-// Today: market mood, the orders for the next session, your positions, BUY signals and the watchlist.
-import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, STATIC } from '../lib.js';
+// Today, in two tabs. Summary: the day in a few sentences, the orders for the next session, your positions and the
+// market. Signals: the BUY signals and the stocks close to one.
+import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, remember, STATIC } from '../lib.js';
 import {
-  Icon, Badges, IndexPills, StatusChip, Kpi, ScoreRing, ScoreBar, DayBar, Empty, Callout, PageHead, SectionHead,
-  Disclaimer, PageLoading, DataTable, StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, LiveQuotes, LIVE_NOTE,
-  CountUp, TickerTape, StockAvatar, Change, Term, SessionBadge, More,
+  Icon, Badges, IndexPills, StatusChip, ScoreRing, DayBar, Empty, Callout, PageHead, SectionHead, PageLoading, DataTable,
+  StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, LiveQuotes, LIVE_NOTE, StockAvatar, Change, Term,
+  SessionBadge, More, ScoreBar,
 } from '../ui.js';
 import { t, tp, isAr } from '../i18n.js';
 import { Sparkline } from '../charts.js';
 
-export function TodayPage() {
+// Both tabs read /today; before the first scan they explain how to get one.
+function useToday(title) {
   const { data, error } = useApi('/today');
-  if (!data) return html`<${PageLoading} error=${error} />`;
-  const m = data.market;
-  if (!m) {
-    return html`<${PageHead} title="Today" />
+  if (!data) return { page: html`<${PageLoading} error=${error} />` };
+  if (!data.market) {
+    return { page: html`<${PageHead} title=${title} />
       <div class="card"><${Empty} icon="activity" title="No scan yet"
         text=${STATIC ? 'The site scans by itself after every close. Check back after the next one.'
           : 'Press Run scan to download 5 years of prices for every EGX stock and look for signals. The first time takes about 5–10 minutes; after that about 2 minutes.'}
-        action=${STATIC ? null : html`<${JobControl} />`} /></div>`;
+        action=${STATIC ? null : html`<${JobControl} />`} /></div>` };
   }
-  const cfg = data.cfg;
-  const blocked = m.risk_off && cfg.riskoff_block_buys;
-  const alerts = data.positions.filter(p => p.status !== 'HOLD').length;
+  const blocked = data.market.risk_off && data.cfg.riskoff_block_buys;
+  return { data, blocked, alerts: data.positions.filter(p => p.status !== 'HOLD').length };
+}
+
+export function TodayPage() {
+  const { page, data, blocked, alerts } = useToday('Today');
+  if (page) return page;
+  const m = data.market;
   return html`
-    <${PageHead} title="Today" sub=${t('Signals for the next session, from the {date} close', { date: fmt.date(m.date) })}>
+    <${PageHead} title="Today" sub=${t('From the {date} close', { date: fmt.date(m.date) })}>
       <${SessionBadge} dataDate=${m.date} /><//>
     <${Brief} data=${data} blocked=${blocked} alerts=${alerts} />
-    <${MoversTape} m=${m} />
-    <${MarketCard} m=${m} spark=${data.spark} blocked=${blocked} b=${data.breadth} />
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
       ${m.warnings.map(w => html`<${Callout} tone="warn">${w}<//>`)}</div>`}
-    <div class="kpis" style="margin-top:14px">
-      <${Kpi} label="BUY signals" icon="trendUp" value=${data.buys.length} valueClass=${data.buys.length ? 'up' : ''}
-        sub=${blocked ? 'paused: risk-off market' : data.buys.length ? 'for the next session' : 'none at the last close'} />
-      <${Kpi} label=${html`<${Term} k="watchlist">${t('Watchlist')}<//>`} icon="eye" value=${data.watch.length} sub="could trigger next" />
-      <${Kpi} label="Your open positions" icon="briefcase" value=${data.positions.length}
-        sub=${data.positions.length ? (alerts ? t(alerts === 1 ? '{n} needs action' : '{n} need action', { n: alerts }) : 'all on hold') : 'none'}
-        subClass=${alerts ? 'warn' : ''} />
-      ${data.paper && html`<${Kpi} label=${html`<${Term} k="paper">${t('Paper account')}<//>`} icon="flask" value=${fmt.short(data.paper.equity)}
-        sub=${`${fmt.pct(data.paper.return_pct)} · ${t('{n} open', { n: data.paper.open })}`} subClass=${tone(data.paper.return_pct)} />`}
-    </div>
-
     ${data.orders && html`<${OrdersCard} o=${data.orders} />`}
-
-    <${LiveNow} positions=${data.positions} buys=${data.buys} />
-
-    ${data.positions.length > 0 && html`<${Positions} positions=${data.positions} cfg=${cfg} alerts=${alerts} />`}
-
+    ${data.positions.length > 0 && html`<${Positions} positions=${data.positions} cfg=${data.cfg} alerts=${alerts} />`}
     <section class="section">
+      <${SectionHead} title="Market" />
+      <${MarketCard} m=${m} spark=${data.spark} blocked=${blocked} b=${data.breadth} />
+    </section>
+    <${LiveNow} positions=${data.positions} buys=${data.buys} />`;
+}
+
+export function SignalsPage() {
+  const { page, data, blocked } = useToday('Signals');
+  if (page) return page;
+  const m = data.market;
+  return html`
+    <${PageHead} title="Signals" sub=${t('Signals for the next session, from the {date} close', { date: fmt.date(m.date) })}>
+      <${SessionBadge} dataDate=${m.date} /><//>
+    <section>
       <${SectionHead} title="BUY signals" count=${data.buys.length}
         hint=${data.buys.length ? "Don't pay more than Buy up to. If it opens higher, skip it." : ''} />
       ${data.buys.length
         ? html`<div class="signal-grid">${data.buys.map(s => html`<${SignalCard} s=${s} model=${data.model} key=${s.symbol} />`)}</div>`
         : html`<div class="card"><${Empty} icon="shield" title="No BUY signals for the next session" text=${blocked
-          ? "The market is in risk-off mode (EGX30 is below its 50-day average), so the agent isn't making new BUY calls. Sitting in cash is a valid decision. The watchlist shows what could trigger once the market recovers."
-          : 'No stock met all the entry rules at the last close. Sitting in cash is a valid decision. The watchlist below shows what could trigger next.'} /></div>`}
+          ? "The market is in risk-off mode (EGX30 is below its 50-day average), so the agent isn't making new BUY calls. Sitting in cash is a valid decision. The list below shows what is close to a BUY once the market recovers."
+          : 'No stock met all the entry rules at the last close. Sitting in cash is a valid decision. The list below shows what is close to a BUY.'} /></div>`}
     </section>
-
     <section class="section">
-      <${SectionHead} title=${html`<${Term} k="watchlist">${t('Watchlist')}<//>`} count=${data.watch.length}
-        hint="Liquid stocks in strong uptrends without an entry trigger yet. A close above the breakout level on strong volume can turn them into BUYs." />
-      <div class="card flush"><${Watchlist} rows=${data.watch} model=${data.model} /></div>
+      <${SectionHead} title=${html`<${Term} k="watchlist">${t('Close to a BUY')}<//>`} count=${data.watch.length}
+        hint="Strong uptrends without an entry trigger yet." />
+      <div class="card flush"><${NearList} rows=${data.watch} model=${data.model} /></div>
     </section>
-
-    ${cfg.auto_paper && data.paper && data.paper.last_scan && html`<p class="faint" style="margin-top:14px;font-size:12.5px">
+    ${data.cfg.auto_paper && data.paper && data.paper.last_scan && html`<p class="faint note">
       ${t('Paper trading at this scan: {filled} filled, {closed} closed, {skipped} skipped, {orders} new orders for the next session.', {
         filled: data.paper.last_scan.filled || 0, closed: data.paper.last_scan.closed || 0,
-        skipped: data.paper.last_scan.cancelled || 0, orders: data.paper.last_scan.new_orders || 0 })}</p>`}
-    <${Disclaimer} />`;
+        skipped: data.paper.last_scan.cancelled || 0, orders: data.paper.last_scan.new_orders || 0 })}</p>`}`;
 }
 
 // "Today in one minute": the market, the signals and your positions in a few plain sentences, from this page's data.
@@ -101,34 +101,24 @@ function Brief({ data, blocked, alerts }) {
     }
   }
   return html`<div class="card brief">
-    <div class="brief-head"><span class="brief-icon"><${Icon} name="activity" size=${16} /></span>${t('Today in one minute')}</div>
+    <div class="brief-head">${t('Today in one minute')}</div>
     <ul>${lines.map(l => html`<li>${l}</li>`)}</ul>
+    ${data.buys.length > 0 && html`<a class="btn sm primary brief-go" href="#/signals">${t('See the BUY signals')}
+      <${Icon} name="chevron" size=${14} /></a>`}
   </div>`;
 }
 
-// EGX30 and the day's biggest risers and fallers at the last close, scrolling across the top.
-function MoversTape({ m }) {
-  const { data } = useApi('/market');
-  const mv = data && data.movers && data.movers.chg1;
-  if (!mv) return null;
-  const item = r => ({ label: r.symbol, href: stockHref(r.symbol), price: fmt.price(r.close), change: r.ret });
-  const items = [{ label: 'EGX30', href: '#/market', price: fmt.int(m.egx30_close), change: m.egx30_change },
-    ...(mv.up || []).map(item), ...(mv.down || []).map(item)];
-  return html`<${TickerTape} items=${items} label=${t('Biggest moves · {date}', { date: fmt.date(m.date) })} />`;
-}
-
-// EGX30, your stocks and the BUY signals at TradingView's live prices (about 15 minutes late).
+// EGX30, your stocks and the BUY signals at TradingView's live prices (about 15 minutes late). Closed until you open it.
 function LiveNow({ positions, buys }) {
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem('egx-live-open') !== '0'; } catch { return true; } });
-  const flip = () => setOpen(o => { try { localStorage.setItem('egx-live-open', o ? '0' : '1'); } catch { /* private mode */ } return !o; });
+  const [open, setOpen] = useState(() => remember('live-open') === '1');
+  const flip = e => { const on = e.currentTarget.open; setOpen(on); remember('live-open', on ? '1' : '0'); };
   const symbols = ['EGX30', ...positions.map(p => p.symbol), ...buys.map(s => s.symbol)];
-  return html`<section class="section">
-    <${SectionHead} title="Live prices" hint="TradingView, about 15 minutes late">
-      <button class="btn sm" onClick=${flip}>${t(open ? 'Hide' : 'Show')}</button><//>
-    ${open && html`<div class="card flush live-list"><${LiveQuotes} symbols=${symbols}
+  return html`<details class="fold card" open=${open} onToggle=${flip}>
+    <summary><${Icon} name="chevron" size=${16} /><b>${t('Live prices')}</b><span class="hint">${t('TradingView, about 15 minutes late')}</span></summary>
+    ${open && html`<div class="live-list"><${LiveQuotes} symbols=${symbols}
       title=${t(positions.length ? 'EGX30, your stocks and the BUYs' : 'EGX30 and the BUYs')} /></div>
-      <p class="faint" style="font-size:12px;margin-top:6px">${t(LIVE_NOTE)}</p>`}
-  </section>`;
+      <p class="faint note">${t(LIVE_NOTE)}</p>`}
+  </details>`;
 }
 
 function MarketCard({ m, spark, blocked, b }) {
@@ -144,13 +134,11 @@ function MarketCard({ m, spark, blocked, b }) {
         ${m.risk_off
           ? html`<span class="chip riskoff"><span class="dot"></span><${Term} k="riskoff">${t('Risk-off')}<//></span>`
           : html`<span class="chip riskon"><span class="dot"></span>${t('Market OK')}</span>`}</div>
-      <div class="market-price"><${CountUp} value=${m.egx30_close} />
-        <${Change} value=${m.egx30_change} pill /></div>
+      <div class="market-price">${fmt.int(m.egx30_close)}<${Change} value=${m.egx30_change} pill /></div>
       <div class="market-meta"><${Term} k="ema50">${t('50-day average')}<//> ${fmt.int(m.egx30_ema50)} ·${' '}
         ${tp(gap >= 0 ? 'the index is {pct} above it' : 'the index is {pct} below it',
           { pct: html`<b class=${tone(gap)}>${fmt.pct(Math.abs(gap), 1, false)}</b>` })}</div>
       <p class="market-text">${text}</p>
-      ${b && html`<p class="market-text" style="margin-top:2px">${t(b.text)} <a href="#/market">${t('Market breadth →')}</a></p>`}
       ${b && b.switch && html`<div style="margin-top:8px"><${MarketSwitch} sw=${b.switch} compact /></div>`}
     </div>
     <div class="market-spark">
@@ -160,9 +148,8 @@ function MarketCard({ m, spark, blocked, b }) {
       <${Sparkline} spark=${spark} />
     </div>
     <div class="market-stats">
-      <span>${t('Scanned')} <b>${m.scanned}</b> ${t('stocks')}</span><span><b>${m.eligible}</b> ${t('liquid enough')}</span>
-      ${b && html`<span class="breadth-link"><${Term} k="breadth">${t('Breadth')}<//>${' '}<a href="#/market"><b class=${b.tone === 'ok' ? 'up' : b.tone === 'bad' ? 'down' : 'warn'}>${fmt.pct(b.above50, 0, false)}</b> ${t('above 50-day avg')}${
-          b.change_week != null ? html` <span class="faint">(${t('{n} pts in a week', { n: fmt.signed(b.change_week * 100) })})</span>` : ''}</a></span>`}
+      ${b && html`<a href="#/market"><${Term} k="breadth">${t('Breadth')}<//>${' '}<b class=${b.tone === 'ok' ? 'up' : b.tone === 'bad' ? 'down' : 'warn'}>${fmt.pct(b.above50, 0, false)}</b> ${t('above 50-day avg')}
+        <${Icon} name="chevron" size=${13} /></a>`}
       <span>${t('Data')}: <b>${fmt.date(m.date)}</b> ${t('close')}</span><span>${t('Last run')} <b>${fmt.datetime(m.finished)}</b></span>
     </div>
   </div>`;
@@ -247,8 +234,8 @@ function OrdersCard({ o }) {
         <button class="btn sm ghost" onClick=${copy} title=${t('Copy the list as text')}><${Icon} name="copy" />${t('Copy')}</button>
       </div>
     </div>
-    ${o.stale && html`<div style="padding:0 18px 12px"><${Callout} tone="warn">These orders were for ${fmt.date(o.session)}.
-      ${STATIC ? "The next session's list appears here after the site's next scan." : "Press Run scan for the next session's list."}<//></div>`}
+    ${o.stale && html`<div style="padding:0 18px 12px"><${Callout} tone="warn">${t('These orders were for {date}.', { date: fmt.date(o.session) })}${' '}
+      ${t(STATIC ? "The next session's list appears here after the site's next scan." : "Press Run scan for the next session's list.")}<//></div>`}
     ${o.items.map(it => html`<div class=${cls('order', done.has(it.key) && 'done')} key=${it.key}>
       <button class=${cls('tick', done.has(it.key) && 'on')} onClick=${() => toggle(it)}
         aria-label=${done.has(it.key) ? 'Mark as not done' : 'Mark as done'} title="Done"><${Icon} name="check" /></button>
@@ -273,71 +260,64 @@ function Level({ label, value, sub, subCls }) {
 
 function SignalCard({ s, model }) {
   const i = s.info;
-  const risk = s.close - s.stop, reward = s.target - s.close;
-  const lossW = (risk / (risk + reward)) * 100;
   const logHref = buyHref(s.symbol, s.entry_high, s.shares);
-  return html`<article class="card signal spot">
+  const cautions = s.cautions || [];
+  const results = cautions.find(c => c.kind === 'results');
+  return html`<article class="card signal">
     <div class="sig-head">
       <div class="who">
-        <div class="sym-line"><${StockAvatar} symbol=${s.symbol} size=${34} /><a class="sym-big" href=${stockHref(s.symbol)}>${s.symbol}</a><${IndexPills} info=${i} />
+        <div class="sym-line"><${StockAvatar} symbol=${s.symbol} size=${34} /><a class="sym-big" href=${stockHref(s.symbol)}>${s.symbol}</a>
           ${s.source === 'model'
             ? html`<span class="model-pick" title="One of the prediction model's top picks today that also passes the liquidity and uptrend checks. Same stop, target and sizing as any BUY."><${Icon} name="target" size=${12} />${t('Model pick')}</span>`
             : s.setup && html`<span class="tag">${t(s.setup)}</span>`}</div>
-        <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}</div>
-        <div class="stock-sector">${i.sector}</div>
+        <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}<span class="faint"> · ${i.sector}</span></div>
       </div>
       <${ScoreRing} score=${s.score} />
     </div>
-    <${Badges} info=${i} />
-    <${Cautions} items=${s.cautions} compact />
-    ${(s.cautions || []).some(c => c.kind === 'ex_dividend') && html`<${More} label="What the ex-dividend date means">
-      <p class="caution-note info"><${Icon} name="info" size=${13} />${t('It goes ex-dividend before this trade would end. The price drops by the dividend that morning and you get it in cash, so the agent lowers the stop and target by the same amount (a to-do reminds you the evening before). Counting the dividend, BUYs this close to an ex-date did as well as the others in 10 years of tests.')}</p><//>`}
-    ${(s.cautions || []).some(c => c.kind === 'results') && html`<p class="caution-note info"><${Icon} name="info" size=${13} />
-      ${t('Results are expected around {date}, before this trade would end. The price can jump either way that day; the agent keeps the same stop.', {
-        date: fmt.date(s.cautions.find(c => c.kind === 'results').date, false) })}</p>`}
+    <div class="sig-tags"><${Badges} info=${i} compact /><${IndexPills} info=${i} /><${Cautions} items=${cautions} compact /></div>
     <div class="levels">
       <${Level} label="Last close" value=${fmt.price(s.close)} />
       <${Level} label=${html`<${Term} k="buyupto">${t('Buy up to')}<//>`} value=${fmt.price(s.entry_high)} sub=${fmt.pct(s.entry_high / s.close - 1)} subCls="faint" />
       <${Level} label=${html`<${Term} k="stop">${t('Stop-loss')}<//>`} value=${fmt.price(s.stop)} sub=${fmt.pct(s.stop / s.close - 1)} subCls="down" />
       <${Level} label=${html`<${Term} k="target">${t('Target')}<//>`} value=${fmt.price(s.target)} sub=${fmt.pct(s.target / s.close - 1)} subCls="up" />
     </div>
-    <div class="rr">
-      <div class="rr-bar"><span class="loss" style=${`width:${lossW}%`}></span><span class="gain" style=${`width:${100 - lossW}%`}></span></div>
-      <div class="rr-labels"><span>${t('Risk {value} / share', { value: fmt.price(risk) })}</span><span><${Term} k="rr">${t('Reward {value}× the risk', { value: fmt.num(reward / risk, 1) })}<//></span></div>
-    </div>
     <div class="sizing">
       <span>${t('Shares')} <b>${s.shares ? fmt.int(s.shares) : '–'}</b></span>
       <span>${t('Amount')} <b>${fmt.egp(s.amount)}</b></span>
       <span>${t('Max loss')} <b class="down">${fmt.egp(s.risk_egp)}</b></span>
     </div>
-    <details class="why"><summary><${Icon} name="chevron" />${t('Why this signal')}</summary>
-      <ul class="reasons" dir="ltr">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${r}</li>`)}</ul></details>
-    ${model && s.pred && html`<div class="model-line"><${Icon} name="target" size=${14} />
-      ${s.pred.top10 === false
-        ? html`<a href="#/predict">${t('Model: #{rank} of {n}, not one of its top picks today', { rank: fmt.int(s.pred.rank10), n: fmt.int(model.count) })}</a>`
-        : html`<a href="#/predict">${tp('Model: #{rank} of {n}, {chance} chance of target before stop in 2 weeks', {
-            rank: fmt.int(s.pred.rank10), n: fmt.int(model.count), chance: html`<${Chance} p=${s.pred.p10} base=${model.base[10]} />` })}</a>
-      <span class="faint">(${t('average stock {pct}', { pct: fmt.pct(model.base[10], 0, false) })})</span>`}</div>
-      ${s.pred.why10 && s.pred.why10.length > 0 && html`<${Why} items=${s.pred.why10} />`}`}
-    <div class="faint" style="font-size:12px">${t('Sizing')}: <span dir="ltr">${s.size_note}</span> · ${t('hold at most until')} <b class="muted">${fmt.date(s.sell_by)}</b></div>
+    <${More} label="Why this signal">
+      <ul class="reasons" dir="ltr">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${r}</li>`)}</ul>
+      ${model && s.pred && html`<div class="model-line"><${Icon} name="target" size=${14} />
+        ${s.pred.top10 === false
+          ? html`<a href="#/predict">${t('Model: #{rank} of {n}, not one of its top picks today', { rank: fmt.int(s.pred.rank10), n: fmt.int(model.count) })}</a>`
+          : html`<a href="#/predict">${tp('Model: #{rank} of {n}, {chance} chance of target before stop in 2 weeks', {
+              rank: fmt.int(s.pred.rank10), n: fmt.int(model.count), chance: html`<${Chance} p=${s.pred.p10} base=${model.base[10]} />` })}</a>
+        <span class="faint">(${t('average stock {pct}', { pct: fmt.pct(model.base[10], 0, false) })})</span>`}</div>
+        ${s.pred.why10 && s.pred.why10.length > 0 && html`<${Why} items=${s.pred.why10} />`}`}
+      ${cautions.some(c => c.kind === 'ex_dividend') && html`<p>${t('It goes ex-dividend before this trade would end. The price drops by the dividend that morning and you get it in cash, so the agent lowers the stop and target by the same amount (a to-do reminds you the evening before). Counting the dividend, BUYs this close to an ex-date did as well as the others in 10 years of tests.')}</p>`}
+      ${results && html`<p>${t('Results are expected around {date}, before this trade would end. The price can jump either way that day; the agent keeps the same stop.', {
+        date: fmt.date(results.date, false) })}</p>`}
+      <p class="faint">${t('Sizing')}: <span dir="ltr">${s.size_note}</span> · ${t('hold at most until')} <b class="muted">${fmt.date(s.sell_by)}</b></p>
+    <//>
     <div class="sig-foot">
-      <a class="btn sm" href=${stockHref(s.symbol)}><${Icon} name="chart" />${t('Chart')}</a>
-      <a class="btn sm" href=${`#/calc/${encodeURIComponent(s.symbol)}`}><${Icon} name="coins" />${t('Size it')}</a>
+      <a class="btn sm ghost" href=${stockHref(s.symbol)}><${Icon} name="chart" />${t('Chart')}</a>
+      <a class="btn sm ghost" href=${`#/calc/${encodeURIComponent(s.symbol)}`}><${Icon} name="coins" />${t('Size it')}</a>
       <a class="btn sm primary" href=${logHref}><${Icon} name="plus" />${t('Log buy')}</a>
     </div>
   </article>`;
 }
 
-function Watchlist({ rows, model }) {
+// The agent's list of stocks close to a BUY (not your own Watchlist).
+function NearList({ rows, model }) {
   const columns = [
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
-    { key: 'sector', label: 'Sector', sortValue: r => r.info.sector, render: r => html`<span class="muted">${r.info.sector}</span>` },
-    { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
-    { key: 'score', label: html`<${Term} k="score">${t('Score')}<//>`, width: '150px', render: r => html`<${ScoreBar} score=${r.score} />` },
+    { key: 'score', label: html`<${Term} k="score">${t('Score')}<//>`, width: '140px', render: r => html`<${ScoreBar} score=${r.score} />` },
     { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
     { key: 'trigger', label: html`<${Term} k="breakout">${t('Breakout above')}<//>`, align: 'r', fmt: v => html`<b>${fmt.price(v)}</b>` },
     { key: 'to_trigger', label: 'Distance', align: 'r', fmt: v => html`<span class="muted">${fmt.pct(v)}</span>`,
       title: 'How far the price must rise to break out' },
+    { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
     { key: 'cautions', label: 'Good to know', sortable: false, render: r => html`<${Cautions} items=${r.cautions} compact />` },
   ];
   if (model) {
