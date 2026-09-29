@@ -148,7 +148,7 @@ function ChanceTable({ rows, hz, base }) {
       render: r => html`<div class="row" style="gap:6px">${r.action && html`<${StatusChip} status=${r.action} />`}
         ${r.held && html`<span class="tag"><${Icon} name="briefcase" size=${12} />Held</span>`}</div>` },
   ];
-  return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol} key=${hz} limit=${25}
+  return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol} key=${hz} limit=${10}
     sort=${{ key: `rank${hz}`, dir: 'asc' }} onRowClick=${r => go(stockHref(r.symbol))}
     empty="None of today's BUY signals, watchlist stocks or your holdings are liquid enough to be scored." />`;
 }
