@@ -494,10 +494,11 @@ def actions(conn: sqlite3.Connection, symbol: str | None = None, since: str | No
 
 
 def cautions(conn: sqlite3.Connection, symbol: str, today: str, hold_days: int = 30, news_days: int = 5,
-             div: dict | None = None) -> list[dict]:
+             div: dict | None = None, results: str | None = None) -> list[dict]:
     """What a buyer of this stock should know now: an ex-dividend date within the next month (the price drops by
     the dividend that morning, which can hit a stop), bonus shares or a rights issue coming, or bad news this week.
-    div: the stock's next cash dividend from TradingView ({ex_date, amount}), to name the amount."""
+    div: the stock's next cash dividend from TradingView ({ex_date, amount}), to name the amount.
+    results: TradingView's expected date for the company's next results (data/dividends.next_results)."""
     out = []
     day = datetime.fromisoformat(today)
     end = (day + timedelta(days=hold_days)).date().isoformat()
@@ -524,6 +525,11 @@ def cautions(conn: sqlite3.Connection, symbol: str, today: str, hold_days: int =
                        "text": f"Goes ex-dividend on {ex}" + (f" ({amount:g} EGP a share)" if amount else "")
                                + ": the price drops by the dividend that morning and holders get it in cash. "
                                  "The agent lowers the stop and target by the same amount that day."})
+    if results and tomorrow <= results <= end:
+        # A guide, not a rule: the agent's tests don't cover results days, so it neither skips nor sizes for them.
+        out.append({"kind": "results", "date": results, "level": "info",
+                    "text": f"Results expected around {results} (TradingView's estimate): the price can move a lot "
+                            "either way when they come out."})
     since = (day - timedelta(days=news_days)).strftime("%Y-%m-%dT00:00")
     for n in _rows(conn.execute(
             "SELECT source, published, title, url, tags, tone FROM news WHERE symbol = ? AND published >= ? "

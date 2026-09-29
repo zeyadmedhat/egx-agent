@@ -5,6 +5,7 @@ import {
 import {
   Icon, Kpi, Callout, PageHead, Disclaimer, PageLoading, Field, Switch, Confirm, JobProgress, useJob,
 } from '../ui.js';
+import { t } from '../i18n.js';
 
 const isNum = f => f.kind === 'float' || f.kind === 'int';
 
@@ -30,7 +31,7 @@ function fromDraft(draft, sections) {
   return out;
 }
 
-const slug = t => 'sec-' + t.toLowerCase().replace(/[^a-z]+/g, '-');
+const slug = title => 'sec-' + title.toLowerCase().replace(/[^a-z]+/g, '-');
 const scrollTo = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
 export function SettingsPage() {
@@ -102,7 +103,7 @@ export function SettingsPage() {
         </div>`)}
         ${dirty && html`<div class="savebar"><span class="msg"><${Icon} name="info" size=${15} /> You have unsaved changes.</span>
           <button class="btn ghost" onClick=${() => { setDraft(original); setErrors({}); }}>Discard</button>
-          <button class="btn primary" disabled=${saving} onClick=${save}><${Icon} name="check" />Save settings</button></div>`}
+          <button class="btn primary" disabled=${saving} onClick=${save}><${Icon} name="check" />${t('Save settings')}</button></div>`}
         <${DataCard} d=${data.data} running=${running} admin=${admin} />
       </div>
     </div>
@@ -197,7 +198,7 @@ function DeviceCard({ telegram, scanUrl }) {
     file.text().then(async text => {
       const site = await import('../local/site.js');
       const book = site.readBackup(text);
-      const n = book.trades.filter(t => t.account === 'real' && t.status === 'open').length;
+      const n = book.trades.filter(x => x.account === 'real' && x.status === 'open').length;
       setRestore({ book, text: `It has ${n} open position${n === 1 ? '' : 's'}${book.trades.length ? '' : ' and nothing else'}. `
         + 'Everything saved in this browser now is replaced by the backup.' });
     }).catch(err => toast(err.message, 'error', 9000));
@@ -214,13 +215,13 @@ function DeviceCard({ telegram, scanUrl }) {
       Nobody else can see them, not even the person who runs the site. They don't move to your other phone or computer by
       themselves: download a backup here and restore it there.</p>
     <div class="device-actions">
-      <button class="btn primary" onClick=${download}><${Icon} name="download" />Download a backup</button>
+      <button class="btn primary" onClick=${download}><${Icon} name="download" />${t('Download a backup')}</button>
       <label class="btn"><${Icon} name="refresh" />Restore from a backup
         <input type="file" accept="application/json,.json" hidden onChange=${pick} /></label>
     </div>
     <p class="faint" style="font-size:12.5px;margin-top:12px">On iPhone, use the site from its Home Screen icon (Share →
       Add to Home Screen): Safari may delete a website's saved data if you don't open it for 7 days.</p>
-    <div class="sub-block"><h3>Alerts on your phone (Telegram)</h3>
+    <div class="sub-block"><h3>${t('Alerts on your phone (Telegram)')}</h3>
       ${telegram ? html`
         <div class="muted" style="font-size:12.5px">After each close, the bot sends you the day's signals: what to buy,
           up to which price, the stop and the target. Your share counts are here on the site.</div>
@@ -231,14 +232,14 @@ function DeviceCard({ telegram, scanUrl }) {
         </ol>
         <div class="device-actions">
           <a class="btn primary" href=${telegram.link} target="_blank" rel="noopener noreferrer">
-            <${Icon} name="send" />Connect Telegram</a>
+            <${Icon} name="send" />${t('Connect Telegram')}</a>
         </div>
         <p class="faint" style="font-size:12.5px;margin-top:10px">To stop, send <b>/stop</b> to @${telegram.bot}. Keep this
           button's link to yourself: anyone who opens it gets the messages too.</p>`
       : html`<div class="muted" style="font-size:12.5px">The site has no Telegram alerts yet. Open it after each close
           (from about 4 pm Cairo time) for the next session's orders.</div>`}
     </div>
-    ${scanUrl && html`<div class="sub-block"><h3>Run a scan now (for the person who runs the site)</h3>
+    ${scanUrl && html`<div class="sub-block"><h3>${t('Run a scan now (for the person who runs the site)')}</h3>
       <div class="muted" style="font-size:12.5px">The site scans by itself after every close. To scan now, open the
         scan on GitHub and press <b>Run workflow</b>, then the green <b>Run workflow</b> button. It needs your GitHub
         sign-in, so it only works for you. The new data shows here in about 5 minutes. During trading hours the
@@ -302,7 +303,7 @@ function AlertsCard() {
   const tokenForm = html`<form class="row" onSubmit=${saveToken}>
     <input class="input token-input" type="password" autocomplete="off" spellcheck=${false}
       placeholder="123456789:AA…" value=${token} onInput=${e => setToken(e.target.value)} />
-    <button class="btn primary" type="submit" disabled=${!token.trim() || !!busy}>Save token</button></form>`;
+    <button class="btn primary" type="submit" disabled=${!token.trim() || !!busy}>${t('Save token')}</button></form>`;
 
   let body;
   if (tg.connected) {
@@ -347,7 +348,7 @@ function AlertsCard() {
     ${tg.error && html`<div style="margin-top:12px"><${Callout} tone="bad">The last message failed
       (${fmt.datetime(tg.error.at)}): ${tg.error.message}<//></div>`}
     ${tg.can_set_bot && tg.token_set && bot && html`<div class="sub-block">
-      <h3>The bot</h3>
+      <h3>${t('The bot')}</h3>
       <div class="muted" style="font-size:12.5px">@${bot} · token ${tg.token_hint}.${website
         ? ' If you change the bot, everyone has to connect again.' : ''}${' '}
         <button class="linkish" onClick=${() => setChangeBot(x => !x)}>${changeBot ? 'Cancel' : 'Use a different bot'}</button></div>
@@ -355,7 +356,7 @@ function AlertsCard() {
     </div>`}
 
     ${sc && html`<div class="sub-block">
-      <h3>Daily scan</h3>
+      <h3>${t('Daily scan')}</h3>
       ${sc.supported
         ? html`<${Switch} checked=${sc.on} label="Scan by itself every trading day, even when the dashboard is closed"
             onChange=${on => run('schedule', () => api('/alerts/schedule', { method: 'POST', body: { on } }))} />

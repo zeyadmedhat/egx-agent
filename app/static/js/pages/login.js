@@ -1,6 +1,7 @@
 // Signing in to the website: log in, join through an invite link, set a new password, and the first-login notice.
 import { html, useState, useEffect, api, useRoute, useStore } from '../lib.js';
 import { Icon, Callout, Field } from '../ui.js';
+import { t } from '../i18n.js';
 
 export function AuthScreen({ onDone }) {
   const route = useRoute();
@@ -37,7 +38,7 @@ function Login({ onDone }) {
     await onDone();
   });
   return html`<form class="stack" onSubmit=${submit}>
-    <h2>Log in</h2>
+    <h2>${t('Log in')}</h2>
     <${Field} label="Username"><input class="input" autocomplete="username" autocapitalize="none" spellcheck=${false}
       value=${username} onInput=${e => setUsername(e.target.value)} required /><//>
     <${Field} label="Password"><input class="input" type="password" autocomplete="current-password"
@@ -83,7 +84,7 @@ function Join({ code, onDone }) {
   if (loading) return html`<div class="skeleton" style="height:180px"></div>`;
   if (linkError || !info || info.kind !== 'invite') {
     return html`<${Callout} tone="bad">${linkError || 'This is not an invite link.'}<//>
-      <a class="btn block" style="margin-top:14px" href="#/">Go to log in</a>`;
+      <a class="btn block" style="margin-top:14px" href="#/">${t('Go to log in')}</a>`;
   }
   return html`<form class="stack" onSubmit=${submit}>
     <h2>${info.claim ? 'Set up your admin account' : "You're invited"}</h2>
@@ -113,10 +114,10 @@ function Reset({ code, onDone }) {
   if (loading) return html`<div class="skeleton" style="height:160px"></div>`;
   if (linkError || !info || info.kind !== 'reset') {
     return html`<${Callout} tone="bad">${linkError || 'This is not a password reset link.'}<//>
-      <a class="btn block" style="margin-top:14px" href="#/">Go to log in</a>`;
+      <a class="btn block" style="margin-top:14px" href="#/">${t('Go to log in')}</a>`;
   }
   return html`<form class="stack" onSubmit=${submit}>
-    <h2>Choose a new password</h2>
+    <h2>${t('Choose a new password')}</h2>
     <p class="muted" style="font-size:13px">For <b>${info.username}</b>. You'll be signed out on your other devices.</p>
     <input type="text" autocomplete="username" value=${info.username || ''} hidden readonly />
     <${PasswordFields} password=${password} setPassword=${setPassword} confirm=${confirm} setConfirm=${setConfirm} />
@@ -132,7 +133,7 @@ function Terms({ onDone }) {
     await onDone();
   });
   return html`<form class="stack" onSubmit=${submit}>
-    <h2>Before you start</h2>
+    <h2>${t('Before you start')}</h2>
     <ul class="reasons">
       <li><b>A private group.</b> This site is for invited friends only. Please don't share your login or the signals.</li>
       <li><b>Not investment advice.</b> The signals come from fixed rules and a statistical model. You decide and place
@@ -144,6 +145,6 @@ function Terms({ onDone }) {
     </ul>
     <label class="check"><input type="checkbox" checked=${ok} onChange=${e => setOk(e.target.checked)} />I understand and agree</label>
     ${error && html`<${Callout} tone="bad">${error}<//>`}
-    <button class="btn primary block" type="submit" disabled=${!ok || busy}><${Icon} name="check" />Continue</button>
+    <button class="btn primary block" type="submit" disabled=${!ok || busy}><${Icon} name="check" />${t('Continue')}</button>
   </form>`;
 }

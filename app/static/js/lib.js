@@ -64,6 +64,7 @@ export const store = {
   toasts: [],
   offline: false,
   theme: document.documentElement.dataset.theme || 'dark',
+  lang: document.documentElement.lang === 'ar' ? 'ar' : 'en',   // set before start from localStorage (index.html)
   me: null,          // /api/me: { multi_user, user } (on your Mac: you, as admin, no login)
   auth: null,        // the website only: 'login' or 'terms' while that screen is needed
   owner: readOwner(),  // the GitHub Pages site: this device shows the owner's Run scan button
@@ -250,6 +251,7 @@ const nfCache = {};
 const nf = (min, max = min) => (nfCache[`${min}-${max}`] ||= new Intl.NumberFormat('en-US', {
   minimumFractionDigits: min, maximumFractionDigits: max,
 }));
+const dateLocale = () => (store.lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB');   // Arabic month names, 0–9 digits
 const bad = v => v === null || v === undefined || Number.isNaN(v);
 const minus = s => s.replace('-', '−');
 
@@ -270,12 +272,12 @@ export const fmt = {
   date(s, withYear = true) {
     if (!s) return '–';
     const d = new Date(String(s).slice(0, 10) + 'T00:00:00');
-    return d.toLocaleDateString('en-GB', withYear ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
+    return d.toLocaleDateString(dateLocale(), withYear ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
   },
   datetime(s) {
     if (!s) return '–';
     const d = new Date(s);
-    return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString(dateLocale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   },
   price: v => (bad(v) ? '–' : minus(nf(2, v < 10 ? 3 : 2).format(v))),
 };
@@ -285,6 +287,14 @@ export const todayISO = () => {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
 export const cls = (...xs) => xs.filter(Boolean).join(' ');
+
+// ------------------------------------------------------------------ language (Arabic reads right to left)
+export function setLang(lang) {
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+  try { localStorage.setItem('egx-lang', lang); } catch { /* private mode */ }
+  setStore({ lang });
+}
 
 // ------------------------------------------------------------------ theme
 export function setTheme(theme) {

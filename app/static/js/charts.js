@@ -1,5 +1,6 @@
 // Charts drawn with TradingView's Lightweight Charts (vendored in /static/vendor).
 import { html, useEffect, useRef, useStore, cssVar, fmt } from './lib.js';
+import { t as tr } from './i18n.js';
 
 const LWC = window.LightweightCharts;
 
@@ -265,8 +266,8 @@ export function BreadthChart({ h, height = 440 }) {
       legend.current.innerHTML = [
         `<span>${fmt.date(T[i])}</span>`,
         `<span><span class="legend-dot" style="background:${t.accent}"></span>EGX30 <b>${fmt.int(h.index[i])}</b></span>`,
-        `<span><span class="legend-dot" style="background:${t.up}"></span>Above 50-day avg <b>${fmt.pct(h.above50[i], 0, false)}</b></span>`,
-        `<span><span class="legend-dot" style="background:${t.violet}"></span>Above 20-day avg <b>${fmt.pct(h.above20[i], 0, false)}</b></span>`,
+        `<span><span class="legend-dot" style="background:${t.up}"></span>${tr('Above 50-day avg')} <b>${fmt.pct(h.above50[i], 0, false)}</b></span>`,
+        `<span><span class="legend-dot" style="background:${t.violet}"></span>${tr('Above 20-day avg')} <b>${fmt.pct(h.above20[i], 0, false)}</b></span>`,
       ].join('');
     };
     writeLegend(n - 1);

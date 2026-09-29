@@ -619,3 +619,33 @@ def test_live_prices_come_only_from_tradingview_boxes():
     ui = (static_site.STATIC / "js" / "ui.js").read_text(encoding="utf-8")
     js = dict(_re.findall(r"(\w+): '(\w+)'", _re.search(r"export const TV_ALIASES = \{([^}]*)\}", ui).group(1)))
     assert js == _prices.TV_ALIASES
+
+
+def test_arabic_translations_keep_their_placeholders():
+    """Every Arabic entry fills in the same {names} as its English key, keys aren't repeated, and every market term
+    has both languages: a missing {date} would show an empty gap, an extra one a raw "{date}"."""
+    import json
+    import re
+    src = (ROOT / "app" / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+    body = src[src.index("export const AR = {"):]
+    pairs = re.findall(r'^  ("(?:[^"\\]|\\.)*"): ("(?:[^"\\]|\\.)*"),$', body, re.M)
+    assert len(pairs) > 400
+    keys = [json.loads(k) for k, _ in pairs]
+    assert len(keys) == len(set(keys))
+    for k, v in pairs:
+        en, ar = json.loads(k), json.loads(v)
+        assert ar.strip() and sorted(re.findall(r"\{(\w+)\}", en)) == sorted(re.findall(r"\{(\w+)\}", ar)), en
+    terms = re.findall(r"^  (\w+): \{\n    en: \[(.*)\],\n    ar: \[(.*)\],", src, re.M)
+    assert len(terms) >= 15 and all(en and ar for _, en, ar in terms)
+
+
+def test_nothing_hides_the_translator():
+    """A local variable named t in a file that translates with t() makes that call crash the page (a DayBar did)."""
+    import re
+    clash = re.compile(r"(?:\b(?:const|let|var)\s+t\s*=|\(\s*t\s*\)\s*=>|[(,]\s*t\s*=>|\bt\s*=>|\(\s*t\s*,|:\s*t\s*[=,}])")
+    for f in (ROOT / "app" / "static" / "js").rglob("*.js"):
+        src = f.read_text(encoding="utf-8")
+        if "vendor" in f.parts or not re.search(r"import \{[^}]*\bt\b(?!\s+as)[^}]*\} from '\.{1,2}/(?:\.\./)?i18n\.js'", src):
+            continue
+        bad = [m.group(0) for m in clash.finditer(src)]
+        assert not bad, f"{f.name}: {bad}"

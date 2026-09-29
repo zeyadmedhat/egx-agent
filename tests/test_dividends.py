@@ -1,5 +1,5 @@
 """Every company's cash dividends from TradingView's screener, kept as they're seen, and a stock's history."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -41,4 +41,30 @@ def test_a_stocks_dividend_and_bonus_share_history(tmp_path):
     assert [(r["ex_date"], r["upcoming"]) for r in h["dividends"]] == [(soon, True), ("2025-04-01", False)]
     assert h["dividends"][1]["pct"] == pytest.approx(0.03) and h["yield"] == pytest.approx(0.035)
     assert h["bonus"] == [{"ex_date": "2024-06-02", "factor": 1.25, "text": "1 free share for every 4 you hold"}]
-    assert views.corporate_history(conn, "XYZ", 10.0) == {"dividends": [], "yield": None, "bonus": [], "actions": []}
+    assert views.corporate_history(conn, "XYZ", 10.0) == {"dividends": [], "yield": None, "bonus": [], "actions": [],
+                                                          "results": None}
+
+
+def _ts(day: str) -> int:
+    """TradingView's timestamp for a day: mid-afternoon Cairo time."""
+    return int(datetime.fromisoformat(day + "T14:00:00+03:00").timestamp())
+
+
+def test_results_dates_come_with_the_dividends(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    today = date.today()
+    soon, recent = (today + timedelta(days=20)).isoformat(), (today - timedelta(days=70)).isoformat()
+    stale = (today - timedelta(days=dividends.EARNINGS_STALE_DAYS + 30)).isoformat()
+    rows = [{**_row("COMI", 4.7), "earnings_release_date": _ts(recent), "earnings_release_next_date": _ts(soon)},
+            {**_row("OLDC", None), "earnings_release_date": _ts(stale), "earnings_release_next_date": _ts(soon)},
+            {**_row("AIH", None), "earnings_release_date": _ts(recent), "earnings_release_next_date": _ts(soon)},
+            _row("NONE", None)]                                   # no results fields: nothing stored
+    dividends.save(conn, rows)
+    got = {r["symbol"]: (r["next_date"], r["last_date"]) for r in conn.execute("SELECT * FROM earnings")}
+    assert got == {"COMI": (soon, recent), "OLDC": ("", stale), "AIH": (soon, recent)}
+    # a company that stopped reporting on TradingView gets no guess; TradingView's names map back to the agent's
+    assert dividends.next_results(conn, today.isoformat()) == {"COMI": soon, "AIHC": soon}
+    assert dividends.next_results(conn, soon) == {}
+    h = views.corporate_history(conn, "COMI", 100.0)
+    assert h["results"] == {"next": soon, "last": recent}
+    assert views.corporate_history(conn, "AIHC", 10.0)["results"]["next"] == soon

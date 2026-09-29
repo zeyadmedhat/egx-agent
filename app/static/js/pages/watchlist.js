@@ -4,6 +4,7 @@ import { html, useApi, useMemo, useStore, fmt, tone, go, stockHref, cls, toggleW
 import {
   Icon, PageLoading, DataTable, StockCell, StatusChip, Chance, Disclaimer, Empty, StockPicker, WatchStar,
 } from '../ui.js';
+import { t } from '../i18n.js';
 
 export function WatchlistPage() {
   const list = useStore(s => s.watchlist);
@@ -45,7 +46,7 @@ export function WatchlistPage() {
       ? 'Kept in this browser with your portfolio, and in your backups (Settings → Download a backup).'
       : 'Kept with your portfolio on this Mac.'}</p>
     <div class="card" style="margin-top:16px">
-      <div class="card-title"><${Icon} name="bell" size=${15} />Alerts in Telegram</div>
+      <div class="card-title"><${Icon} name="bell" size=${15} />${t('Alerts in Telegram')}</div>
       <p class="muted" style="font-size:13px;margin-bottom:10px">The website's Telegram bot can tell you after a close
         when a stock gets a BUY signal or closes past a price. Connect it on the website (Settings → Connect Telegram),
         then send it:</p>

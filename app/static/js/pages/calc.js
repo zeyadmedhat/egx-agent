@@ -4,6 +4,7 @@ import { html, useApi, useState, useEffect, fmt, go, cls } from '../lib.js';
 import {
   Icon, PageLoading, StockPicker, Field, Seg, Callout, MarketSwitch, StatusChip, Chance, Disclaimer, Empty,
 } from '../ui.js';
+import { t } from '../i18n.js';
 import { planTrade } from '../sizing.js';
 
 const SIZES = [{ value: 'full', label: 'Full size' }, { value: 'half', label: 'Half size' }];
@@ -79,7 +80,7 @@ export function CalcPage({ route }) {
       </div>
       <${Result} res=${res} sym=${st.symbol} entry=${Number(f.entry)} />
     </div>
-    ${res.ok && html`<div class="card" style="margin-top:14px"><div class="card-title">Your portfolio limits</div>
+    ${res.ok && html`<div class="card" style="margin-top:14px"><div class="card-title">${t('Your portfolio limits')}</div>
       <ul class="checklist">${res.checks.map(c => html`<li>
         <span class=${LEVEL[c.level][1]}><${Icon} name=${LEVEL[c.level][0]} /></span><span>${c.text}</span></li>`)}</ul></div>`}
     <${Disclaimer} />`;
@@ -93,21 +94,21 @@ function Result({ res, sym, entry }) {
     <div class=${cls('calc-shares', res.shares ? 'up' : 'down')}>${fmt.int(res.shares)} <span>shares</span></div>
     <div class="faint" style="font-size:12.5px;margin-bottom:14px">Sized by: ${res.size_note}</div>
     <div class="stat-list">
-      <span class="k">Amount</span><span class="v">${fmt.egp(res.amount)}
+      <span class="k">${t('Amount')}</span><span class="v">${fmt.egp(res.amount)}
         <span class="faint" style="font-weight:500"> ${fmt.pct(res.position_pct, 1, false)} of the account</span></span>
-      <span class="k">Buy fee</span><span class="v">${fmt.egp(res.buy_fee, 2)}</span>
-      <span class="k">Stop-loss</span><span class="v down">${fmt.price(entry - res.per_share)}
+      <span class="k">${t('Buy fee')}</span><span class="v">${fmt.egp(res.buy_fee, 2)}</span>
+      <span class="k">${t('Stop-loss')}</span><span class="v down">${fmt.price(entry - res.per_share)}
         <span class="faint" style="font-weight:500"> ${fmt.pct(-res.stop_pct, 1)}</span></span>
-      <span class="k">Target</span><span class="v up">${fmt.price(res.target)}
+      <span class="k">${t('Target')}</span><span class="v up">${fmt.price(res.target)}
         <span class="faint" style="font-weight:500"> ${fmt.pct(res.target_pct, 1)}</span></span>
-      <span class="k">If the stop is hit</span><span class="v down">${fmt.egp(res.loss_at_stop ? -res.loss_at_stop : 0)}
+      <span class="k">${t('If the stop is hit')}</span><span class="v down">${fmt.egp(res.loss_at_stop ? -res.loss_at_stop : 0)}
         <span class="faint" style="font-weight:500"> ${fmt.pct(res.loss_pct ? -res.loss_pct : 0, 2)} of the account</span></span>
-      <span class="k">If the target is hit</span><span class="v up">${res.gain_at_target ? '+' : ''}${fmt.egp(res.gain_at_target)}</span>
-      <span class="k">Cash left after</span><span class="v">${fmt.egp(res.cash_after)}</span>
+      <span class="k">${t('If the target is hit')}</span><span class="v up">${res.gain_at_target ? '+' : ''}${fmt.egp(res.gain_at_target)}</span>
+      <span class="k">${t('Cash left after')}</span><span class="v">${fmt.egp(res.cash_after)}</span>
     </div>
     <p class="faint" style="font-size:12px;margin-top:10px">Fees on both sides included. A gap through the stop can
       lose more.</p>
     ${res.shares > 0 && html`<a class="btn primary block" style="margin-top:14px" href=${log}>
-      <${Icon} name="plus" />Log this buy after it fills</a>`}
+      <${Icon} name="plus" />${t('Log this buy after it fills')}</a>`}
   </div>`;
 }

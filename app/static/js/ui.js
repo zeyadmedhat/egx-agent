@@ -3,6 +3,9 @@ import {
   html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
   stockHref, watchForData, toggleWatch, STATIC,
 } from './lib.js';
+import { t, term } from './i18n.js';
+
+const tx = v => (typeof v === 'string' ? t(v) : v);   // plain text is translated; built pieces are left alone
 
 // ------------------------------------------------------------------ icons (stroke icons, 24×24)
 const ICONS = {
@@ -50,11 +53,11 @@ const ICONS = {
 };
 export function Icon({ name, size }) {
   const style = size ? `width:${size}px;height:${size}px` : undefined;
-  return html`<svg class="icon" viewBox="0 0 24 24" style=${style} aria-hidden="true" dangerouslySetInnerHTML=${{ __html: ICONS[name] || '' }}></svg>`;
+  return html`<svg class="icon" data-i=${name} viewBox="0 0 24 24" style=${style} aria-hidden="true" dangerouslySetInnerHTML=${{ __html: ICONS[name] || '' }}></svg>`;
 }
 
 // ------------------------------------------------------------------ Shariah badges + index pills
-const KASHIF = {
+const KASHIF = {   // labels go through t() where shown
   compliant: ['ok', 'Compliant'],
   non_compliant: ['bad', 'Not compliant'],
   awaiting: ['warn', 'Awaiting statements'],
@@ -66,7 +69,8 @@ export function Badges({ info, compact }) {
   const egx = info.egx33
     ? html`<span class="badge ok" title=${`Member of the EGX33 Shariah index (source: ${src})`}>EGX33 ✓</span>`
     : html`<span class="badge muted" title="Not in the EGX33 Shariah index">EGX33 ✗</span>`;
-  const [c, text] = KASHIF[info.kashif_status] || ['muted', 'Not on Kashif'];
+  const [c, en] = KASHIF[info.kashif_status] || ['muted', 'Not on Kashif'];
+  const text = t(en);
   const tip = [
     `Kashif: ${info.kashif_label || text}`,
     info.purity && `Purity: ${info.purity}`,
@@ -78,7 +82,7 @@ export function Badges({ info, compact }) {
   return html`<div class=${cls('badges', compact && 'compact')}>
     ${egx}
     <a class=${`badge ${c}`} href=${info.kashif_url} target="_blank" rel="noopener" title=${tip}
-       onClick=${e => e.stopPropagation()}><span class="dot"></span>Kashif · ${text}</a>
+       onClick=${e => e.stopPropagation()}><span class="dot"></span>${t('Kashif')} · ${text}</a>
   </div>`;
 }
 export function IndexPills({ info }) {
@@ -94,15 +98,15 @@ const STATUS = {
 };
 const STATUS_LABEL = { ADJUST: 'UPDATE SHARES' };
 export function StatusChip({ status }) {
-  return html`<span class=${`chip ${STATUS[status] || 'nodata'}`}><span class="dot"></span>${STATUS_LABEL[status] || status}</span>`;
+  return html`<span class=${`chip ${STATUS[status] || 'nodata'}`}><span class="dot"></span>${t(STATUS_LABEL[status] || status)}</span>`;
 }
 
 export function Kpi({ label, value, sub, valueClass, subClass, title, compact, icon }) {
   return html`<div class=${cls('kpi spot', compact && 'compact', icon && 'has-icon')} title=${title}>
-    <div class="k-label">${label}</div>
+    <div class="k-label">${tx(label)}</div>
     ${icon && html`<span class="k-icon"><${Icon} name=${icon} size=${15} /></span>`}
     <div class=${cls('k-value', valueClass)}>${Number.isInteger(value) ? html`<${CountUp} value=${value} />` : value}</div>
-    ${sub != null && sub !== '' && html`<div class=${cls('k-sub', subClass)}>${sub}</div>`}
+    ${sub != null && sub !== '' && html`<div class=${cls('k-sub', subClass)}>${tx(sub)}</div>`}
   </div>`;
 }
 
@@ -117,17 +121,21 @@ export function CountUp({ value, format = fmt.int, ms = 700 }) {
     if (!el) return;
     const from = last.current == null ? 0 : last.current;
     last.current = value;
-    if (value == null || !isFinite(value) || calm() || from === value) { el.textContent = format(value); return; }
+    if (value == null || !isFinite(value) || calm() || from === value || document.hidden) {
+      el.textContent = format(value);
+      return undefined;
+    }
     let raf, t0;
-    const step = t => {
-      if (t0 == null) t0 = t;
-      const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+    const step = now => {
+      if (t0 == null) t0 = now;
+      const k = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - k, 3);
       el.textContent = format(from + (value - from) * e);
       if (k < 1) raf = requestAnimationFrame(step);
     };
     el.textContent = format(from);
     raf = requestAnimationFrame(step);
-    return () => { cancelAnimationFrame(raf); el.textContent = format(value); };
+    const done = setTimeout(() => { cancelAnimationFrame(raf); el.textContent = format(value); }, ms + 400);  // tab hidden
+    return () => { cancelAnimationFrame(raf); clearTimeout(done); el.textContent = format(value); };
   }, [value]);
   return html`<span ref=${ref}></span>`;
 }
@@ -171,43 +179,119 @@ export function ScoreBar({ score }) {
 
 export function DayBar({ day, max, review }) {
   const pct = Math.min(100, (day / max) * 100);
-  const t = day >= max ? 'down' : day >= review ? 'warn' : '';
-  return html`<div class="days"><span>Day ${day} of ${max}</span><div class=${cls('bar', t)}><span style=${`width:${pct}%`}></span></div></div>`;
+  const tn = day >= max ? 'down' : day >= review ? 'warn' : '';
+  return html`<div class="days"><span>${t('Day {day} of {max}', { day, max })}</span><div class=${cls('bar', tn)}><span style=${`width:${pct}%`}></span></div></div>`;
 }
 
 export function Empty({ icon = 'info', title, text, action }) {
   return html`<div class="empty">
     <div class="e-icon"><${Icon} name=${icon} size=${22} /></div>
-    ${title && html`<h3>${title}</h3>`}
-    ${text && html`<p>${text}</p>`}
+    ${title && html`<h3>${tx(title)}</h3>`}
+    ${text && html`<p>${tx(text)}</p>`}
     ${action && html`<div class="e-action">${action}</div>`}
   </div>`;
 }
 
-export function Callout({ tone: t = '', icon, children }) {
-  const ic = icon || (t === 'warn' ? 'alert' : t === 'ok' ? 'checkCircle' : t === 'bad' ? 'xCircle' : 'info');
-  return html`<div class=${cls('callout', t)}><${Icon} name=${ic} /><div>${children}</div></div>`;
+export function Callout({ tone: tn = '', icon, children }) {
+  const ic = icon || (tn === 'warn' ? 'alert' : tn === 'ok' ? 'checkCircle' : tn === 'bad' ? 'xCircle' : 'info');
+  return html`<div class=${cls('callout', tn)}><${Icon} name=${ic} /><div>${children}</div></div>`;
 }
 
 export function PageHead({ title, sub, children }) {
-  return html`<div class="page-head"><div><h1>${title}</h1>${sub && html`<div class="sub">${sub}</div>`}</div>
+  return html`<div class="page-head"><div><h1>${tx(title)}</h1>${sub && html`<div class="sub">${tx(sub)}</div>`}</div>
     ${children && html`<div class="row">${children}</div>`}</div>`;
 }
 
 export function SectionHead({ title, count, hint, children }) {
-  return html`<div class="section-head"><h2>${title}</h2>
+  return html`<div class="section-head"><h2>${tx(title)}</h2>
     ${count != null && html`<span class="pill-count">${count}</span>`}
-    ${hint && html`<span class="hint">${hint}</span>`}
+    ${hint && html`<span class="hint">${tx(hint)}</span>`}
     ${children && html`<div class="right">${children}</div>`}</div>`;
 }
 
 export function Disclaimer() {
-  return html`<div class="disclaimer">Rules-based signals to support your own decisions. Not investment advice: you
-    decide and place every order yourself. Past (backtest) results do not guarantee future returns.</div>`;
+  return html`<div class="disclaimer">${t('Rules-based signals to support your own decisions. Not investment advice: you decide and place every order yourself. Past (backtest) results do not guarantee future returns.')}</div>`;
+}
+
+// ------------------------------------------------------------------ plain-language helpers (ideas from esthmr.com)
+// A market word with a dotted underline: tap it for a two-line explanation (i18n.js GLOSSARY).
+let closeOpenTerm = null;
+export function Term({ k, children }) {
+  const [pos, setPos] = useState(null);
+  const btn = useRef(null);
+  const info = term(k);
+  useEffect(() => {
+    if (!pos) return undefined;
+    const close = e => { if (!e || !btn.current || !btn.current.parentNode.contains(e.target)) setPos(null); };
+    const esc = e => e.key === 'Escape' && setPos(null);
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', esc);
+    window.addEventListener('scroll', () => setPos(null), { once: true, capture: true });
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', esc); };
+  }, [pos]);
+  if (!info) return children;
+  const open = e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (pos) { setPos(null); return; }
+    if (closeOpenTerm) closeOpenTerm();
+    closeOpenTerm = () => setPos(null);
+    const r = btn.current.getBoundingClientRect();
+    const w = Math.min(300, window.innerWidth - 24);
+    const left = Math.max(12, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 12));
+    const below = r.bottom + 170 < window.innerHeight;
+    setPos({ left, width: w, top: below ? r.bottom + 8 : undefined, bottom: below ? undefined : window.innerHeight - r.top + 8 });
+  };
+  const style = pos && Object.entries({ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom })
+    .filter(([, v]) => v != null).map(([k2, v]) => `${k2}:${v}px`).join(';');
+  return html`<span class="term-wrap"><button type="button" class="term" ref=${btn} aria-expanded=${!!pos}
+      onClick=${open} title=${info[1]}>${children || info[0]}</button>
+    ${pos && html`<span class="term-pop" role="tooltip" style=${style}><b>${info[0]}</b>${info[1]}</span>`}</span>`;
+}
+
+// Is EGX trading right now? Sunday to Thursday, 10:00–14:30 Cairo time (public holidays aren't known here).
+export function sessionState(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Cairo', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now).map(p => [p.type, p.value]));
+  const day = `${parts.year}-${parts.month}-${parts.day}`;
+  const mins = Number(parts.hour) * 60 + Number(parts.minute);
+  if (parts.weekday === 'Fri' || parts.weekday === 'Sat') return { state: 'weekend', day };
+  if (mins < 600) return { state: 'pre', day };
+  if (mins < 870) return { state: 'open', day };
+  return { state: 'after', day };
+}
+
+// Whether the numbers on the page are final: during the session they aren't, after the close they are once the
+// agent has scanned. dataDate: the close the page's numbers come from.
+export function SessionBadge({ dataDate }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const id = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(id); }, []);
+  const s = sessionState(now);
+  const date = fmt.date(dataDate);
+  const [tn, label, sub, text] = s.state === 'open'
+    ? ['warn', 'Session open', 'Prices not final',
+      "EGX is trading now (10:00–14:30 Cairo). The live boxes are about 15 minutes late; the agent's numbers use the {date} close."]
+    : s.state === 'after' && dataDate < s.day
+      ? ['info', "Today's close not in yet", '',
+        'The session ended. The agent scans after the close; until then its numbers use the {date} close.']
+      : s.state === 'weekend'
+        ? ['ok', 'Market closed', 'Closing prices', 'Final closing prices of {date}. EGX trades Sunday to Thursday.']
+        : ['ok', s.state === 'pre' ? 'Before the open' : 'Market closed', 'Closing prices',
+          'Final closing prices of {date}. The next session opens at 10:00 Cairo time.'];
+  return html`<div class=${cls('session', tn)} title=${t(text, { date })}>
+    <span class="dot"></span><b>${t(label)}</b>${sub && html`<span>· ${t(sub)}</span>`}</div>`;
+}
+
+// Short main text, the fine print one tap away.
+export function More({ label = 'Details and caveats', children, open }) {
+  return html`<details class="more" open=${open}><summary><${Icon} name="chevron" size=${14} />${t(label)}</summary>
+    <div class="more-body">${children}</div></details>`;
 }
 
 export function PageLoading({ error }) {
-  if (error) return html`<div class="card"><${Callout} tone="bad"><b>Couldn't load this page.</b> ${error.message}<//></div>`;
+  if (error) return html`<div class="card"><${Callout} tone="bad"><b>${t("Couldn't load this page.")}</b> ${error.message}<//></div>`;
   return html`<div class="stack">
     <div class="skeleton" style="height:64px"></div>
     <div class="kpis">${[1, 2, 3, 4].map(() => html`<div class="skeleton" style="height:86px"></div>`)}</div>
@@ -220,7 +304,7 @@ export function PageLoading({ error }) {
 export function Chance({ p, base, top }) {
   if (p == null) return html`<span class="faint">–</span>`;
   if (top === false) {
-    return html`<span class="chance-off" title="Not in the model's top 10% today. Its test results are about its top picks, so it doesn't give a chance for the rest.">not a top pick</span>`;
+    return html`<span class="chance-off" title="Not in the model's top 10% today. Its test results are about its top picks, so it doesn't give a chance for the rest.">${t('not a top pick')}</span>`;
   }
   const ratio = base ? p / base : 1;
   return html`<span class=${cls('chance', ratio >= 1.3 ? 'up' : ratio <= 0.8 ? 'low' : '')}
@@ -241,19 +325,19 @@ export function WatchStar({ symbol, label }) {
   const list = useStore(s => s.watchlist) || [];
   const on = list.includes(symbol);
   return html`<button type="button" class=${cls('star-btn', on && 'on', label && 'labelled')}
-    title=${on ? 'On your watchlist: click to remove it' : 'Add to your watchlist'} aria-pressed=${on}
-    onClick=${e => { e.stopPropagation(); toggleWatch(symbol); }}>${on ? '★' : '☆'}${label ? html`<span>${on ? 'Watching' : 'Watch'}</span>` : ''}</button>`;
+    title=${t(on ? 'On your watchlist: click to remove it' : 'Add to your watchlist')} aria-pressed=${on}
+    onClick=${e => { e.stopPropagation(); toggleWatch(symbol); }}>${on ? '★' : '☆'}${label ? html`<span>${t(on ? 'Watching' : 'Watch')}</span>` : ''}</button>`;
 }
 
 // What a buyer or holder should know now (data/news.py cautions): an ex-dividend date within a month, bonus
 // shares or a rights issue coming, bad news this week. compact: one chip each.
 const CAUTION_SHORT = { ex_dividend: 'Ex-dividend', bonus: 'Bonus shares', split: 'Split', rights: 'Rights issue',
-  bad_news: 'Bad news?' };
+  bad_news: 'Bad news?', results: 'Results' };
 export function Cautions({ items, compact }) {
   if (!items || !items.length) return null;
   if (compact) {
     return html`<span class="cautions">${items.map(c => html`<span class=${cls('caution-chip', c.level)} title=${c.text}>
-      <${Icon} name=${c.level === 'warn' ? 'alert' : 'info'} size=${12} />${CAUTION_SHORT[c.kind] || c.kind}${
+      <${Icon} name=${c.level === 'warn' ? 'alert' : 'info'} size=${12} />${t(CAUTION_SHORT[c.kind] || c.kind)}${
         c.kind !== 'bad_news' ? ` ${fmt.date(c.date)}` : ''}</span>`)}</span>`;
   }
   return html`<ul class="caution-list">${items.map(c => html`<li class=${c.level}>
@@ -276,7 +360,7 @@ export function NewsList({ items, sources = {}, showSymbol, limit, empty = 'No n
         <div class="news-meta">
           ${showSymbol && n.symbol && html`<a class="sym-link" href=${stockHref(n.symbol)}>${n.symbol}</a>`}
           <span>${sources[n.source] || n.source}</span><span>${fmt.date(n.published.slice(0, 10))} ${n.published.slice(11, 16)}</span>
-          ${(n.tags || []).map(t => html`<span class="tag">${TAG_LABELS[t] || t}</span>`)}
+          ${(n.tags || []).map(tag => html`<span class="tag">${t(TAG_LABELS[tag] || tag)}</span>`)}
         </div>
       </div></li>`)}</ul>
     ${limit && items.length > limit && html`<button class="linkish" style="margin-top:8px" onClick=${() => setAll(!all)}>
@@ -293,24 +377,23 @@ const SWITCH_DO = {
 export function MarketSwitch({ sw, compact }) {
   if (!sw) return null;
   if (compact) {
-    return html`<a class=${cls('switch-pill', sw.state)} href="#/market" title=${`${sw.text} ${SWITCH_DO[sw.state]}`}>
-      <span class="dot"></span>Model picks: ${sw.label}</a>`;
+    return html`<a class=${cls('switch-pill', sw.state)} href="#/market" title=${`${t(sw.text)} ${t(SWITCH_DO[sw.state])}`}>
+      <span class="dot"></span>${t('Model picks: {label}', { label: t(sw.label) })}</a>`;
   }
-  return html`<${Callout} tone=${SWITCH_TONE[sw.state]}><b>Market switch: ${sw.label}.</b>${' '}${sw.text}${' '}
-    ${SWITCH_DO[sw.state]}${' '}<span class="faint">Tested 2016–2026, it cut the worst drop of the model's top picks from
-    −62% to −22%. Your BUY rules keep their own EGX30 rule.</span><//>`;
+  return html`<${Callout} tone=${SWITCH_TONE[sw.state]}><b>${t('Market switch: {label}.', { label: t(sw.label) })}</b>${' '}${t(sw.text)}${' '}
+    ${t(SWITCH_DO[sw.state])}${' '}<span class="faint">${t("Tested 2016–2026, it cut the worst drop of the model's top picks from −62% to −22%. Your BUY rules keep their own EGX30 rule.")}</span><//>`;
 }
 
 export function Change({ value, digits = 2, pill }) {
   if (!pill) return html`<span class=${tone(value)}>${fmt.pct(value, digits)}</span>`;
-  const t = tone(value);
-  return html`<span class=${cls('chg-pill', t)}>${t === 'up' ? '▲ ' : t === 'down' ? '▼ ' : ''}${fmt.pct(Math.abs(value), digits, false)}</span>`;
+  const tn = tone(value);
+  return html`<span class=${cls('chg-pill', tn)}>${tn === 'up' ? '▲ ' : tn === 'down' ? '▼ ' : ''}${fmt.pct(Math.abs(value), digits, false)}</span>`;
 }
 
 export function StockCell({ symbol, info, sub }) {
   return html`<div class="stock-cell"><${StockAvatar} symbol=${symbol} size=${28} /><div>
     <a class="sym" href=${stockHref(symbol)} onClick=${e => e.stopPropagation()}>${symbol}</a>
-    ${sub !== false && html`<div class="sub" dir="auto" style="text-align:left" title=${sub || info?.name_ar || undefined}>${sub || info?.name_ar || ''}</div>`}</div></div>`;
+    ${sub !== false && html`<div class="sub" dir="auto" style="text-align:start" title=${sub || info?.name_ar || undefined}>${sub || info?.name_ar || ''}</div>`}</div></div>`;
 }
 
 // ------------------------------------------------------------------ segmented control / switch
@@ -335,7 +418,7 @@ export function Seg({ options, value, onChange }) {
     return () => ro && ro.disconnect();
   }, [value, options.length]);
   return html`<div class="seg" ref=${ref}>${options.map(o => html`<button type="button" class=${o.value === value ? 'on' : ''}
-    onClick=${() => onChange(o.value)}>${o.label}</button>`)}</div>`;
+    onClick=${() => onChange(o.value)}>${tx(o.label)}</button>`)}</div>`;
 }
 export function Switch({ checked, onChange, label }) {
   return html`<label class="switch"><input type="checkbox" checked=${checked} onChange=${e => onChange(e.target.checked)} />
@@ -343,8 +426,8 @@ export function Switch({ checked, onChange, label }) {
 }
 export function Field({ label, help, error, children, className }) {
   return html`<div class=${cls('field', className)}>
-    ${label && html`<label>${label}</label>`}${children}
-    ${error ? html`<div class="f-error">${error}</div>` : help && html`<div class="f-help">${help}</div>`}</div>`;
+    ${label && html`<label>${tx(label)}</label>`}${children}
+    ${error ? html`<div class="f-error">${error}</div>` : help && html`<div class="f-help">${tx(help)}</div>`}</div>`;
 }
 
 // ------------------------------------------------------------------ sortable table
@@ -378,7 +461,7 @@ export function DataTable({ columns, rows, rowKey = (r, i) => i, onRowClick, sor
   const shown = limit && !all ? sorted.slice(0, limit) : sorted;
   return html`<div class="table-wrap"><table class="table">
     <thead><tr>${columns.map(c => html`<th class=${cls(c.align, c.sortable !== false && 'sortable')} style=${c.width ? `width:${c.width}` : ''}
-      onClick=${() => clickSort(c)} title=${c.title}>${c.label}${sort && sort.key === c.key
+      onClick=${() => clickSort(c)} title=${tx(c.title)}>${tx(c.label)}${sort && sort.key === c.key
         ? html`<span class="arrow">${sort.dir === 'asc' ? '↑' : '↓'}</span>` : ''}</th>`)}</tr></thead>
     <tbody>${shown.length ? shown.map((r, i) => {
       const k = rowKey(r, i);
@@ -389,7 +472,7 @@ export function DataTable({ columns, rows, rowKey = (r, i) => i, onRowClick, sor
         </tr>
         ${open && renderExpanded && html`<tr class="detail"><td colspan=${columns.length}>${renderExpanded(r)}</td></tr>`}
       <//>`;
-    }) : html`<tr><td colspan=${columns.length} class="table-empty">${empty}</td></tr>`}</tbody>
+    }) : html`<tr><td colspan=${columns.length} class="table-empty">${tx(empty)}</td></tr>`}</tbody>
   </table>${limit && sorted.length > limit && html`<div class="table-more">
     <button class="linkish" onClick=${() => setAll(a => !a)}>${all ? 'Show fewer' : `Show all ${sorted.length}`}</button></div>`}</div>`;
 }
@@ -455,7 +538,7 @@ export function StockPicker({ value, onChange, starred = [], placeholder = 'Sear
   const shown = open ? q : search ? '' : current ? `${current.symbol} · ${current.name_ar || ''}` : value || '';
   return html`<div class=${search ? 'search' : 'picker'}>
     ${search && html`<${Icon} name="search" />`}
-    <input ref=${input} class=${cls('input', invalid && 'invalid')} value=${shown} placeholder=${placeholder}
+    <input ref=${input} class=${cls('input', invalid && 'invalid')} value=${shown} placeholder=${tx(placeholder)}
       onFocus=${() => { setOpen(true); setQ(''); }} onBlur=${() => setTimeout(() => setOpen(false), 150)}
       onInput=${e => { setQ(e.target.value); setOpen(true); }} onKeyDown=${onKey} autocomplete="off" spellcheck=${false} />
     ${search && !open && html`<kbd>/</kbd>`}
@@ -463,8 +546,8 @@ export function StockPicker({ value, onChange, starred = [], placeholder = 'Sear
       <div class=${cls('dd-item', i === hi && 'on')} onMouseDown=${e => { e.preventDefault(); pick(x); }} onMouseEnter=${() => setHi(i)}>
         <span class="s">${star.has(x.symbol) ? '⭐ ' : ''}${x.symbol}</span>
         <span class="n"><span dir="rtl">${x.name_ar || ''}</span> <span class="faint">· ${x.sector || ''}</span></span>
-        <span class="p">${x.close != null ? html`${fmt.price(x.close)} <${Change} value=${x.change} />` : html`<span class="faint">no data</span>`}</span>
-      </div>`) : html`<div class="dd-empty">${stocks ? 'No stock matches.' : 'Loading stocks…'}</div>`}</div>`}
+        <span class="p">${x.close != null ? html`${fmt.price(x.close)} <${Change} value=${x.change} />` : html`<span class="faint">${t('no data')}</span>`}</span>
+      </div>`) : html`<div class="dd-empty">${t(stocks ? 'No stock matches.' : 'Loading stocks…')}</div>`}</div>`}
   </div>`;
 }
 
@@ -478,20 +561,20 @@ export function Confirm({ title, text, confirmLabel = 'Confirm', danger, onConfi
   }, []);
   return html`<div class="modal-bg" onMouseDown=${e => e.target === e.currentTarget && onClose()}>
     <div class="modal" role="dialog" aria-modal="true">
-      <h3>${title}</h3><p>${text}</p>
+      <h3>${tx(title)}</h3><p>${tx(text)}</p>
       <div class="actions">
-        <button class="btn ghost" onClick=${onClose}>Cancel</button>
+        <button class="btn ghost" onClick=${onClose}>${t('Cancel')}</button>
         <button class=${cls('btn', danger ? 'danger' : 'primary')} disabled=${busy}
-          onClick=${async () => { setBusy(true); try { await onConfirm(); } finally { setBusy(false); } onClose(); }}>${confirmLabel}</button>
+          onClick=${async () => { setBusy(true); try { await onConfirm(); } finally { setBusy(false); } onClose(); }}>${tx(confirmLabel)}</button>
       </div>
     </div></div>`;
 }
 
 export function Toasts() {
   const toasts = useStore(s => s.toasts);
-  return html`<div class="toasts" role="status">${toasts.map(t => html`<div class=${`toast ${t.tone}`} key=${t.id}>
-    <${Icon} name=${t.tone === 'error' ? 'xCircle' : 'checkCircle'} /><div>${t.message}</div>
-    <button class="x" onClick=${() => dismissToast(t.id)} aria-label="Dismiss"><${Icon} name="x" size=${14} /></button></div>`)}</div>`;
+  return html`<div class="toasts" role="status">${toasts.map(x => html`<div class=${`toast ${x.tone}`} key=${x.id}>
+    <${Icon} name=${x.tone === 'error' ? 'xCircle' : 'checkCircle'} /><div>${x.message}</div>
+    <button class="x" onClick=${() => dismissToast(x.id)} aria-label="Dismiss"><${Icon} name="x" size=${14} /></button></div>`)}</div>`;
 }
 
 export function useJob(kind) {
@@ -518,11 +601,11 @@ export function JobControl() {
     const url = STATIC && owner && scanUrl;
     return url ? html`${pill}<a class="btn primary" href=${url} target="_blank" rel="noopener noreferrer"
       onClick=${() => watchForData()} title="Opens the scan on GitHub: press Run workflow there. The new data shows here in about 5 minutes.">
-      <${Icon} name="refresh" /> Run scan</a>` : pill;
+      <${Icon} name="refresh" /> ${t('Run scan')}</a>` : pill;
   }
   return html`<button class="btn primary" onClick=${() => startJob('/jobs/scan', { update_data: true })}
     title=${`Download the latest closing prices and look for signals${market ? ` (data now: ${fmt.date(market.date)} close)` : ''}`}>
-    <${Icon} name="refresh" /> Run scan</button>`;
+    <${Icon} name="refresh" /> ${t('Run scan')}</button>`;
 }
 
 export function JobProgress({ kind, title }) {
@@ -542,7 +625,8 @@ export function JobProgress({ kind, title }) {
 export const TV_ALIASES = { AIHC: 'AIH', ANFI: 'TYCN', FCMD: 'EGS3I0S1C019', NAPR: 'EGS370O1C013' };
 export const tvSymbol = sym => `EGX:${TV_ALIASES[sym] || sym}`;
 const TV_WIDGET = 'https://www.tradingview-widget.com/embed-widget/';
-const widgetSrc = (name, opts) => `${TV_WIDGET}${name}/?locale=en#${encodeURIComponent(JSON.stringify(opts))}`;
+const tvLocale = () => (store.lang === 'ar' ? 'ar_AE' : 'en');
+const widgetSrc = (name, opts) => `${TV_WIDGET}${name}/?locale=${tvLocale()}#${encodeURIComponent(JSON.stringify(opts))}`;
 
 function TvFrame({ src, height, title }) {
   return html`<iframe class="tv-frame" src=${src} title=${title} style=${`height:${height}px`} loading="lazy"
@@ -551,7 +635,7 @@ function TvFrame({ src, height, title }) {
 
 export function LiveChart({ symbol, height = 520 }) {
   const theme = useStore(s => s.theme);
-  const q = new URLSearchParams({ symbol: tvSymbol(symbol), interval: 'D', theme, style: '1', locale: 'en',
+  const q = new URLSearchParams({ symbol: tvSymbol(symbol), interval: 'D', theme, style: '1', locale: tvLocale(),
     timezone: 'Africa/Cairo', hidesidetoolbar: '1', symboledit: '0', saveimage: '0', withdateranges: '1',
     hideideas: '1' });
   return html`<${TvFrame} key=${theme + symbol} src=${`https://s.tradingview.com/widgetembed/?${q}`} height=${height}

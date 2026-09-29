@@ -8,6 +8,7 @@ import {
   Icon, StatusChip, Kpi, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, DayBar, Field,
   StockPicker, Confirm, Callout, Seg, Empty, LiveQuotes, LIVE_NOTE,
 } from '../ui.js';
+import { t } from '../i18n.js';
 import { LineChart } from '../charts.js';
 import { equityCurve, correlations, sectorMix, stopRisk, journal } from '../insights.js';
 
@@ -49,12 +50,12 @@ export function PortfolioPage({ route }) {
     { key: 'exit_reason', label: 'Reason', render: r => html`<span class="muted">${r.exit_reason || '–'}</span>` },
   ];
   const cs = data.closed_stats;
-  const tab = TABS.some(t => t.value === route.query.tab) ? route.query.tab : 'positions';
+  const tab = TABS.some(x => x.value === route.query.tab) ? route.query.tab : 'positions';
   const pickTab = v => go(v === 'positions' ? '#/portfolio' : `#/portfolio?tab=${v}`);
   return html`
     <${PageHead} title="My Portfolio"
       sub="Log the trades you place with your broker. After each close the agent checks every position against the exit rules.">
-      <button class="btn primary" onClick=${scrollToBuy}><${Icon} name="plus" />Log a buy</button><//>
+      <button class="btn primary" onClick=${scrollToBuy}><${Icon} name="plus" />${t('Log a buy')}</button><//>
     ${data.nothing_saved && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>Nothing is saved in this
       browser yet.</b> Your portfolio is kept only in the browser where you entered it, and links opened from Telegram
       or another app can open a different browser. Open the site there, or bring your portfolio here with${' '}
@@ -116,9 +117,9 @@ function HealthTab({ data }) {
   const curve = h ? equityCurve(h) : null;
   const top = Math.max(...mix.map(m => m.pct), 0.01);
   const lines = curve && [
-    { title: 'Your account', data: curve.time.map((t, i) => ({ time: t, value: curve.value[i] })), area: true },
+    { title: 'Your account', data: curve.time.map((d, i) => ({ time: d, value: curve.value[i] })), area: true },
     { title: 'EGX30, same start', color: '--text-3', dashed: true, width: 1.5,
-      data: curve.time.map((t, i) => ({ time: t, value: curve.index[i] })) },
+      data: curve.time.map((d, i) => ({ time: d, value: curve.index[i] })) },
   ];
   return html`
     <section class="section">
@@ -311,7 +312,7 @@ function PositionDetail({ p, data, onDone }) {
           ? html`${qty === p.shares ? 'Closes the position' : `${fmt.int(p.shares - qty)} shares stay open at ${fmt.price(p.avg_price)}`}
               · P&L after fees <b class=${tone(pnl)}>${fmt.signed(pnl)} EGP</b>`
           : 'Enter the shares and price you sold at.'}</span>
-        <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="sell" />Record sale</button>
+        <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="sell" />${t('Record sale')}</button>
       </div>
     </form>`;
 
@@ -411,8 +412,8 @@ function DividendForm({ p, onClose }) {
     </div>
     <div class="row">
       <span style="flex:1">${amount > 0 ? html`${fmt.num(amount / p.shares, 3)} EGP per share on your ${fmt.int(p.shares)} shares. It adds to this position's P&L.` : ''}</span>
-      <button class="btn ghost sm" type="button" onClick=${onClose}>Cancel</button>
-      <button class="btn primary sm" type="submit" disabled=${busy || amount <= 0}><${Icon} name="check" />Save dividend</button>
+      <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
+      <button class="btn primary sm" type="submit" disabled=${busy || amount <= 0}><${Icon} name="check" />${t('Save dividend')}</button>
     </div>
   </form>`;
 }
@@ -491,7 +492,7 @@ function BuyForm({ data, query }) {
       <div style="flex:1;min-width:260px">${preview || html`<span class="faint" style="font-size:12.5px">⭐ = today's BUY signals.
         Buying more of a stock you already hold adds the shares to that position at the average price, and the 1-month
         limit keeps counting from your first buy.</span>`}</div>
-      <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="plus" />Save buy</button>
+      <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="plus" />${t('Save buy')}</button>
     </div>
   </form>`;
 }

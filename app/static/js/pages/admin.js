@@ -1,13 +1,14 @@
 // Admin (the website only): invite friends, look after their accounts, and download a backup.
 import { html, useApi, useState, api, toast, refreshAll, fmt, copyText } from '../lib.js';
 import { Icon, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, Confirm, Field, Empty } from '../ui.js';
+import { t } from '../i18n.js';
 
 function LinkBox({ link, text }) {
   const copy = () => (copyText(link) ? toast('Link copied. Send it privately.') : toast('Select the link and copy it.', 'error'));
   return html`<div class="link-box">
     <div class="muted" style="font-size:12.5px">${text}</div>
     <div class="row" style="gap:8px"><input class="input mono" readonly value=${link} onFocus=${e => e.target.select()} />
-      <button class="btn sm primary" onClick=${copy}><${Icon} name="copy" />Copy</button></div>
+      <button class="btn sm primary" onClick=${copy}><${Icon} name="copy" />${t('Copy')}</button></div>
   </div>`;
 }
 
@@ -65,7 +66,7 @@ export function AdminPage() {
         <form class="row" style="gap:8px;align-items:flex-end" onSubmit=${invite}>
           <${Field} label="Who is it for? (optional, only you see this)" className="grow">
             <input class="input" value=${note} maxlength="60" placeholder="e.g. Sara" onInput=${e => setNote(e.target.value)} /><//>
-          <button class="btn primary" type="submit" disabled=${busy}>Create invite link</button>
+          <button class="btn primary" type="submit" disabled=${busy}>${t('Create invite link')}</button>
         </form>
         ${link && html`<div style="margin-top:14px"><${LinkBox} link=${link.link} text=${link.text} /></div>`}
       </div>
@@ -73,7 +74,7 @@ export function AdminPage() {
         <div class="card-title" style="font-size:14px;color:var(--text)"><${Icon} name="download" size=${16} />Backup</div>
         <p class="muted" style="font-size:13px;margin-bottom:12px">The server keeps a copy of everything every night for 14
           days. Download one to your Mac now and then as well: it has every portfolio and all the prices.</p>
-        <a class="btn" href="/api/admin/backup" download><${Icon} name="download" />Download a backup</a>
+        <a class="btn" href="/api/admin/backup" download><${Icon} name="download" />${t('Download a backup')}</a>
         <p class="faint" style="font-size:12px;margin-top:12px">Scans, the Kashif data, the strategy and the Telegram bot
           are in <a href="#/settings">Settings</a>. The prediction model is on <a href="#/predict">Predict</a>.</p>
       </div>

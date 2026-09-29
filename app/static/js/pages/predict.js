@@ -1,9 +1,10 @@
 // Predict: a machine-learning model's chance that a trade reaches its target before its stop. Information only.
 import { html, useApi, useState, startJob, fmt, tone, go, stockHref, STATIC } from '../lib.js';
 import {
-  Icon, Badges, Kpi, Callout, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, Seg, JobProgress,
+  Icon, Badges, Kpi, Callout, More, PageHead, SectionHead, Disclaimer, PageLoading, DataTable, StockCell, Seg, JobProgress,
   useJob, StatusChip, Chance, Empty, MarketSwitch, Why,
 } from '../ui.js';
+import { t } from '../i18n.js';
 
 const HORIZONS = [{ value: 10, label: '10 sessions (~2 weeks)' }, { value: 20, label: '20 sessions (~1 month)' }];
 const SHOW = [{ value: 'all', label: 'All liquid stocks' }, { value: 'mine', label: 'Signals & my stocks' }];
@@ -63,11 +64,11 @@ export function PredictPage() {
         title=${`A test portfolio: its 5 best-ranked stocks bought equally every ${hz} sessions, sized by the market switch. Worst drop ${fmt.pct(r.portfolio.max_drawdown, 0)}.`}
         sub=${`${fmt.pct(r.portfolio_cost.cagr, 0)} a year with ${fmt.pct(r.extra_cost, 1, false)} more cost per trade · worst drop ${fmt.pct(r.portfolio.max_drawdown, 0)}`} />`}
     </div>
-    <p class="faint" style="font-size:12.5px;margin-top:8px">Trading costs matter: with ${fmt.pct(r.extra_cost, 1, false)} more
+    <${More} label="Details and caveats"><p>Trading costs matter: with ${fmt.pct(r.extra_cost, 1, false)} more
       slippage on every trade than the fees already counted, its top 10% average ${fmt.pct(r.top_ret_cost, 2)} a trade
       instead of ${fmt.pct(r.top.ret, 2)}.${r.chances && r.chances.useful === false ? html`${' '}<b>Its chance numbers
       for ${hz} sessions are no more accurate than giving every stock the average chance</b> (checked year by year):
-      trust its <i>rank</i>, not the % itself.` : ''}</p>
+      trust its <i>rank</i>, not the % itself.` : ''}</p><//>
 
     <section class="section">
       <${SectionHead} title="Today's chances" count=${data.rows.length}
@@ -101,12 +102,12 @@ export function PredictPage() {
       <${About} m=${m} data=${data} r=${r} hz=${hz} onTrain=${train} running=${running} />
     </section>
 
-    <div style="margin-top:18px"><${Callout} tone="warn"><b>Read these numbers with care.</b>${' '}
-      (1) Even its best picks reach the target first only about ${fmt.pct(r.top.hit, 0, false)} of the time: most trades end at
-      the stop or run out of time, so always use the stop.
-      (2) It learnt from stocks listed today, so companies that collapsed or delisted are missing, which flatters results.
-      (3) Patterns in the past can stop working. Watch the live track record.
-      (4) Returns are in nominal EGP. It's a second opinion, not investment advice.<//></div>
+    <div style="margin-top:18px"><${Callout} tone="warn"><b>${t('Read these numbers with care.')}</b>${' '}
+      ${t('Even its best picks reach the target first only about {pct} of the time, so always use the stop.', { pct: fmt.pct(r.top.hit, 0, false) })}
+      <${More} label="Three more caveats"><ul class="reasons">
+        <li>It learnt from stocks listed today, so companies that collapsed or delisted are missing, which flatters results.</li>
+        <li>Patterns in the past can stop working. Watch the live track record.</li>
+        <li>Returns are in nominal EGP. It's a second opinion, not investment advice.</li></ul><//><//></div>
     <${Disclaimer} />`;
 }
 
@@ -114,12 +115,12 @@ function Intro({ data, onTrain, running }) {
   const lv = data.levels;
   return html`<div class="card predict-intro">
     <${JobProgress} kind="train" title="Training the prediction model…" />
-    <h3>What it predicts</h3>
+    <h3>${t('What it predicts')}</h3>
     <p>For every liquid stock, after each close: if you bought at the next open with the agent's usual plan (stop ${lv.atr_stop_mult}×
       the average daily range below, kept ${lv.stop_min_pct}–${lv.stop_max_pct}% under the price; target ${lv.target_r}× the
       risk above), what is the chance the <b>target is reached before the stop</b>, within 10 sessions (~2 weeks) and within
       20 sessions (~1 month)?</p>
-    <h3>How it learns</h3>
+    <h3>${t('How it learns')}</h3>
     <ul class="reasons">
       <li>${data.deep ? '' : `First a one-time download of ${data.deep_years} years of prices (about 4 minutes). `}It learns from
         about 10 years of every liquid EGX stock: roughly 250,000 past examples.</li>
@@ -132,7 +133,7 @@ function Intro({ data, onTrain, running }) {
     </ul>
     ${STATIC ? html`<p class="faint" style="font-size:12.5px;margin-top:16px">The site trains the model by itself after a
       scan. Check back tomorrow.</p>` : html`<div class="row" style="margin-top:16px">
-      <button class="btn primary" onClick=${onTrain} disabled=${running}><${Icon} name="play" />Train the model</button>
+      <button class="btn primary" onClick=${onTrain} disabled=${running}><${Icon} name="play" />${t('Train the model')}</button>
       <span class="faint" style="font-size:12.5px">About 2 minutes${data.deep ? '' : ', plus the 4-minute download the first time'}.
         You can keep using the dashboard meanwhile.</span>
     </div>`}
@@ -243,23 +244,23 @@ function ComboTable({ c }) {
 }
 
 function Experiment({ ex }) {
-  const t = ex.test || {}, live = ex.live || { n: 0 };
-  const hold = t.hold || {};
+  const test = ex.test || {}, live = ex.live || { n: 0 };
+  const hold = test.hold || {};
   return html`<div class="grid grid-2" style="align-items:start">
     <div class="card"><div class="stat-list">
-      <span class="k">Tested: its top 10% (5 days)</span><span class="v"><b class=${tone(hold.top)}>${fmt.pct(hold.top, 2)}</b> a
+      <span class="k">${t('Tested: its top 10% (5 days)')}</span><span class="v"><b class=${tone(hold.top)}>${fmt.pct(hold.top, 2)}</b> a
         trade${' '}<span class="faint">vs ${fmt.pct(hold.all, 2)} for all</span></span>
-      ${t.portfolio && t.portfolio.cagr != null && html`<span class="k">Tested: its top 5 every 5 days</span><span class="v">
-        ${fmt.pct(t.portfolio.cagr, 0)} a year <span class="faint">· worst drop ${fmt.pct(t.portfolio.max_drawdown, 0)}</span></span>
-      <span class="k">With ${fmt.pct(t.extra_cost, 1, false)} more cost a trade</span><span class="v">${fmt.pct(t.portfolio_cost.cagr, 0)} a year</span>`}
-      <span class="k">Live so far</span><span class="v">${live.n
+      ${test.portfolio && test.portfolio.cagr != null && html`<span class="k">${t('Tested: its top 5 every 5 days')}</span><span class="v">
+        ${fmt.pct(test.portfolio.cagr, 0)} a year <span class="faint">· worst drop ${fmt.pct(test.portfolio.max_drawdown, 0)}</span></span>
+      <span class="k">With ${fmt.pct(test.extra_cost, 1, false)} more cost a trade</span><span class="v">${fmt.pct(test.portfolio_cost.cagr, 0)} a year</span>`}
+      <span class="k">${t('Live so far')}</span><span class="v">${live.n
         ? html`its daily top 5 <b class=${tone(live.picks.ret)}>${fmt.pct(live.picks.ret, 2)}</b> a trade, all ${fmt.pct(live.all.ret, 2)}
           <span class="faint">(${fmt.int(live.days)} days)</span>`
         : html`<span class="faint">nothing decided yet</span>`}</span>
     </div>
     <p class="faint" style="font-size:12px;margin-top:10px">It trades every week, so costs weigh twice as much, and it has no
       stop. It becomes more than an experiment only if its live results match its tests for a few months.</p></div>
-    <div class="card"><div class="card-title"><${Icon} name="target" size=${15} />Its 5 picks from the last close</div>
+    <div class="card"><div class="card-title"><${Icon} name="target" size=${15} />${t('Its 5 picks from the last close')}</div>
       <div class="stat-list">${(ex.picks || []).map(p => html`<span class="k">#${p.rank}</span>
         <span class="v"><a href=${stockHref(p.symbol)}>${p.symbol}</a> <span class="faint">${fmt.price(p.close)}</span></span>`)}</div>
       <p class="faint" style="font-size:12px;margin-top:10px">Paper only: not signals, not advice.</p></div>
@@ -269,11 +270,11 @@ function Experiment({ ex }) {
 function About({ m, data, r, hz, onTrain, running }) {
   return html`<div class="card"><div class="grid grid-2" style="align-items:start">
     <div class="stat-list">
-      <span class="k">Trained</span><span class="v">${fmt.datetime(m.trained_at)} (${m.age_days === 0 ? 'today' : `${m.age_days} days ago`})</span>
-      <span class="k">Price history used</span><span class="v">${fmt.date(m.data_from)} – ${fmt.date(m.data_to)}</span>
-      <span class="k">Stocks learnt from</span><span class="v">${fmt.int(m.stocks)}</span>
-      <span class="k">Past examples</span><span class="v">${fmt.int(r.train_n)}</span>
-      <span class="k">Scored today</span><span class="v">${fmt.int(data.count)} liquid stocks</span>
+      <span class="k">${t('Trained')}</span><span class="v">${fmt.datetime(m.trained_at)} (${m.age_days === 0 ? 'today' : `${m.age_days} days ago`})</span>
+      <span class="k">${t('Price history used')}</span><span class="v">${fmt.date(m.data_from)} – ${fmt.date(m.data_to)}</span>
+      <span class="k">${t('Stocks learnt from')}</span><span class="v">${fmt.int(m.stocks)}</span>
+      <span class="k">${t('Past examples')}</span><span class="v">${fmt.int(r.train_n)}</span>
+      <span class="k">${t('Scored today')}</span><span class="v">${fmt.int(data.count)} liquid stocks</span>
     </div>
     <div>
       <p class="muted" style="font-size:13px">A gradient-boosting model (many small decision trees) for each horizon, using${' '}
@@ -285,7 +286,7 @@ function About({ m, data, r, hz, onTrain, running }) {
         the stop or target settings. Stocks that aren't liquid enough for the agent's rules are left out, and so are
         days a stock couldn't really be bought (no trading, or stuck at one price).</p>
       <button class="btn sm" style="margin-top:12px" onClick=${onTrain} disabled=${running}>
-        <${Icon} name="refresh" />Retrain now</button>
+        <${Icon} name="refresh" />${t('Retrain now')}</button>
     </div>
   </div></div>`;
 }

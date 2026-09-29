@@ -1,7 +1,8 @@
-"""Every EGX company's cash dividends, from TradingView.
+"""Every EGX company's cash dividends, and when its results come, from TradingView.
 
 - The screener (one request for the whole market) gives each stock's latest dividend, the next one once it's
-  announced, and the yield: cash_dividends.
+  announced, and the yield: cash_dividends. The same request brings the date of each company's last results and
+  TradingView's expected date for the next ones: earnings.
 - The whole history comes from TradingView's prices: the same chart "adjusted for dividends" and not. On each
   ex-date the two part by exactly that dividend, so every step in their ratio is one dividend, back to 2001
   (update_history → dividend_history). A few stocks a run, each again every month.
@@ -29,7 +30,9 @@ from . import prices
 URL = "https://scanner.tradingview.com/egypt/scan"
 COLUMNS = ["name", "dividends_yield_current", "dividend_ex_date_recent", "dividend_amount_recent",
            "dividend_payment_date_recent", "dividend_ex_date_upcoming", "dividend_amount_upcoming",
-           "dividend_payment_date_upcoming"]
+           "dividend_payment_date_upcoming", "earnings_release_date", "earnings_release_next_date"]
+EARNINGS_STALE_DAYS = 400     # a company whose last results on TradingView are older gets no expected date: it
+                              # doesn't report there regularly, so the estimate would be a guess
 CAIRO = ZoneInfo("Africa/Cairo")
 
 
@@ -62,6 +65,12 @@ def save(conn: sqlite3.Connection, rows: list[dict]) -> int:
                     (sym, ex, _day(r[f"dividend_payment_date_{when}"]), round(float(amount), 6), now))
         conn.execute("INSERT OR REPLACE INTO dividend_yield(symbol, yield_pct, updated) VALUES (?,?,?)",
                      (sym, r["dividends_yield_current"], now))
+        last, nxt = _day(r.get("earnings_release_date")), _day(r.get("earnings_release_next_date"))
+        if last and (date.fromisoformat(now[:10]) - date.fromisoformat(last)).days > EARNINGS_STALE_DAYS:
+            nxt = None
+        if last or nxt:
+            conn.execute("INSERT OR REPLACE INTO earnings(symbol, next_date, last_date, updated) VALUES (?,?,?,?)",
+                         (sym, nxt or "", last or "", now))
     conn.commit()
     return conn.execute("SELECT COUNT(*) FROM cash_dividends").fetchone()[0] - before
 
@@ -195,6 +204,16 @@ def per_share(conn: sqlite3.Connection, symbol: str, closes: pd.Series) -> pd.Se
         if pc and amount and ex >= last_rebase and amount / pc <= MAX_YIELD:
             out[pd.Timestamp(ex)] = float(amount)
     return out
+
+
+def next_results(conn: sqlite3.Connection, after: str, before: str | None = None) -> dict[str, str]:
+    """Each stock's expected results date after the day `after` (and up to `before`): {symbol: YYYY-MM-DD}."""
+    sql, args = "SELECT symbol, next_date FROM earnings WHERE next_date > ?", [after]
+    if before:
+        sql += " AND next_date <= ?"
+        args.append(before)
+    back = {v: k for k, v in prices.TV_ALIASES.items()}
+    return {back.get(sym, sym): day for sym, day in conn.execute(sql, args)}
 
 
 def coming(conn: sqlite3.Connection, after: str) -> dict[str, dict]:

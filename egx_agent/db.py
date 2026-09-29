@@ -131,6 +131,12 @@ CREATE TABLE IF NOT EXISTS dividend_history (
     yield REAL NOT NULL,            -- the dividend ÷ the close the session before (the price drop it explains)
     PRIMARY KEY (symbol, ex_date)
 );
+CREATE TABLE IF NOT EXISTS earnings (
+    symbol TEXT PRIMARY KEY,        -- when each company's results come, from TradingView (data/dividends.py)
+    next_date TEXT,                 -- TradingView's expected date for the next results ('' if none or unreliable)
+    last_date TEXT,                 -- the last results TradingView has
+    updated TEXT
+);
 CREATE TABLE IF NOT EXISTS dividend_yield (
     symbol TEXT PRIMARY KEY,
     yield_pct REAL,                 -- the last 12 months' cash dividends ÷ the price (%), TradingView's figure

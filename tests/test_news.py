@@ -180,6 +180,10 @@ def test_cautions_for_a_buyer(tmp_path):
     bad = news.cautions(conn, "COMI", today)
     assert [x["kind"] for x in bad] == ["bad_news"] and bad[0]["source"] == "Reuters"
     assert news.cautions(conn, "COMI", "2026-10-10") == []      # more than 5 days later
+    c = news.cautions(conn, "COMI", "2026-10-10", results="2026-10-25")
+    assert [x["kind"] for x in c] == ["results"] and c[0]["date"] == "2026-10-25" and c[0]["level"] == "info"
+    assert news.cautions(conn, "COMI", "2026-10-10", results="2026-12-25") == []   # after the longest hold
+    assert news.cautions(conn, "COMI", "2026-10-10", results="2026-10-10") == []   # today: already out
 
 
 def test_event_features_only_know_what_was_announced_before_the_day(tmp_path):

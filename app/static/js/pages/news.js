@@ -3,6 +3,7 @@
 // publisher; the good/bad dot is a rough keyword guess. Filters are remembered on this device.
 import { html, useApi, useState, useMemo, useStore, fmt, stockHref, remember } from '../lib.js';
 import { Icon, PageHead, PageLoading, Seg, Disclaimer, Callout, NewsList, TAG_LABELS } from '../ui.js';
+import { t } from '../i18n.js';
 
 const SHOW = [{ value: 'stocks', label: 'Stock news' }, { value: 'mine', label: 'My stocks' },
   { value: 'market', label: 'Market & economy' }, { value: 'all', label: 'Everything' }];
@@ -60,7 +61,7 @@ export function NewsPage() {
             ${sourcesUsed.map(s => html`<option value=${s}>${data.sources[s] || s}</option>`)}</select>
           <select class="input" style="width:auto" value=${f.tag} onChange=${set('tag')}>
             <option value="">All topics</option>
-            ${data.tags.map(t => html`<option value=${t}>${TAG_LABELS[t] || t}</option>`)}</select>
+            ${data.tags.map(tag => html`<option value=${tag}>${t(TAG_LABELS[tag] || tag)}</option>`)}</select>
           <select class="input" style="width:auto" value=${f.tone} onChange=${set('tone')}>
             <option value="">Any tone</option><option value="good">Sounds good</option><option value="bad">Sounds bad</option></select>
           ${changed && html`<button class="linkish" onClick=${() => save({ ...DEFAULTS })}>Clear</button>`}
@@ -77,7 +78,7 @@ export function NewsPage() {
           every run.</p>
       </div>
       <aside class="stack">
-        <div class="card"><div class="card-title"><${Icon} name="coins" size=${15} />Coming ex-dates</div>
+        <div class="card"><div class="card-title"><${Icon} name="coins" size=${15} />${t('Coming ex-dates')}</div>
           ${coming.length ? html`<div class="stat-list">${coming.slice(0, 25).map(a => html`
             <span class="k"><b>${fmt.date(a.effective)}</b></span>
             <span class="v" style="font-weight:500"><a href=${stockHref(a.symbol)}>${a.symbol}</a> · ${a.label}${
@@ -85,7 +86,7 @@ export function NewsPage() {
             : html`<p class="muted" style="font-size:13px">Nothing announced for the coming weeks.</p>`}
           <p class="faint" style="font-size:12px;margin-top:10px">On a cash dividend's ex-date the price drops by about the
             dividend. Bonus shares and splits re-base it. <a href="#/dividends">Dividend amounts →</a></p></div>
-        <div class="card"><div class="card-title"><${Icon} name="info" size=${15} />Announced this month</div>
+        <div class="card"><div class="card-title"><${Icon} name="info" size=${15} />${t('Announced this month')}</div>
           ${announced.length ? html`<div class="stat-list">${announced.slice(0, 25).map(a => html`
             <span class="k">${fmt.date(a.announced)}</span>
             <span class="v" style="font-weight:500"><a href=${stockHref(a.symbol)}>${a.symbol}</a> · ${a.label}${

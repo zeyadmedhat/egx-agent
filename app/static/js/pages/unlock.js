@@ -1,6 +1,7 @@
 // The GitHub Pages site's front door: the group password, and a short notice the first time.
 import { html, useState, remember } from '../lib.js';
 import { Icon, Callout, Field } from '../ui.js';
+import { t } from '../i18n.js';
 
 const isIphone = /iPhone|iPad|iPod/.test(navigator.userAgent);
 const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
@@ -33,7 +34,7 @@ export function UnlockScreen({ onDone, error: bootError }) {
     <div class="brand" style="padding:0;margin-bottom:18px"><div class="logo">EGX</div>
       <div><div class="brand-name">Trading Agent</div><div class="brand-sub">Private group · swing trades</div></div></div>
     <form class="stack" onSubmit=${submit}>
-    <h2>Enter the group password</h2>
+    <h2>${t('Enter the group password')}</h2>
     <p class="muted">The person who sent you this link also gave you a password.</p>
     <input type="text" autocomplete="username" value="egx-group" hidden readonly />
     <${Field} label="Password"><input class="input" type="password" autocomplete="current-password" autofocus

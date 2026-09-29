@@ -1,8 +1,9 @@
 // App shell: sidebar navigation, stock search, scan progress and page routing.
 import {
   html, render, useState, useEffect, useStore, useRoute, pollStatus, loadStocks, setTheme, fmt, tone, cls, go, stockHref,
-  loadMe, api, toast, setStore, STATIC,
+  loadMe, api, toast, setStore, setLang, STATIC,
 } from './lib.js';
+import { t } from './i18n.js';
 import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm } from './ui.js';
 import { AuthScreen } from './pages/login.js';
 import { UnlockScreen } from './pages/unlock.js';
@@ -44,39 +45,42 @@ const NAV = [
 function Sidebar({ page, onNav }) {
   const status = useStore(s => s.status);
   const theme = useStore(s => s.theme);
+  const lang = useStore(s => s.lang);
   const me = useStore(s => s.me);
   const [account, setAccount] = useState(false);
   const website = me && me.multi_user;
   const nav = website && me.user.is_admin ? [...NAV, ['admin', 'Admin', 'users']] : NAV;
   const m = status && status.market;
   const badge = id => {
-    if (id === 'today' && m && m.buys) return html`<span class="count hot" title="BUY signals">${m.buys}</span>`;
+    if (id === 'today' && m && m.buys) return html`<span class="count hot" title=${t('BUY signals')}>${m.buys}</span>`;
     if (id === 'portfolio' && status && status.alerts) {
-      return html`<span class="count alert" title="Positions that need action">${status.alerts}</span>`;
+      return html`<span class="count alert" title=${t('Positions that need action')}>${status.alerts}</span>`;
     }
     return null;
   };
   return html`<aside class="sidebar">
     <div class="brand"><div class="logo">EGX</div>
-      <div><div class="brand-name">Trading Agent</div><div class="brand-sub">Swing trades · 2–4 weeks</div></div></div>
+      <div><div class="brand-name">${t('Trading Agent')}</div><div class="brand-sub">${t('Swing trades · 2–4 weeks')}</div></div></div>
     <nav class="nav">${nav.map(([id, label, icon]) => html`<a href=${`#/${id}`} class=${page === id ? 'active' : ''}
-      onClick=${onNav}><${Icon} name=${icon} />${label}${badge(id)}</a>`)}</nav>
+      onClick=${onNav}><${Icon} name=${icon} />${t(label)}${badge(id)}</a>`)}</nav>
     ${m && html`<div class="side-market">
       <div class="label">EGX30</div>
       <div class="value">${fmt.int(m.egx30_close)} <span class=${tone(m.egx30_change)} style="font-size:13px">${fmt.pct(m.egx30_change, 2)}</span></div>
       <div style="margin-top:6px">${m.risk_off
-        ? html`<span class="chip riskoff"><span class="dot"></span>Risk-off</span>`
-        : html`<span class="chip riskon"><span class="dot"></span>Market OK</span>`}</div>
-      <div class="meta">Data: ${fmt.date(m.date)} close</div>
+        ? html`<span class="chip riskoff"><span class="dot"></span>${t('Risk-off')}</span>`
+        : html`<span class="chip riskon"><span class="dot"></span>${t('Market OK')}</span>`}</div>
+      <div class="meta">${t('Data: {date} close', { date: fmt.date(m.date) })}</div>
     </div>`}
     <div class="side-foot">${website
       ? html`<button class="account-btn" onClick=${() => setAccount(true)} title="Your account">
           <span class="avatar">${(me.user.display_name || '?').slice(0, 1).toUpperCase()}</span>
           <span class="who">${me.user.display_name}</span></button>`
-      : html`<small>Not investment advice</small>`}
+      : html`<small>${t('Not investment advice')}</small>`}
+      <button class="icon-btn lang-btn" title=${lang === 'ar' ? 'English' : 'العربية'} lang=${lang === 'ar' ? 'en' : 'ar'}
+        onClick=${() => setLang(lang === 'ar' ? 'en' : 'ar')}>${lang === 'ar' ? 'EN' : 'ع'}</button>
       ${STATIC && html`<button class="icon-btn" title="Lock: forget the password on this device"
         onClick=${() => setAccount(true)}><${Icon} name="shield" /></button>`}
-      <button class="icon-btn" title=${theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+      <button class="icon-btn" title=${t(theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme')}
         onClick=${() => setTheme(theme === 'dark' ? 'light' : 'dark')}><${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} /></button></div>
     ${account && (STATIC
       ? html`<${Confirm} title="Lock the site on this device?" confirmLabel="Lock"
@@ -144,13 +148,14 @@ function App() {
   const version = useStore(s => s.version);
   const tick = useStore(s => s.tick);
   const offline = useStore(s => s.offline);
+  const lang = useStore(s => s.lang);
   useEffect(() => { pollStatus(); }, []);
   useEffect(() => { if (version) loadStocks(); }, [version, tick]);
   useEffect(() => {
-    const title = (NAV.find(([id]) => id === route.page) || NAV[0])[1];
+    const title = t((NAV.find(([id]) => id === route.page) || NAV[0])[1]);
     document.title = `${route.page === 'stock' && route.arg ? route.arg : title} · EGX Trading Agent`;
     setMenu(false);
-  }, [route.page, route.arg]);
+  }, [route.page, route.arg, lang]);
   const Page = PAGES[route.page] || TodayPage;
   return html`<div class=${cls('shell', menu && 'menu-open')}>
     <${Sidebar} page=${PAGES[route.page] ? route.page : 'today'} onNav=${() => setMenu(false)} />
@@ -159,7 +164,7 @@ function App() {
       <header class="topbar">
         <button class="icon-btn only-mobile" onClick=${() => setMenu(true)} aria-label="Menu"><${Icon} name="menu" /></button>
         <${StockPicker} search hotkey value=${null} onChange=${sym => go(stockHref(sym))}
-          placeholder="Search stocks: symbol or Arabic name" />
+          placeholder=${t('Search stocks: symbol or Arabic name')} key=${lang} />
         <div class="topbar-right"><${JobControl} /></div>
       </header>
       ${offline && (STATIC
@@ -167,7 +172,7 @@ function App() {
             in this browser.</div>`
         : html`<div class="offline"><b>Can't reach the agent.</b> It may have been stopped. Double-click
             “Start Trading Agent.command” in the project folder, then reload this page.</div>`)}
-      <div class="content"><${Page} route=${route} key=${route.page} /></div>
+      <div class="content"><${Page} route=${route} key=${route.page + lang} /></div>
     </main>
     <${Toasts} />
   </div>`;

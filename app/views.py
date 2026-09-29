@@ -359,8 +359,12 @@ def corporate_history(conn: sqlite3.Connection, sym: str, close: float) -> dict:
                                    (sym,))]
     five_years = (date.today() - pd.Timedelta(days=5 * 365)).isoformat()
     actions = [a for a in news.actions(conn, sym, since=five_years, kinds=EVENT_KINDS)]
+    names = (sym, prices.TV_ALIASES.get(sym, sym))
+    e = conn.execute("SELECT next_date, last_date FROM earnings WHERE symbol IN (?,?)", names).fetchone()
+    results = {"next": e["next_date"] if e["next_date"] and e["next_date"] > today else None,
+               "last": e["last_date"] or None} if e else None
     return {"dividends": cash, "yield": y["yield_pct"] / 100 if y and y["yield_pct"] is not None else None,
-            "bonus": bonus, "actions": actions}
+            "bonus": bonus, "actions": actions, "results": results}
 
 
 EVENT_KINDS = ("dividend", "bonus", "split", "rights", "placement", "treasury_buy", "consolidation", "reduction")
@@ -368,20 +372,22 @@ HOLD_CALENDAR_DAYS = 30       # about 20 sessions: the longest a trade is held
 
 
 def cautions_map(d: Data) -> dict[str, list[dict]]:
-    """For every stock with something a buyer or holder should know now (an ex-dividend date within a month, bonus
-    shares or a rights issue coming, bad news this week): its cautions (data/news.py). The same for everyone."""
+    """For every stock with something a buyer or holder should know now (an ex-dividend date or results within a
+    month, bonus shares or a rights issue coming, bad news this week): its cautions (data/news.py). The same for
+    everyone."""
     def build():
         today = db.get_meta(d.conn, "scan_data_date") or date.today().isoformat()
         nxt = {r["symbol"]: {"ex_date": r["ex_date"], "amount": r["amount"]} for r in d.conn.execute(
             "SELECT symbol, MIN(ex_date) AS ex_date, amount FROM cash_dividends WHERE ex_date > ? GROUP BY symbol",
             (today,))}
+        results = dividends.next_results(d.conn, today)
         since = (date.fromisoformat(today) - pd.Timedelta(days=7)).isoformat()
         maybe = {r[0] for r in d.conn.execute(
             "SELECT symbol FROM corp_actions WHERE effective > ? UNION SELECT symbol FROM news "
-            "WHERE symbol != '' AND tone < 0 AND published >= ?", (today, since))} | set(nxt)
+            "WHERE symbol != '' AND tone < 0 AND published >= ?", (today, since))} | set(nxt) | set(results)
         out = {}
         for sym in sorted(maybe & set(d.table.index)):
-            c = news.cautions(d.conn, sym, today, HOLD_CALENDAR_DAYS, div=nxt.get(sym))
+            c = news.cautions(d.conn, sym, today, HOLD_CALENDAR_DAYS, div=nxt.get(sym), results=results.get(sym))
             if c:
                 out[sym] = c
         return out
@@ -831,13 +837,25 @@ def movers(d: Data) -> dict:
     return d.cache.get(d.version, ("movers",), build)
 
 
+RESULTS_AHEAD_DAYS = 45       # the Market page's "Results coming" list
+
+
+def results_calendar(d: Data) -> list[dict]:
+    """The liquid-enough stocks' expected results dates in the next few weeks (TradingView's estimates)."""
+    today = db.get_meta(d.conn, "scan_data_date") or date.today().isoformat()
+    until = (date.fromisoformat(today) + pd.Timedelta(days=RESULTS_AHEAD_DAYS)).isoformat()
+    rows = [{"symbol": s, "date": day, "name": d.info(s).get("name_ar", "")}
+            for s, day in dividends.next_results(d.conn, today, until).items() if s in d.table.index]
+    return sorted(rows, key=lambda r: (r["date"], r["symbol"]))
+
+
 def market_view(d: Data) -> dict:
     b = breadth_data(d)
     m = market_info(d.conn)
     if not b:
-        return {"breadth": None, "market": m or None}
+        return {"breadth": None, "market": m or None, "results": results_calendar(d)}
     return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("risk_off") if m else None), "market": m or None,
-                  **movers(d)})
+                  "results": results_calendar(d), **movers(d)})
 
 
 def predictions(d: Data) -> dict:

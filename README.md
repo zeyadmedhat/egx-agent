@@ -36,12 +36,12 @@ If macOS says the file can't be opened, right-click it → **Open** → **Open**
 
 | Page | What it's for |
 |---|---|
-| **Today** | Market mood with a 6-month EGX30 chart, the orders checklist for the next session, live prices for EGX30, your stocks and the BUYs, BUY signals (each with a **Log buy** button), alerts for your positions, watchlist |
-| **Market** | Breadth: how many stocks are above their 20-, 50- and 200-day averages, up/down counts, 1-year highs/lows, a 1-year chart against EGX30 and a sector table, the biggest movers (day, week, month), the stocks at a 1-year high or low, and the market switch for the model's picks. Context only: it doesn't change the BUY rules |
+| **Today** | "Today in one minute" (the market, the signals and your positions in a few plain sentences), a badge saying whether the session is open and the numbers are final, a strip of the day's biggest movers, market mood with a 6-month EGX30 chart, the orders checklist for the next session, live prices for EGX30, your stocks and the BUYs, BUY signals (each with a **Log buy** button), alerts for your positions, watchlist |
+| **Market** | Breadth: how many stocks are above their 20-, 50- and 200-day averages, up/down counts, 1-year highs/lows, a 1-year chart against EGX30 and a sector table, the biggest movers (day, week, month), the stocks at a 1-year high or low, the companies whose results are expected in the next 6 weeks, and the market switch for the model's picks. Context only: it doesn't change the BUY rules |
 | **Predict** | A machine-learning model's chance that each liquid stock reaches its target before its stop within 2 weeks and 1 month, how it did on years it never saw, and its live track record. Information only: it doesn't change the BUY rules |
 | **Screener** | Every stock in one table: trend (above its 20/50/200-day averages), RSI, volume, distance from its 1-year high, 1- and 3-month returns, the model's top picks, dividend yield and signal. Filters and quick presets, remembered on the device |
 | **Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/unwatch COMI` and `/list`, checked after each close |
-| **Stock** | The live price, and a switch between the agent's chart and TradingView's live chart (with 1-minute to daily bars). The agent's chart has averages, volume, RSI, MACD, your levels and your buys/sells marked; why a stock does or doesn't qualify; the model's chance and rank; cash dividends, yield and bonus shares; Shariah details |
+| **Stock** | The live price, and a switch between the agent's chart and TradingView's live chart (with 1-minute to daily bars). The agent's chart has averages, volume, RSI, MACD, your levels and your buys/sells marked; why a stock does or doesn't qualify; the model's chance and rank; cash dividends, yield, bonus shares and the next results date; Shariah details |
 | **Calculator** | How many shares to buy with your own risk rules (the same sizing as the BUY signals): amount, fees, loss at the stop, gain at the target, and a check against your portfolio limits. Full or half size |
 | **News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month. Each stock's page shows its own news and anything to know now (an ex-dividend date within a month, bonus shares, bad news) |
 | **Dividends** | Every EGX company's cash dividends from TradingView: coming up (ex-dates), the highest yields, recent payouts, your own stocks, the last year's bonus shares and splits, and the bonus shares, rights issues and splits announced on Mubasher |
@@ -52,6 +52,15 @@ If macOS says the file can't be opened, right-click it → **Open** → **Open**
 
 Handy: press **/** to search any stock by symbol or Arabic name. The sun/moon button at the bottom of the sidebar
 switches between the dark and light themes. On the chart, use the 3M…All buttons to zoom and drag to move.
+
+**Arabic.** The ع button at the bottom of the menu switches the whole site to Arabic, right to left (EN switches
+back); each device remembers its choice. Menus, titles, labels, buttons and explanations are translated
+(`app/static/js/i18n.js`); the agent's own detailed notes (a signal's reasons, an order's details, sector names) stay
+in English for now.
+
+**Market words explained.** Words with a dotted underline (stop-loss, target, 50-day average, breadth, RSI, ADX,
+risk-off, ex-dividend, results…) show a two-line explanation when you tap them. Longer fine print sits under
+*Details* links you can open.
 
 **Live prices** come from TradingView's free boxes, about 15 minutes late (the orange D next to a price). They're
 for watching during the session only: the signals, stops, targets and your P&L still use the last close, because
@@ -286,6 +295,16 @@ without a server and without your Mac being on.
 
 The multi-user server version (logins, invites; `app/auth.py`, `app/accounts.py`, `python -m app.server
 --server`) is still in the code if you ever want a real server.
+
+## Results dates
+
+The same TradingView request that brings the dividends also brings each company's last results date and
+TradingView's **expected** date for the next ones (`earnings` table, `egx_agent/data/dividends.py`). They're
+estimates from when the company reported before; EGX companies often publish a few days earlier or later.
+Companies whose last results on TradingView are more than 13 months old get no expected date. A stock with results
+expected before a trade would end shows a *Results* note (on Today, the watchlist, the stock page and your
+positions) and the Market page lists the ones coming in the next 6 weeks. It's information only: the rules don't
+skip or resize for results, because the tests didn't cover them.
 
 ## Data sources
 
