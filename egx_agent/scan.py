@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import corporate, db, portfolio, predict, risk, strategy
+from . import corporate, db, levels, portfolio, predict, risk, strategy
 from .data import dividends, macro, news, prices, shariah, universe
 from .indicators import add_indicators
 
@@ -209,12 +209,14 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     model_health = predict.health(conn)["status"] if model else "none"
 
     say(0.88, "Scoring stocks…")
-    rows = {}
+    rows, plans = {}, {}
     for sym, frame in ind.items():
         if frame.index[-1] != scan_ts:
             continue  # didn't trade on the scan date
-        sf = strategy.signal_frame(frame, cfg)
+        sf = levels.apply(frame, strategy.signal_frame(frame, cfg), cfg)   # the chart's stop and target
         rows[sym] = (frame.iloc[-1], sf.iloc[-1], prices.sanity_flags(frame, scan_ts))
+        if cfg.get("levels_mode") == "chart" and sf.iloc[-1]["trend_ok"]:
+            plans[sym] = levels.plan_at(frame, cfg)
     eligible_ret = pd.Series({s: r[0]["ret63"] for s, r in rows.items() if r[1]["eligible"] and not r[2]})
     ranks = strategy.rs_rank(eligible_ret)
 
@@ -227,7 +229,7 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             "score": round(float(strategy.score(sr["base_score"], rank_pct)), 1), "setup": sr["setup"] or "",
             "close": float(ir["close"]), "entry_high": float(sr["entry_high"]), "entry_limit": float(sr["entry_high"]),
             "stop": float(sr["stop"]), "target": float(sr["target"]), "atr": float(ir["atr14"]),
-            "avg_value": float(ir["value_avg20"]), "reasons": strategy.explain(ir, sr, rank_pct),
+            "avg_value": float(ir["value_avg20"]), "reasons": strategy.explain(ir, sr, rank_pct) + levels.describe(plans.get(sym)),
             "priority": round(m["pct"], 4) if m else None, "source": "rules",
         }
 

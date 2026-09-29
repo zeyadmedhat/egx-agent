@@ -86,6 +86,7 @@ export function StockPage({ route }) {
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
           ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} />`}
+          ${data.chart && html`<${LevelsPanel} c=${data.chart} held=${!!data.position} />`}
           <${SignalPanel} data=${data} />
           ${data.prediction && html`<${PredictionPanel} p=${data.prediction} />`}
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
@@ -119,6 +120,67 @@ function SignalPanel({ data }) {
       <${Icon} name="plus" />${t('Log this buy')}</a>`}
   </div>`;
 }
+
+// Where a level comes from: "swing low 2026-03-16" → "Swing low (16 Mar 2026)", each in the chosen language.
+function source(what) {
+  const m = /^(.*?) (\d{4}-\d{2}-\d{2})$/.exec(what);
+  const name = m ? m[1] : what;
+  const label = t(name.charAt(0).toUpperCase() + name.slice(1));
+  return m ? `${label} (${fmt.date(m[2])})` : label;
+}
+const sources = list => (list || []).map(source).join(' · ');
+
+// "Stop" / "Target" beside the zone each one sits under.
+function tagFor(z, c) {
+  const same = (a, b) => (a || []).slice(0, 3).join('|') === (b || []).slice(0, 3).join('|');
+  if (z.side === 'down' && c.stop_why.length && same(z.sources, c.stop_why)) return html` <span class="tag down">${t('Stop')}</span>`;
+  if (z.side === 'up' && c.target_why.length && same(z.sources, c.target_why)) return html` <span class="tag up">${t('Target')}</span>`;
+  return '';
+}
+
+// Stop-loss and target from the chart's support and resistance (egx_agent/levels.py), for every stock.
+function LevelsPanel({ c, held }) {
+  const zones = [...(c.resistances || []).slice().reverse().map(z => ({ ...z, side: 'up' })),
+    { price: c.close, now: true }, ...(c.supports || []).map(z => ({ ...z, side: 'down' }))];
+  return html`<div class="card levels-card">
+    <div class="card-title"><${Icon} name="target" size=${15} />${t('Stop-loss & target')}
+      <span class="right faint">${t('from the chart')}</span></div>
+    <div class="stat-list">
+      <span class="k"><${Term} k="stop">${t('Stop-loss')}<//></span>
+      <span class="v down">${fmt.price(c.stop)} <span class="faint" style="font-weight:500">${fmt.pct(-c.stop_pct, 1)}</span></span>
+      <span class="k"><${Term} k="target">${t('Target')}<//></span>
+      <span class="v up">${fmt.price(c.target)} <span class="faint" style="font-weight:500">${fmt.pct(c.target_pct, 1)}</span></span>
+      ${c.target2 && html`<span class="k">${t('Next target')}</span>
+        <span class="v up">${fmt.price(c.target2)} <span class="faint" style="font-weight:500">${fmt.pct(c.target2 / c.close - 1, 1)}</span></span>`}
+      <span class="k"><${Term} k="rr">${t('Reward / risk')}<//></span><span class="v">${fmt.num(c.rr, 1)}×</span>
+    </div>
+    <ul class="level-why">
+      ${c.stop_why.length > 0 && html`<li><b class="down">${t('Stop')}</b> ${t('just under support:')} ${sources(c.stop_why)}</li>`}
+      ${c.method === 'atr' && html`<li><b class="down">${t('Stop')}</b> ${t('no support in range, so 2× the daily range')}</li>`}
+      ${c.target_why.length > 0 && html`<li><b class="up">${t('Target')}</b> ${t('just under resistance:')} ${sources(c.target_why)}</li>`}
+      ${!c.target_why.length && html`<li><b class="up">${t('Target')}</b> ${t('no resistance within reach, so {r}× the risk', { r: fmt.num(c.rr, 1) })}</li>`}
+      ${c.hurdle && html`<li class="caution">${t('Resistance at {price} comes first: {what}', { price: fmt.price(c.hurdle.price), what: sources(c.hurdle.sources) })}</li>`}
+    </ul>
+    <p class="faint" style="font-size:12px;margin-top:10px">${held
+      ? t('For a buy at the last close ({price}). Your position keeps its own stop and target below.', { price: fmt.price(c.close) })
+      : t('For a buy at the last close ({price}). The agent logs these with your buy.', { price: fmt.price(c.close) })}</p>
+    <${More} label="Support & resistance levels">
+      <div class="zone-list">${zones.map(z => z.now
+        ? html`<div class="zone now"><span class="p">${fmt.price(z.price)}</span><span>${t('Last close')}</span></div>`
+        : html`<div class=${cls('zone', z.side)}><span class="p">${fmt.price(z.price)}</span>
+            <span class="s" title=${t('Strength')}>${'●'.repeat(Math.min(5, Math.round(z.strength / 1.5)) || 1)}</span>
+            <span class="w">${sources(z.sources)}${tagFor(z, c)}</span></div>`)}</div>
+      <p class="faint" style="font-size:12px;margin-top:8px">${t('More dots: more tools agree on the level.')}</p><//>
+    <${More} label="How these are worked out"><p>${t(LEVELS_HOW)}</p><//>
+  </div>`;
+}
+
+const LEVELS_HOW = 'The agent marks prices where buyers or sellers stepped in before: swing lows and highs of the last year, '
+  + 'Fibonacci retracements (23.6–78.6%) and extensions (127.2%, 161.8%) of the latest big rise, the 20- and 50-day '
+  + 'averages, monthly pivot points, the price where the most shares traded in 6 months, and the 1-year high. Levels '
+  + 'that sit together make one zone; the more tools agree, the stronger it is. The stop goes a little under the '
+  + 'nearest solid support (at least one normal daily move away, at most the widest stop in Settings); the target a '
+  + 'little under the first resistance that pays at least 1.5× the risk. It is a plan, not a promise.';
 
 const SOURCES = { mubasher: 'Mubasher', reuters: 'Reuters', zawya: 'Zawya', 'dow-jones': 'Dow Jones', lse: 'LSE filings',
   alborsa: 'Al Borsa News', dne: 'Daily News Egypt' };

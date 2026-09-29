@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from egx_agent import config, corporate, db, portfolio
+from egx_agent import config, corporate, db, levels, portfolio
 
 from . import accounts, alerts, auth, jobs, schedule, views
 from .accounts import LOCAL, Person
@@ -521,13 +521,14 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
         if len(ind):
             hist = ind.loc[:pd.Timestamp(body.date)]
             atr = float((hist if len(hist) else ind)["atr14"].iloc[-1])
+        chart = levels.plan_at(ind, d.cfg, body.date) if len(ind) and d.cfg.get("levels_mode") == "chart" else None
         if (atr is None or not math.isfinite(atr)) and not body.stop:
             fail(400, "There's no price history for this stock, so the automatic stop can't be calculated. "
                       "Enter a stop-loss.")
         had = portfolio.open_position(d.conn, "real", sym) is not None
         portfolio.add_real_buy(d.conn, d.cfg, sym, str(body.date), body.price, body.shares, atr,
                                sector=d.info(sym).get("sector") or "", stop=body.stop or None,
-                               notes=body.notes.strip())
+                               notes=body.notes.strip(), chart=chart)
         pos = portfolio.open_position(d.conn, "real", sym)
         if had:
             msg = (f"Added {body.shares:,} {sym} to your position: now {pos['shares']:,} shares at an average of "

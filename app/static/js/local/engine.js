@@ -352,19 +352,24 @@ export function openPosition(book, account, symbol) {
     .sort((a, b) => (a.entry_date < b.entry_date ? -1 : a.entry_date > b.entry_date ? 1 : a.id - b.id))[0] || null;
 }
 
-// Stop (typed by you, or the ATR rule) and the matching target for an entry/average price.
-function levels(price, atr, cfg, stop) {
-  const s = stop ? +stop : initialStop(price, atr, cfg);
-  return [s, price + cfg.target_r * (price - s)];
+// Stop and target for an entry/average price (portfolio._levels): the stop you typed, else the chart's support when
+// it's between stop_min_pct and stop_max_pct below, else the ATR rule; the chart's target when it pays at least the
+// risk, else target_r × the risk.
+function levels(price, atr, cfg, stop, chart = null) {
+  const gap = chart ? 1 - chart.stop / price : NaN;
+  const s = stop ? +stop
+    : chart && gap >= cfg.stop_min_pct / 100 && gap <= cfg.stop_max_pct / 100 ? chart.stop : initialStop(price, atr, cfg);
+  const risk = price - s;
+  return [s, chart && chart.target >= price + risk ? chart.target : price + cfg.target_r * risk];
 }
 
 // Log a buy. If you already hold this stock, the shares join that position at the average price.
-export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector = '', stop = null, notes = '') {
+export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector = '', stop = null, notes = '', chart = null) {
   const fee = price * shares * cfg.fee_pct_per_side / 100;
   const pos = openPosition(book, 'real', symbol);
   let id;
   if (!pos) {
-    const [s, target] = levels(price, atr, cfg, stop);
+    const [s, target] = levels(price, atr, cfg, stop, chart);
     id = nextId(book);
     book.trades.push({ id, account: 'real', status: 'open', symbol, sector, signal_date: null, entry_date: date,
       entry_price: price, shares, initial_stop: s, stop: s, target, entry_limit: null, highest_close: price,
@@ -374,7 +379,7 @@ export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector =
     id = pos.id;
     const total = pos.shares + shares;
     const avg = (pos.entry_price * pos.shares + price * shares) / total;
-    const [s, target] = levels(avg, atr, cfg, stop);
+    const [s, target] = levels(avg, atr, cfg, stop, chart);
     Object.assign(pos, { entry_date: pos.entry_date < date ? pos.entry_date : date, entry_price: avg, shares: total,
       initial_stop: s, stop: s, target, highest_close: avg, fees: (pos.fees || 0) + fee,
       notes: [pos.notes, notes].filter(Boolean).join('; ') });

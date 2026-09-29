@@ -29,10 +29,21 @@ def trades_df(conn: sqlite3.Connection, account: str, statuses: tuple[str, ...] 
 
 # ---------------------------------------------------------------- real account
 
-def _levels(price: float, atr: float | None, cfg: dict, stop: float | None = None) -> tuple[float, float]:
-    """Stop (typed by you, or the ATR rule) and the matching target for an entry/average price."""
-    stop = float(stop) if stop else float(initial_stop(price, atr, cfg))
-    return stop, price + cfg["target_r"] * (price - stop)
+def _levels(price: float, atr: float | None, cfg: dict, stop: float | None = None,
+            chart: dict | None = None) -> tuple[float, float]:
+    """Stop and target for an entry/average price. The stop is the one you typed, else the chart's support
+    (levels.chart_plan, when it's between stop_min_pct and stop_max_pct below the price), else the ATR rule. The
+    target is the chart's resistance when it pays at least the risk, else target_r × the risk."""
+    if stop:
+        stop = float(stop)
+    elif chart and cfg["stop_min_pct"] / 100 <= 1 - chart["stop"] / price <= cfg["stop_max_pct"] / 100:
+        stop = float(chart["stop"])
+    else:
+        stop = float(initial_stop(price, atr, cfg))
+    risk = price - stop
+    if chart and chart["target"] >= price + risk:
+        return stop, float(chart["target"])
+    return stop, price + cfg["target_r"] * risk
 
 
 def _add_fill(conn: sqlite3.Connection, trade_id: int, symbol: str, date: str, side: str, shares: int,
@@ -55,7 +66,7 @@ def fills_df(conn: sqlite3.Connection, trade_id: int) -> pd.DataFrame:
 
 
 def _merge_buy(conn: sqlite3.Connection, cfg: dict, pos: sqlite3.Row, date: str, price: float, shares: int,
-               fee: float, atr: float | None, stop: float | None, notes: str) -> None:
+               fee: float, atr: float | None, stop: float | None, notes: str, chart: dict | None = None) -> None:
     """Add shares to an open position at the share-weighted average price.
 
     The stop and target are recalculated from the new average (unless a stop is given). The position keeps its
@@ -63,7 +74,7 @@ def _merge_buy(conn: sqlite3.Connection, cfg: dict, pos: sqlite3.Row, date: str,
     """
     total = int(pos["shares"]) + int(shares)
     avg = (pos["entry_price"] * pos["shares"] + price * shares) / total
-    new_stop, target = _levels(avg, atr, cfg, stop)
+    new_stop, target = _levels(avg, atr, cfg, stop, chart)
     note = "; ".join(x for x in (pos["notes"], notes) if x)
     conn.execute(
         """UPDATE trades SET entry_date=?, entry_price=?, shares=?, initial_stop=?, stop=?, target=?,
@@ -74,12 +85,14 @@ def _merge_buy(conn: sqlite3.Connection, cfg: dict, pos: sqlite3.Row, date: str,
 
 
 def add_real_buy(conn: sqlite3.Connection, cfg: dict, symbol: str, date: str, price: float, shares: int,
-                 atr: float, sector: str = "", stop: float | None = None, notes: str = "") -> int:
-    """Log a buy. If you already hold this stock, the shares join that position at the average price."""
+                 atr: float, sector: str = "", stop: float | None = None, notes: str = "",
+                 chart: dict | None = None) -> int:
+    """Log a buy. If you already hold this stock, the shares join that position at the average price. chart: the
+    stock's chart levels on the buy date (levels.plan_at), for the automatic stop and target."""
     fee = price * shares * cfg["fee_pct_per_side"] / 100
     pos = open_position(conn, "real", symbol)
     if pos is None:
-        new_stop, target = _levels(price, atr, cfg, stop)
+        new_stop, target = _levels(price, atr, cfg, stop, chart)
         cur = conn.execute(
             """INSERT INTO trades(account, status, symbol, sector, entry_date, entry_price, shares, initial_stop, stop,
                    target, highest_close, fees, notes)
@@ -89,7 +102,7 @@ def add_real_buy(conn: sqlite3.Connection, cfg: dict, symbol: str, date: str, pr
         trade_id = int(cur.lastrowid)
     else:
         trade_id = int(pos["id"])
-        _merge_buy(conn, cfg, pos, date, price, shares, fee, atr, stop, notes)
+        _merge_buy(conn, cfg, pos, date, price, shares, fee, atr, stop, notes, chart)
     _add_fill(conn, trade_id, symbol, date, "buy", shares, price, fee, notes)
     conn.commit()
     return trade_id

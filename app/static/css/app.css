@@ -395,6 +395,21 @@ details.why[open] summary svg { transform: rotate(90deg); }
 ul.reasons { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
 ul.reasons li { position: relative; padding-inline-start: 16px; color: var(--text-2); font-size: 13px; }
 ul.reasons li::before { content: ""; position: absolute; inset-inline-start: 3px; top: 8px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+/* Stop-loss & target card (stock page) */
+ul.level-why { margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-2); }
+ul.level-why b { font-weight: 650; margin-inline-end: 4px; }
+ul.level-why li.caution { color: var(--warn); }
+.zone-list { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.zone { display: grid; grid-template-columns: 64px 44px 1fr; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: var(--r-sm); }
+.zone .p { font-weight: 650; font-variant-numeric: tabular-nums; }
+.zone.up .p { color: var(--up); }
+.zone.down .p { color: var(--down); }
+.zone .s { color: var(--accent); font-size: 9px; letter-spacing: 1px; }
+.zone .w { color: var(--text-3); font-size: 12px; }
+.zone.now { background: var(--panel-2); grid-template-columns: 64px 1fr; color: var(--text-2); }
+.zone .tag { margin-inline-start: 6px; font-size: 11px; padding: 1px 6px; }
+.zone .tag.up { color: var(--up); background: var(--up-soft); }
+.zone .tag.down { color: var(--down); background: var(--down-soft); }
 ul.reasons li.caution::before { background: var(--warn); }
 
 .score-ring { position: relative; width: 48px; height: 48px; flex: none; }

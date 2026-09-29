@@ -49,7 +49,14 @@ DEFAULTS: dict = {
     # counted): rules alone 15.3% a year; in the model's order 19.8%; plus its top 3 26.9%, same worst drop (−20%),
     # better in both halves.
     "model_picks": 3,
-    # Exits
+    # Exits. "chart": the stop under the nearest solid support and the target under the first resistance paying at
+    # least target_min_r × the risk (levels.py: swing points, Fibonacci, averages, pivots, volume). "atr": the stop
+    # atr_stop_mult × the daily range below (within stop_min/max_pct) and the target target_r × the risk above.
+    # Walk-forward 2016–2026: the BUY rules made 13.4% a year with chart levels vs 7.8% with ATR, worst drop −20% vs
+    # −22%; with the model's picks 24.4% vs 27.7% (ATR's lead is all in 2021–26; 2016–21 13.4% vs 9.2%), drop −22% vs −26%.
+    "levels_mode": "chart",
+    "target_min_r": 1.5,
+    "target_max_r": 3.0,
     "atr_stop_mult": 2.0,
     "stop_min_pct": 4.0,
     "stop_max_pct": 12.0,

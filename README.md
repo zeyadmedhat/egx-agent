@@ -45,7 +45,7 @@ The ⚙ button (**More** on a phone) holds Settings, Admin, the language and the
 | **Market → Overview** | Breadth: how many stocks are above their 50-day average, up/down counts, 1-year highs/lows, the biggest movers (day, week, month), a sector table and the market switch for the model's picks. The 1-year breadth chart and the 20-/200-day counts open on a tap. Context only: it doesn't change the BUY rules |
 | **Market → Predictions** | A machine-learning model's chance that each liquid stock reaches its target before its stop within 2 weeks and 1 month. How it did on years it never saw, its live track record and the experiment open on a tap. Information only |
 | **Market → Dividends & results** | Every EGX company's cash dividends from TradingView (coming up, highest yields), the companies whose results are expected in the next 6 weeks, and the bonus shares, rights issues and splits announced on Mubasher. Recent dividends and last year's bonus shares open on a tap |
-| **Stocks → Stock** | The live price, and a switch between the agent's chart and TradingView's live chart. The agent's chart has averages, volume, RSI, MACD, your levels and your buys/sells marked; why a stock does or doesn't qualify; the model's chance and rank; news and anything to know now; dividends and Shariah details open on a tap |
+| **Stocks → Stock** | The live price, and a switch between the agent's chart and TradingView's live chart. The agent's chart has averages, volume, RSI, MACD, your levels and your buys/sells marked; a *Stop-loss & target* card gives every stock's stop and target from the chart with the support and resistance behind them; why a stock does or doesn't qualify; the model's chance and rank; news and anything to know now; dividends and Shariah details open on a tap |
 | **Stocks → Screener** | Every stock in one table: trend (above its 20/50/200-day averages), RSI, 1- and 3-month returns, the model's top picks, dividend yield and signal. Quick presets, the main filters, and **More filters**, remembered on the device |
 | **Stocks → Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/unwatch COMI` and `/list`, checked after each close |
 | **Portfolio → My portfolio** | Three tabs. **Positions**: log real buys and sells. Click a position to sell some or all of it, record a cash dividend, see its transactions, or delete it if it was logged by mistake. Buying more of a stock you hold joins it at the average price. See status, days held (of 20) and P&L after fees and dividends. **Health**: your account against EGX30 since your first buy, money by sector, what you'd lose if every stop were hit, and how closely your stocks move together. **Journal**: win rate, average win and loss, profit factor, results by signal setup, exit reason and month, and your profit after Egypt's inflation |
@@ -140,9 +140,18 @@ By default this is information only. To only get BUY signals for compliant stock
   room to run) and need 70+.
 - **Size:** shares = 1.5% of your account ÷ (entry − stop), capped at 25% of the account per stock, 5 positions,
   2 per sector, 6% total risk.
-- **Stop:** 2× the stock's average daily range below entry (kept between 4% and 12%).
-- **Exits:** target at 2× the risk; stop moves to breakeven after +1× risk, then trails; exit on a close below
-  the 50-day average; **review at day 10 (2 weeks), hard exit at day 20 (1 month)**.
+- **Stop and target from the chart:** the agent marks support and resistance from swing lows/highs of the last
+  year, Fibonacci retracements (23.6–78.6%) and extensions (127.2%, 161.8%) of the latest big rise, the 20- and
+  50-day averages, monthly pivot points, the most-traded price of 6 months and the 1-year high. Levels close
+  together make one zone; the more tools agree, the stronger it is. The **stop** goes just under the nearest solid
+  support (at least a normal day's move away, at most 12%); the **target** just under the first resistance that pays
+  at least 1.5× the risk (at most 3×). With nothing usable on the chart it falls back to the old rule (stop 2× the
+  daily range, kept 4–12%; target 2× the risk). Every stock's page shows its levels. Settings → Exits switches back
+  to the fixed rule. Tested on 2016–2026 years the prediction model never saw: the BUY rules made 13.4% a year with
+  chart levels vs 7.8% with the fixed rule, worst drop −20% vs −22%; with the model's own picks 24.4% vs 27.7%
+  (the fixed rule's lead is all in the 2021–26 boom; 2016–21: 13.4% vs 9.2%), worst drop −22% vs −26%.
+- **Exits:** stop moves to breakeven after +1× risk, then trails; exit on a close below the 50-day average;
+  **review at day 10 (2 weeks), hard exit at day 20 (1 month)**.
 
 ## Backtest results (Sep 2022 – Sep 2026, default settings)
 

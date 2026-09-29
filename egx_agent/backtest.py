@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from . import engine, risk, strategy
+from . import engine, levels, risk, strategy
 from .data import dividends, shariah
 from .indicators import add_indicators
 
@@ -43,6 +43,9 @@ def prepare(price_data: dict[str, pd.DataFrame], index_df: pd.DataFrame, stocks:
         for s, f in ind.items():
             f["div"] = dividends.per_share(conn, s, f["close"])
     sf = {s: strategy.signal_frame(ind[s], cfg) for s in ind}
+    # Stop and target from the chart (levels.py) on every day the stock could be bought: a setup, or a model pick
+    sf = {s: levels.apply(ind[s], f, cfg, (f["any_setup"] | (f["eligible"] & f["trend_ok"])).to_numpy())
+          for s, f in sf.items()}
     dates = index_ind.index
     eligible = _panel({s: f["eligible"].astype(float) for s, f in sf.items()}, dates, 0.0).astype(bool)
     setup = _panel({s: f["any_setup"].astype(float) for s, f in sf.items()}, dates, 0.0).astype(bool)

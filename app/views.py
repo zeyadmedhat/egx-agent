@@ -10,7 +10,7 @@ from datetime import date, datetime
 import numpy as np
 import pandas as pd
 
-from egx_agent import breadth, config, corporate, db, portfolio, predict, risk, scan, strategy
+from egx_agent import breadth, config, corporate, db, levels, portfolio, predict, risk, scan, strategy
 from egx_agent.data import dividends, news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
@@ -439,9 +439,11 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
         "index_ret63": last.index_ret63, "last_bar": str(ind.index[-1].date()),
         "high52": year["high"].max(), "low52": year["low"].min(), "volume": last.volume, "vol_ratio": last.vol_ratio,
     }
-    sf = strategy.signal_frame(ind, cfg).iloc[-1]
+    sf = levels.apply(ind, strategy.signal_frame(ind, cfg), cfg).iloc[-1]
     # the agent's usual plan if bought at the next open: what the size calculator starts from
     out["plan"] = {"stop": sf.stop, "target": sf.target, "atr": last.atr14}
+    # stop-loss and target from the chart's support and resistance, with the levels behind them (every stock)
+    out["chart"] = levels.plan_at(ind, cfg)
     out["checklist"] = [   # shown when the stock has no signal today
         {"ok": sf.eligible, "text": f"Liquid & clean data (≥ {cfg['min_avg_value_egp'] / 1e6:g}M EGP/day, "
                                      f"≥ {cfg['min_history_bars']} days of history)"},
@@ -600,23 +602,25 @@ def stock_detail(d: Data, symbol: str) -> dict:
         return clean(out)
     _, sig_rows = signals(d)
     row = [r for r in sig_rows if r["symbol"] == sym]
-    levels = []
+    ch = out.get("chart")
+    lines = [{"label": "Stop", "price": ch["stop"], "kind": "stop"},
+              {"label": "Target", "price": ch["target"], "kind": "target"}] if ch else []
     if row:
         sig = row[0]
         out["signal"] = sig
         out.pop("checklist")
         if sig["action"] == "BUY":
-            levels = [{"label": "Buy up to", "price": sig["entry_high"], "kind": "entry"},
+            lines = [{"label": "Buy up to", "price": sig["entry_high"], "kind": "entry"},
                       {"label": "Stop", "price": sig["stop"], "kind": "stop"},
                       {"label": "Target", "price": sig["target"], "kind": "target"}]
 
     pos = open_positions(d, sym)
     if pos:
         out["position"] = pos[0]
-        levels = [{"label": "Avg price", "price": pos[0]["avg_price"], "kind": "entry"},
+        lines = [{"label": "Avg price", "price": pos[0]["avg_price"], "kind": "entry"},
                   {"label": "Stop", "price": pos[0]["stop"], "kind": "stop"},
                   {"label": "Target", "price": pos[0]["target"], "kind": "target"}]
-    out["levels"] = levels
+    out["levels"] = lines
     out["fills"] = [dict(r) for r in d.conn.execute(
         """SELECT f.date, f.side, SUM(f.shares) AS shares, AVG(f.price) AS price FROM fills f
            JOIN trades t ON t.id = f.trade_id WHERE t.account='real' AND f.symbol=? AND f.side IN ('buy', 'sell')
@@ -1033,11 +1037,22 @@ SETTINGS_SECTIONS = [
                 "27%, with the same worst drop. 0 = none. Either way it decides which BUYs get money first."),
     ]},
     {"title": "Exits", "fields": [
+        {"key": "levels_mode", "label": "Stop-loss and target from", "kind": "choice",
+         "options": [{"value": "chart", "label": "The chart: support, resistance, Fibonacci"},
+                     {"value": "atr", "label": "A fixed rule: 2× the daily range, target 2× the risk"}],
+         "help": "Chart: the stop goes just under the nearest solid support and the target just under the first "
+                 "resistance. Tested 2016–2026 on years the model never saw: steadier (13% vs 9% a year in the first "
+                 "half, worst drop −22% vs −26%), but 24% vs 28% a year overall, because the fixed rule caught more "
+                 "of the 2021–26 boom."},
+        _f("target_min_r", "Chart target: at least", 1, 4, 0.25, "× the risk",
+           "Resistance closer than this is passed; the target goes to the next one."),
+        _f("target_max_r", "Chart target: at most", 1.5, 8, 0.25, "× the risk"),
         _f("atr_stop_mult", "Stop distance", 1, 5, 0.25, "× average daily range"),
         _f("stop_min_pct", "Tightest stop", 1, 20, 0.5, "% below entry"),
         _f("stop_max_pct", "Widest stop", 2, 30, 0.5, "% below entry"),
         _f("target_r", "Target", 1, 6, 0.25, "× the risk",
-           "2 means the target is twice as far above entry as the stop is below it."),
+           "2 means the target is twice as far above entry as the stop is below it. With chart levels, used only "
+           "when there's no resistance within reach."),
         _f("review_day", "Review if no progress by session", 3, 30, 1, kind="int"),
         _f("max_hold_days", "Hard exit after sessions", 5, 40, 1, kind="int",
            help="20 sessions ≈ 1 month (EGX trades Sunday–Thursday)."),

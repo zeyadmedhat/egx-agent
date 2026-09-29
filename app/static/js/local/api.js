@@ -241,7 +241,8 @@ async function stockDetail(c, symbol) {
   if (!out.has_data) return out;
   const [, rows] = signals(c);
   const row = rows.find(r => r.symbol === sym);
-  let levels = [];
+  const ch = out.chart;
+  let levels = ch ? [{ label: 'Stop', price: ch.stop, kind: 'stop' }, { label: 'Target', price: ch.target, kind: 'target' }] : [];
   if (row) {
     out.signal = row;
     delete out.checklist;
@@ -443,8 +444,11 @@ async function buy(c, body) {
     fail(400, "There's no price history for this stock, so the automatic stop can't be calculated. Enter a stop-loss.");
   }
   const had = !!E.openPosition(c.book, 'real', sym);
+  // The chart's stop and target from the stock's page: they're for the last close, so only for a recent buy.
+  const page = c.cfg.levels_mode === 'chart' ? await load(`stock/${sym}`).catch(() => null) : null;
+  const chart = page && page.chart && page.stats && date >= E.addDays(page.stats.last_bar, -7) ? page.chart : null;
   E.addRealBuy(c.book, c.cfg, sym, date, price, shares, atr, info(c, sym).sector || '', stop || null,
-    String(body.notes || '').trim().slice(0, 500));
+    String(body.notes || '').trim().slice(0, 500), chart);
   saveBook(c.book);
   const pos = E.openPosition(c.book, 'real', sym);
   const message = had
