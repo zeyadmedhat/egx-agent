@@ -139,7 +139,8 @@ function watch(state, cid, text) {
 export async function handle(state, update) {
   const msg = update.message || {}, chat = msg.chat || {}
   if (chat.type !== "private") return null
-  const cid = String(chat.id), text = (msg.text || "").trim(), subbed = cid in state.subs
+  const cid = String(chat.id)
+  let text = (msg.text || "").trim(), subbed = cid in state.subs
   const m = START_RE.exec(text)
   if (m) {
     if (subbed || (await sha(m[1])).slice(0, 16) !== state.fp) return null
@@ -147,6 +148,19 @@ export async function handle(state, update) {
     return WELCOME
   }
   if (!subbed) return null
+  // A command tapped in the menu comes without its symbol: ask for it, and treat the next message as its rest.
+  // The message is rewritten in place (to "/watch COMI"), so the website's run reads the whole command.
+  const pending = (state.pending ||= {})
+  if (!text.startsWith("/") && pending[cid]) {
+    text = msg.text = `/${pending[cid]} ${text}`
+  }
+  delete pending[cid]
+  const bare = /^\/(stock|s|watch|unwatch)(?:@\w+)?$/i.exec(text)
+  if (bare) {
+    pending[cid] = bare[1].toLowerCase()
+    return pending[cid] === "watch" ? "Which stock? Send its symbol (COMI), or with a price (COMI 45), or COMI levels."
+      : pending[cid] === "unwatch" ? "Which stock? Send its symbol, or all." : "Which stock? Send its symbol, like COMI."
+  }
   if (STOP_RE.test(text)) {
     delete state.subs[cid]
     delete state.alerts[cid]

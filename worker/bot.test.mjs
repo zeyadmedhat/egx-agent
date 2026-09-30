@@ -46,3 +46,17 @@ assert.match(await ask("/help"), /\/top/)
 assert.match(await ask("/unwatch all"), /Removed all your alerts \(1\)/)
 assert.deepEqual(st.alerts[9], [])
 console.log("asking ok")
+
+// A command from the menu, then its symbol
+st.stocks.ABUK = 50
+const u = text => ({ update_id: 3, message: { chat: { id: 9, type: "private" }, text } })
+assert.match(await handle(st, u("/watch")), /Which stock\?/)
+const next = u("abuk levels")
+assert.match(await handle(st, next), /ABUK closes near a strong support/)
+assert.equal(next.message.text, "/watch abuk levels")          // what the website's run will read
+assert.match(await handle(st, u("/stock")), /Which stock\?/)
+assert.match(await handle(st, u("/list")), /ABUK: near support/)   // another command: the question is dropped
+assert.equal(await handle(st, u("hello")), null)
+assert.match(await handle(st, u("/unwatch")), /or all/)
+assert.match(await handle(st, u("all")), /Removed all your alerts \(1\)/)
+console.log("menu ok")
