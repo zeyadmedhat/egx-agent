@@ -1,7 +1,8 @@
 # The website: after every EGX close, download prices, scan, and publish the encrypted site to GitHub Pages.
 # Secrets (Settings → Secrets and variables → Actions): SITE_PASSWORD (required), TELEGRAM_TOKEN (optional: the
 # bot that messages each friend who pressed Connect Telegram) and OWNER_TELEGRAM (optional: your Telegram @username,
-# so the alarms reach you when something breaks). The logs are public, so the job only prints counts.
+# so the alarms reach you when something breaks), WORKER_URL and WORKER_KEY (optional: the Cloudflare Worker that
+# answers the bot at once, worker/bot.js). The logs are public, so the job only prints counts.
 # The data is kept in GitHub's cache between runs and backed up once a day (locked; see app/backup.py).
 name: Daily scan and website
 
@@ -84,6 +85,8 @@ jobs:
           EGX_SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           OWNER_TELEGRAM: ${{ secrets.OWNER_TELEGRAM }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          WORKER_KEY: ${{ secrets.WORKER_KEY }}
           SITE_URL: ${{ steps.pages.outputs.base_url }}
           FORCE_SCAN: ${{ inputs.force_scan }}
           TZ: Africa/Cairo

@@ -119,3 +119,17 @@ def test_hourly_bars_are_fetched_when_behind_the_last_close(tmp_path):
     conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) VALUES "
                  "('VVV', '2026-09-29', 12, 12, 12, 12, 1)")     # a newer close: behind again
     assert prices.refresh_intraday(conn, "VVV", provider=feed) and feed.asked == ["VVV", "VVV"]
+
+
+def test_the_worker_hands_over_messages_it_already_answered(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "egx.db")
+    _stock(conn, np.linspace(10, 12, 80))
+    sent = []
+    monkeypatch.setattr(alerts, "send", lambda token, chat, text: sent.append(text))
+    msg = lambda i, text: {"update_id": i, "message": {"chat": {"id": 5, "type": "private"}, "text": text}}
+    out = alerts.sync_subscribers(conn, "123:abc", "secretcode1",
+                                  [msg(1, "/start secretcode1"), msg(2, "/watch vvv 20")], answered=True)
+    assert out["joined"] == 1 and out["commands"] == 1 and sent == []        # the Worker replied already
+    st = alerts.worker_state(conn, "secretcode1")
+    assert st["seen"] == 2 and st["subs"] == {"5": {"weekly": True}} and abs(st["stocks"]["VVV"] - 12) < 1e-9
+    assert st["alerts"] == {"5": [{"symbol": "VVV", "kind": "above", "price": 20.0}]}

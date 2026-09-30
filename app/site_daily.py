@@ -197,12 +197,22 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
 
         # 3. Telegram: the friends who pressed Start (or /stop) since the last run
         telegram = subs = None
+        worker = ("", "")
         if token:
             code = static_site.telegram_code(password, site_id)
             bot = _bot(conn, token)
             telegram = {"bot": bot, "link": f"https://t.me/{bot}?start={code}"} if bot else None
+            worker = (os.environ.get("WORKER_URL", "").strip(), os.environ.get("WORKER_KEY", "").strip())
             try:
-                subs = alerts.sync_subscribers(conn, token, code)
+                if all(worker):      # the Worker has the messages (and has answered them already)
+                    try:
+                        updates = alerts.worker_call(*worker, "/updates")["updates"]
+                    except alerts.TelegramError as exc:
+                        report["worker"] = str(exc)
+                        updates = []
+                    subs = alerts.sync_subscribers(conn, token, code, updates, answered=True)
+                else:
+                    subs = alerts.sync_subscribers(conn, token, code)
             except alerts.TelegramError as exc:
                 report["telegram"] = f"failed: {exc}"
 
@@ -233,6 +243,12 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                                   + (f", weekly summary to {weekly}" if weekly else ""))
         elif not token:
             report["telegram"] = "not set up"
+        if subs is not None and all(worker):      # after the alerts that fired: the Worker's copy of who's watching what
+            try:
+                alerts.worker_call(*worker, "/state", alerts.worker_state(conn, code))
+                report.setdefault("worker", "up to date")
+            except alerts.TelegramError as exc:
+                report["worker"] = str(exc)
 
         # 5. alarms: tell the owner what broke since the last run, and what's fixed
         try:

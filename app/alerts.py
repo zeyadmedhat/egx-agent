@@ -450,14 +450,18 @@ def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str, cfg:
     return sent
 
 
-def sync_subscribers(conn: sqlite3.Connection, token: str, code: str) -> dict:
+def sync_subscribers(conn: sqlite3.Connection, token: str, code: str, updates: list | None = None,
+                     answered: bool = False) -> dict:
     """Connect the friends who pressed Start through the site's link and disconnect those who sent /stop.
+    `updates`: the messages, when the Worker collected them (it has `answered` them already), else read here.
     Returns counts only (the logs are public)."""
     subs = _subscribers(conn)
     seen = int(db.get_meta(conn, "site_update_seen") or 0)
     fp = _fingerprint(code)
     replies, joined, left, commands = [], 0, 0, 0
-    for u in sorted(call(token, "getUpdates", timeout=0, allowed_updates=["message"]), key=lambda u: u["update_id"]):
+    if updates is None:
+        updates = call(token, "getUpdates", timeout=0, allowed_updates=["message"])
+    for u in sorted(updates, key=lambda u: u["update_id"]):
         if int(u["update_id"]) <= seen:
             continue
         seen = int(u["update_id"])
@@ -486,6 +490,8 @@ def sync_subscribers(conn: sqlite3.Connection, token: str, code: str) -> dict:
         elif cid in subs and (reply := watch_command(conn, cid, text)):
             replies.append((cid, reply))
             commands += 1
+    if answered:
+        replies = []
     for cid in [c for c, s in subs.items() if s["code"] != fp]:   # the password changed
         del subs[cid]
         forget_alerts(conn, cid)
@@ -496,6 +502,31 @@ def sync_subscribers(conn: sqlite3.Connection, token: str, code: str) -> dict:
     for cid, text in replies:
         _reply(token, cid, text)
     return {"connected": len(subs), "joined": joined, "left": left, "commands": commands}
+
+
+# The Cloudflare Worker (worker/bot.js) that answers the bot's messages at once. Set up with
+# "Set up instant Telegram replies.command"; the run finds it through the WORKER_URL and WORKER_KEY secrets.
+
+def worker_call(url: str, key: str, path: str, body: dict | None = None) -> dict:
+    try:
+        r = requests.request("POST" if body is not None else "GET", url.rstrip("/") + path, json=body, timeout=30,
+                             headers={"Authorization": f"Bearer {key}"})
+        r.raise_for_status()
+        return r.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise TelegramError(f"The Telegram Worker didn't answer ({type(exc).__name__}).") from None
+
+
+def worker_state(conn: sqlite3.Connection, code: str) -> dict:
+    """What the Worker needs to answer on its own: who's connected, their alerts, and each stock's last close."""
+    alerts: dict = {}
+    for a in conn.execute("SELECT chat_id, symbol, kind, price FROM watch_alerts"):
+        alerts.setdefault(a["chat_id"], []).append({"symbol": a["symbol"], "kind": a["kind"], "price": a["price"]})
+    stocks = {r["symbol"]: r["close"] for r in conn.execute(
+        "SELECT s.symbol, (SELECT close FROM prices p WHERE p.symbol = s.symbol ORDER BY date DESC LIMIT 1) AS close "
+        "FROM stocks s")}
+    return {"fp": _fingerprint(code), "seen": int(db.get_meta(conn, "site_update_seen") or 0), "stocks": stocks,
+            "subs": {c: {"weekly": s.get("weekly", True)} for c, s in _subscribers(conn).items()}, "alerts": alerts}
 
 
 def send_to_subscribers(conn: sqlite3.Connection, token: str, text: str, data_date: str) -> dict:
