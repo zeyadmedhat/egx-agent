@@ -19,3 +19,4 @@ __pycache__/
 /Deploy to server.command
 /tests/fixtures/
 /.claude/
+graphify-out/
