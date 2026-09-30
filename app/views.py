@@ -289,6 +289,41 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
     return clean(out)
 
 
+def book_positions(d: Data, book: dict) -> list[dict]:
+    """A website friend's open positions, from the record their browser keeps (synced through the Telegram bot), with
+    what the exit rules say at the last close: what open_positions gives for yours, as the site works it out
+    (app/static/js/local/api.js). Enough for orders(): the evening message tells them what to do."""
+    done = {(a.get("event_id"), a.get("trade_id")) for a in book.get("adjustments") or [] if isinstance(a, dict)}
+    events = [{"id": f"{r['symbol']}:{r['ex_date']}", "symbol": r["symbol"], "ex_date": r["ex_date"], "factor": r["factor"]}
+              for r in d.conn.execute("SELECT symbol, ex_date, factor FROM price_events ORDER BY ex_date, id")]
+    out = []
+    for t in book.get("trades") or []:
+        if not isinstance(t, dict) or t.get("account") != "real" or t.get("status") != "open":
+            continue
+        try:
+            sym, shares, entry = str(t["symbol"]), int(t["shares"]), float(t["entry_price"])
+            row = pd.Series({**t, "initial_stop": float(t["initial_stop"]), "target": float(t["target"])})
+        except (KeyError, TypeError, ValueError):
+            continue            # an incomplete record: the site shows it, the message skips it
+        ind = d.indicators(sym)
+        since = str(t.get("entry_date") or t.get("signal_date") or "")
+        ev = next((e for e in events if e["symbol"] == sym and since < e["ex_date"] and (e["id"], t.get("id")) not in done),
+                  None)
+        if ev:
+            ev = {**ev, "describe": corporate.describe(ev["factor"])}
+            last = float(ind["close"].iloc[-1]) if len(ind) else entry / ev["factor"]
+            stt = {"status": "ADJUST", "stop": None, "days_held": int((ind.index >= pd.Timestamp(since)).sum()),
+                   "reason": f"Bonus shares or split from {nice_date(ev['ex_date'])}: {ev['describe']}."}
+        else:
+            stt = portfolio.real_status(row, ind, d.cfg)
+            last = stt.get("last_close") or entry
+        out.append({"id": t.get("id"), "symbol": sym, "status": stt["status"], "reason": stt["reason"], "shares": shares,
+                    "avg_price": entry, "last": last, "stop": stt["stop"], "prev_stop": stt.get("prev_stop"),
+                    "target": float(row["target"]), "day": int(stt["days_held"]), "adjust": ev})
+    out.sort(key=lambda p: (STATUS_ORDER.get(p["status"], 9), p["symbol"]))
+    return clean(out)
+
+
 def status(d: Data) -> dict:
     m = market_info(d.conn)
     positions = open_positions(d)

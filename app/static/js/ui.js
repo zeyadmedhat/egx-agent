@@ -3,7 +3,7 @@ import {
   html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
   stockHref, watchForData, toggleWatch, STATIC,
 } from './lib.js';
-import { t, term } from './i18n.js';
+import { t, term, tn } from './i18n.js';
 
 const tx = v => (typeof v === 'string' ? t(v) : v);   // plain text is translated; built pieces are left alone
 
@@ -518,7 +518,7 @@ export function StockPicker({ value, onChange, starred = [], placeholder = 'Sear
     ${open && html`<div class="dropdown" ref=${listRef}>${list.length ? list.map((x, i) => html`
       <div class=${cls('dd-item', i === hi && 'on')} onMouseDown=${e => { e.preventDefault(); pick(x); }} onMouseEnter=${() => setHi(i)}>
         <span class="s">${star.has(x.symbol) ? '⭐ ' : ''}${x.symbol}</span>
-        <span class="n"><span dir="rtl">${x.name_ar || ''}</span> <span class="faint">· ${x.sector || ''}</span></span>
+        <span class="n"><span dir="rtl">${x.name_ar || ''}</span> <span class="faint">· ${tn(x.sector || '')}</span></span>
         <span class="p">${x.close != null ? html`${fmt.price(x.close)} <${Change} value=${x.change} />` : html`<span class="faint">${t('no data')}</span>`}</span>
       </div>`) : html`<div class="dd-empty">${t(stocks ? 'No stock matches.' : 'Loading stocks…')}</div>`}</div>`}
   </div>`;

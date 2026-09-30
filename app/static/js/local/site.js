@@ -110,6 +110,36 @@ export async function unlock(password, remember) {
   } catch { /* private mode: it stays open until the tab closes */ }
 }
 
+// Inside Telegram (the bot's "Open the app" button): Telegram vouches for who opened it, and the bot gives a
+// connected friend the site's key and their portfolio link, so there's no password to type there.
+export async function telegramUnlock(initData) {
+  const s = await siteInfo(true);
+  if (!s.worker || !initData) return false;
+  let res;
+  try {
+    res = await fetch(s.worker.replace(/\/$/, '') + '/miniapp', { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData }) });
+  } catch {
+    return false;
+  }
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok || !out.key || out.key.salt !== s.salt || out.key.iter !== s.iter) return false;
+  const raw = unb64(out.key.key);
+  try {
+    await openBox(await fetchBox('core'), raw);
+  } catch {
+    return false;
+  }
+  key = raw;
+  files.clear();
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ salt: s.salt, iter: s.iter, key: out.key.key }));
+    if (out.token) localStorage.setItem('egx-bot-link', JSON.stringify({ url: s.worker, token: out.token }));
+    localStorage.setItem('egx-accepted', new Date().toISOString());
+  } catch { /* storage blocked: open until the app closes */ }
+  return true;
+}
+
 export function lock() {
   key = null;
   files.clear();
@@ -147,7 +177,10 @@ export function loadBook() {
   return emptyBook();
 }
 
-export function saveBook(book) {
+// Each change is stamped, so the copy linked to the Telegram bot knows which device has the newest (api.js).
+// keepStamp: a copy brought from the bot keeps its own.
+export function saveBook(book, keepStamp = false) {
+  if (!keepStamp) book.meta = { ...(book.meta || {}), changed: new Date().toISOString() };
   try {
     localStorage.setItem(BOOK, JSON.stringify(book));
   } catch {

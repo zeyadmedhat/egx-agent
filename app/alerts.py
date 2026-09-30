@@ -102,11 +102,29 @@ def collect_starts(conn: sqlite3.Connection, token: str) -> dict:
 
 def find_chat_by_code(conn: sqlite3.Connection, token: str, code: str) -> dict | None:
     """The chat that pressed Start through this person's link, or None if they haven't yet."""
-    return collect_starts(conn, token).get(code)
+    try:
+        return collect_starts(conn, token).get(code)
+    except TelegramError as exc:
+        if exc.status != 409:
+            raise
+    # 409: the website's bot answers through its Cloudflare Worker (worker/bot.js), and Telegram hands the messages
+    # only to it. The Worker notes each other /start, so ask it who pressed Start through this link.
+    hook = (call(token, "getWebhookInfo").get("url") or "").removesuffix("/telegram")
+    if not hook.startswith("https://"):
+        raise TelegramError("Telegram gives this bot's messages to another program, so it can't be connected here.")
+    try:
+        r = requests.post(hook + "/started", json={"code": code}, timeout=20)
+        found = r.json() if r.ok else {}
+    except (requests.RequestException, ValueError):
+        raise TelegramError("The bot's Cloudflare Worker didn't answer. Try again in a minute.") from None
+    if not found.get("found"):
+        return None
+    return {"id": str(found["id"]), "name": found.get("name") or "you", "at": _now()}
 
 
-def send(token: str, chat_id: str, text: str) -> None:
-    call(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+def send(token: str, chat_id: str, text: str, buttons: list | None = None) -> None:
+    extra = {"reply_markup": {"inline_keyboard": buttons}} if buttons else {}
+    call(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True, **extra)
 
 
 # ------------------------------------------------------------------ the message
@@ -120,29 +138,70 @@ def _shariah(info: dict) -> str:
     return f"{egx} · Kashif {KASHIF.get(info.get('kashif_status'), '–')}"
 
 
+# The website's friends choose English or Arabic in Telegram (/lang; at first, their Telegram app's language).
+MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+DAYS_AR = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+
+
+def _date(day: str, lang: str = "en", weekday: bool = False) -> str:
+    if lang != "ar":
+        return views.nice_date(day, weekday)
+    d = pd.Timestamp(day)
+    return (f"{DAYS_AR[d.weekday()]} " if weekday else "") + f"{d.day} {MONTHS_AR[d.month - 1]}"
+
+
+# The exit rules' notes (egx_agent/engine.py) in Arabic; anything else stays as written. In step with worker/bot.js.
+NOTES_AR = [
+    (r"^Trend break \(closed below 50-day average\)", "كسر الاتجاه (أغلق تحت متوسط 50 يومًا)"),
+    (r"^Max hold reached \((\d+) trading days\)", r"انتهت مدة الاحتفاظ (\1 جلسة)"),
+    (r"^Trailing stop", "الوقف المتحرك"), (r"^Breakeven stop", "وقف التعادل"), (r"^Stop-loss", "وقف الخسارة"),
+    (r"^Target reached", "تم الوصول للهدف"), (r": sell at the next open", ": بع عند الافتتاح القادم"),
+    (r": sell at the open \(flagged before ([\d-]+)\)", r": بع عند الافتتاح (ظهرت قبل \1)"),
+    (r" \(gap down\)", " (فجوة هبوط)"), (r" \(gap up\)", " (فجوة صعود)"), (r" on ([\d-]+) at ([\d.]+)", r" يوم \1 عند \2"),
+    (r"^Day (\d+): no \+1R move yet \(needs ([\d.]+)\)\. Consider exiting\.",
+     r"اليوم \1: لم يتحرك +1R بعد (يحتاج \2). فكّر في الخروج."),
+    (r"^Raise your stop to ([\d.]+)", r"ارفع وقفك إلى \1"), (r"^Stop ([\d.]+), target ([\d.]+)", r"الوقف \1، الهدف \2"),
+]
+
+
+def note_ar(text: str) -> str:
+    for pattern, arabic in NOTES_AR:
+        text = re.sub(pattern, arabic, text, count=1)
+    return text
+
+
 SWITCH_ICON = {"full": "🟢", "half": "🟡", "off": "🔴"}
+SWITCH_AR = {"full": "حجم كامل", "half": "نصف الحجم", "off": "لا مشتريات جديدة"}
 
 
-def _switch_line(v: dict) -> str:
+def _switch_line(v: dict, lang: str = "en") -> str:
     sw = v.get("switch")
-    return f"Market switch: {SWITCH_ICON[sw['state']]} {sw['label']} (for the model's picks)" if sw else ""
+    if not sw:
+        return ""
+    if lang == "ar":
+        return f"مفتاح السوق: {SWITCH_ICON[sw['state']]} {SWITCH_AR.get(sw['state'], sw['label'])} (لاختيارات النموذج)"
+    return f"Market switch: {SWITCH_ICON[sw['state']]} {sw['label']} (for the model's picks)"
 
 
-def _caution_lines(items: list[dict], indent: str = "      ") -> list[str]:
+def _caution_lines(items: list[dict], indent: str = "      ", lang: str = "en") -> list[str]:
     """A signal's or position's cautions (views.cautions_map), one short line each."""
-    out = []
+    out, ar = [], lang == "ar"
     for c in items or []:
-        day = views.nice_date(c["date"]) if c.get("date") else ""
+        day = _date(c["date"], lang) if c.get("date") else ""
         if c["kind"] == "ex_dividend":
-            amt = f" ({c['amount']:g} EGP)" if c.get("amount") else ""
-            out.append(f"{indent}ℹ️ Ex-dividend {day}{amt}: the price drops by it that morning and you get it in cash; "
+            amt = (f" ({c['amount']:g} جنيه)" if ar else f" ({c['amount']:g} EGP)") if c.get("amount") else ""
+            out.append(f"{indent}ℹ️ توزيع نقدي {day}{amt}: ينخفض السعر بقيمته صباح ذلك اليوم وتحصل عليه نقدًا؛ اخفض "
+                       "الوقف بنفس القيمة في المساء السابق" if ar else
+                       f"{indent}ℹ️ Ex-dividend {day}{amt}: the price drops by it that morning and you get it in cash; "
                        "lower the stop by the same amount the evening before")
         elif c["kind"] == "bad_news":
-            out.append(f"{indent}⚠️ News: {_e(c['title'])} ({_e(c['source'])})")
+            out.append(f"{indent}⚠️ {'خبر' if ar else 'News'}: {_e(c['title'])} ({_e(c['source'])})")
         elif c["kind"] in ("bonus", "split"):
-            out.append(f"{indent}ℹ️ {'Bonus shares' if c['kind'] == 'bonus' else 'Split'} {day}: the price is re-based that day")
+            out.append(f"{indent}ℹ️ {'أسهم منحة' if c['kind'] == 'bonus' else 'تجزئة'} {day}: يُعاد حساب السعر في ذلك اليوم"
+                       if ar else
+                       f"{indent}ℹ️ {'Bonus shares' if c['kind'] == 'bonus' else 'Split'} {day}: the price is re-based that day")
         elif c["kind"] == "rights":
-            out.append(f"{indent}ℹ️ Rights issue, ex-date {day}")
+            out.append(f"{indent}ℹ️ {'حق اكتتاب، التاريخ' if ar else 'Rights issue, ex-date'} {day}")
     return out
 
 
@@ -219,49 +278,121 @@ def build_message(d: views.Data) -> tuple[str, bool]:
     return text, bool(o["items"])
 
 
-def build_site_message(d: views.Data, site_url: str = "") -> str:
+def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", personal: list[str] | None = None) -> str:
     """The GitHub Pages site's message, sent to each friend who connected Telegram: the day's signals for everyone,
-    without share counts (each person sizes them with their own numbers on the site)."""
+    without share counts (each person sizes them with their own numbers on the site). `personal`: the friend's own
+    positions (personal_part), when their portfolio is linked to the bot; None when it isn't."""
+    ar = lang == "ar"
     m = views.market_info(d.conn)
     scan_date, df = views.current_scan(d.conn)
     if not m or not scan_date:
-        return "<b>EGX Agent</b>\nNo scan yet."
+        return "<b>EGX Agent</b>\n" + ("لا يوجد فحص بعد." if ar else "No scan yet.")
     rows = views.records(df)
     buys = [r for r in rows if r["action"] == "BUY"]
     session = views.sessions_after(scan_date, 1)
-    mood = "🔴 Risk-off" if m.get("risk_off") else "🟢 Market OK"
-    if m.get("risk_off") and d.cfg.get("riskoff_block_buys"):
-        mood += ": no new buys"
-    lines = [f"<b>EGX Agent · {views.nice_date(scan_date, True)} close</b>",
-             f"EGX30 {m['egx30_close']:,.0f} ({m['egx30_change']:+.1%}) · {mood}"]
+    blocked = m.get("risk_off") and d.cfg.get("riskoff_block_buys")
+    if ar:
+        mood = ("🔴 تجنب المخاطر" + (": لا مشتريات جديدة" if blocked else "")) if m.get("risk_off") else "🟢 السوق جيد"
+        lines = [f"<b>EGX Agent · إغلاق {_date(scan_date, lang, True)}</b>"]
+    else:
+        mood = ("🔴 Risk-off" + (": no new buys" if blocked else "")) if m.get("risk_off") else "🟢 Market OK"
+        lines = [f"<b>EGX Agent · {views.nice_date(scan_date, True)} close</b>"]
+    lines.append(f"EGX30 {m['egx30_close']:,.0f} ({m['egx30_change']:+.1%}) · {mood}")
     b = views.breadth_data(d)
     if b:
         v = breadth.verdict(b, m.get("risk_off"))
-        week = f" ({v['change_week'] * 100:+.0f} pts in a week)" if v["change_week"] is not None else ""
-        lines.append(f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
-        lines.append(_switch_line(v))
+        if v["change_week"] is None:
+            week = ""
+        else:
+            week = f" ({v['change_week'] * 100:+.0f} {'نقطة في أسبوع' if ar else 'pts in a week'})"
+        lines.append(f"الاتساع: {b['above50']:.0%} من الأسهم فوق متوسط 50 يومًا{week}" if ar else
+                     f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
+        lines.append(_switch_line(v, lang))
     preds = views.predictions(d)
     warn = views.cautions_map(d)
-    lines += ["", f"<b>BUY signals for {views.nice_date(session, True)}</b>" if buys else "<b>No BUY signals</b> at this close."]
+    if ar:
+        lines += ["", f"<b>إشارات الشراء لجلسة {_date(session, lang, True)}</b>" if buys
+                  else "<b>لا توجد إشارات شراء</b> عند هذا الإغلاق."]
+    else:
+        lines += ["", f"<b>BUY signals for {views.nice_date(session, True)}</b>" if buys
+                  else "<b>No BUY signals</b> at this close."]
     for r in sorted(buys, key=views.signal_order):      # the order money goes in: the model's rank first
-        pick = " (model pick)" if r.get("source") == "model" else ""
-        lines.append(f"🟢 <b>{_e(r['symbol'])}</b>{pick}: buy up to {views.px(r['entry_high'])} · "
-                     f"stop {views.px(r['stop'])} · target {views.px(r['target'])}")
-        extra = [f"score {r['score']:.0f}", _shariah(d.info(r["symbol"]))]
+        levels_ = (views.px(r["entry_high"]), views.px(r["stop"]), views.px(r["target"]))
+        if ar:
+            pick = " (اختيار النموذج)" if r.get("source") == "model" else ""
+            lines.append(f"🟢 <b>{_e(r['symbol'])}</b>{pick}: اشترِ حتى {levels_[0]} · الوقف {levels_[1]} · الهدف {levels_[2]}")
+        else:
+            pick = " (model pick)" if r.get("source") == "model" else ""
+            lines.append(f"🟢 <b>{_e(r['symbol'])}</b>{pick}: buy up to {levels_[0]} · stop {levels_[1]} · target {levels_[2]}")
+        extra = [f"{'التقييم' if ar else 'score'} {r['score']:.0f}", _shariah(d.info(r["symbol"]))]
         pr = preds["by_symbol"].get(r["symbol"])
         if pr and pr.get("p10") is not None and preds["base"].get(10):
-            extra.append(f"model top pick {pr['p10']:.0%} (avg {preds['base'][10]:.0%})" if pr.get("top10")
-                         else "not a model top pick")
+            if ar:
+                extra.append(f"من أفضل اختيارات النموذج {pr['p10']:.0%} (المتوسط {preds['base'][10]:.0%})"
+                             if pr.get("top10") else "ليس من أفضل اختيارات النموذج")
+            else:
+                extra.append(f"model top pick {pr['p10']:.0%} (avg {preds['base'][10]:.0%})" if pr.get("top10")
+                             else "not a model top pick")
         lines.append("      " + " · ".join(extra))
-        lines += _caution_lines(warn.get(r["symbol"]))
-    watch = len(rows) - len(buys)
-    if watch:
-        lines.append(f"Watchlist: {watch} stock{'s' if watch != 1 else ''} could trigger next.")
-    lines += ["", "Open the site for your share counts, your Shariah filter and what to do with your own positions."
-              + (f"\n{site_url}" if site_url else ""), "",
-              "<i>Rules-based signals, not investment advice.</i> Send /stop to stop these messages."]
+        lines += _caution_lines(warn.get(r["symbol"]), lang=lang)
+    near = sorted((r for r in rows if r["action"] != "BUY"), key=views.signal_order)
+    if near:              # the site's "Close to a BUY" list: the first few by the same order
+        names, more = [_e(r["symbol"]) for r in near[:3]], len(near) - 3
+        lines.append(f"قريبة من الشراء: {'، '.join(names)}" + (f" و{more} أخرى" if more > 0 else "") + "." if ar else
+                     f"Close to a BUY: {', '.join(names)}" + (f" and {more} more" if more > 0 else "") + ".")
+    if personal:
+        lines += personal
+    if ar:
+        foot = ("عدد الأسهم لكل صفقة وفلتر الشريعة على الموقع." if personal is not None else
+                "افتح الموقع لعدد الأسهم وفلتر الشريعة وما تفعله في مراكزك، أو اربط محفظتك (الإعدادات ← ربط تيليجرام) "
+                "لتصلك أوامرك هنا.")
+        lines += ["", foot + (f"\n{site_url}" if site_url else ""), "",
+                  "<i>إشارات مبنية على قواعد، وليست نصيحة استثمارية.</i> أرسل /stop لإيقاف هذه الرسائل."]
+    else:
+        foot = ("Your share counts and Shariah filter are on the site." if personal is not None else
+                "Open the site for your share counts, your Shariah filter and what to do with your own positions, "
+                "or link your portfolio (Settings → Connect Telegram) to get your orders here.")
+        lines += ["", foot + (f"\n{site_url}" if site_url else ""), "",
+                  "<i>Rules-based signals, not investment advice.</i> Send /stop to stop these messages."]
     text = "\n".join(lines)
-    return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + "\n…more on the site."
+    return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + ("\n…المزيد على الموقع." if ar else "\n…more on the site.")
+
+
+def personal_part(d: views.Data, positions: list[dict], lang: str = "en") -> tuple[list[str], bool]:
+    """A linked friend's own positions (views.book_positions) for the evening message: what to do at the next
+    session, most urgent first, as the orders list on the site. Also whether there is anything to do."""
+    o = views.orders(d, positions) if positions else None
+    if not o:
+        return [], False
+    ar = lang == "ar"
+    items = [it for it in o["items"] if it["kind"] != "buy"]     # buys are for everyone, above, without share counts
+    lines = ["", "<b>مراكزك</b>" if ar else "<b>Your positions</b>"]
+    days = {p["symbol"]: p["day"] for p in positions}
+    for it in items:
+        sym = _e(it["symbol"])
+        if not ar:
+            title, detail = it["title"], it["detail"]
+        elif it["kind"] == "adjust":
+            title = f"حدّث {sym} لأسهم المنحة أو التجزئة"
+            detail = "على صفحة محفظتي أدخل عدد الأسهم التي تملكها الآن. لا يمكن فحص الوقف حتى تفعل."
+        elif it["kind"] == "sell":
+            title, detail = f"بع كل {it['shares']:,} من {sym} عند الافتتاح", note_ar(it["detail"])
+        elif it["kind"] == "stop" and it["key"].startswith("exdiv:"):
+            amount = it["from"] - it["to"]
+            title = f"اخفض وقف {sym} إلى {views.px(it['to'])} قبل الافتتاح"
+            detail = (f"{sym} يصرف توزيعًا نقديًا: يفتح السعر أقل بحوالي {amount:g} جنيه وتحصل على {amount:g} جنيه "
+                      "للسهم. يخفض الوكيل الوقف والهدف بنفس القيمة حتى لا يبيع الهبوط وحده.")
+        elif it["kind"] == "stop":
+            title = f"ارفع وقف {sym} إلى {views.px(it['to'])}"
+            detail = f"كان {views.px(it['from'])}. بع إذا هبط السعر إلى {views.px(it['to'])}."
+        else:
+            title, detail = f"قرّر بشأن {sym}: اليوم {days.get(it['symbol'], '')} بدون تقدم", note_ar(it["detail"])
+        lines += [f"{ICON[it['kind']]} <b>{_e(title) if not ar else title}</b>", f"      {_e(detail)}"]
+    if o["holds"]:
+        lines.append(("تحتفظ بـ: " if ar else "Holding: ") + ("، " if ar else ", ").join(
+            f"{_e(h['symbol'])} ({'الوقف' if ar else 'stop'} {views.px(h['stop'])}، {'اليوم' if ar else 'day'} {h['day']})"
+            if ar else f"{_e(h['symbol'])} (stop {views.px(h['stop'])}, day {h['day']})" for h in o["holds"]))
+    return lines, bool(items)
 
 
 # ------------------------------------------------------------------ the website: a message to each friend
@@ -298,7 +429,17 @@ WATCH_RE = re.compile(r"^/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.
 UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})\s*$", re.I)
 LIST_RE = re.compile(r"^/(?:list|alerts)(?:@\w+)?\s*$", re.I)
 WEEKLY_RE = re.compile(r"^/weekly(?:@\w+)?\s+(on|off)\s*$", re.I)
+QUIET_RE = re.compile(r"^/quiet(?:@\w+)?(?:\s+(on|off))?\s*$", re.I)
+LANG_RE = re.compile(r"^/lang(?:@\w+)?(?:\s+(\S+))?\s*$", re.I)
+LANG_WORDS = {"ar": "ar", "arabic": "ar", "عربي": "ar", "العربية": "ar", "en": "en", "english": "en", "انجليزي": "en",
+              "الإنجليزية": "en"}
 MAX_ALERTS = 20
+
+
+def _lang_of(msg: dict) -> str | None:
+    """The language of the person's Telegram app, if it says: "ar" or "en"."""
+    code = str((msg.get("from") or {}).get("language_code") or "")
+    return ("ar" if code.startswith("ar") else "en") if code else None
 HELP = ("<b>Alerts for the stocks you follow</b>, checked after each close:\n"
         "/watch COMI: when COMI gets a BUY signal\n"
         "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n"
@@ -385,7 +526,7 @@ def watch_command(conn: sqlite3.Connection, chat_id: str, text: str) -> str | No
 NEAR_SUPPORT = 0.015    # a close this close above a strong support zone's top (or inside it) is "near support"
 
 
-def level_touch(d: views.Data, symbol: str, data_date: str) -> dict | None:
+def level_touch(d: views.Data, symbol: str, data_date: str, lang: str = "en") -> dict | None:
     """Did the close on `data_date` come near a strong support or reach a strong resistance (levels.py)?
     {key, text}: the key names the zone, so the same touch isn't sent again day after day."""
     ind = d.indicators(symbol)
@@ -397,6 +538,16 @@ def level_touch(d: views.Data, symbol: str, data_date: str) -> dict | None:
     c, name = p["close"], _e(symbol)
     sup = next((z for z in p["supports"] if z["strength"] >= levels.SOLID), None)
     res = next((z for z in p["resistances"] if z["strength"] >= levels.SOLID), None)
+    if lang == "ar" and sup and c <= sup["high"] * (1 + NEAR_SUPPORT):
+        return {"key": f"support {sup['price']:.2f}", "text": (
+            f"🔔 <b>{name}</b> أغلق عند {views.px(c)} يوم {_date(data_date, lang)}، قرب الدعم عند {views.px(sup['price'])} "
+            f"({_e(', '.join(sup['sources'][:2]))}). دخل المشترون هناك من قبل؛ وإغلاق أقل منه بوضوح يكسره. "
+            f"وقف الرسم البياني {views.px(p['stop'])}، الهدف {views.px(p['target'])}.")}
+    if lang == "ar" and res and c >= res["low"] * 0.99:
+        return {"key": f"resistance {res['price']:.2f}", "text": (
+            f"🔔 <b>{name}</b> أغلق عند {views.px(c)} يوم {_date(data_date, lang)}، عند المقاومة {views.px(res['price'])} "
+            f"({_e(', '.join(res['sources'][:2]))}). دخل البائعون هناك من قبل: مكان لجني بعض الربح، أو انتظر إغلاقًا "
+            "واضحًا فوقها.")}
     if sup and c <= sup["high"] * (1 + NEAR_SUPPORT):
         return {"key": f"support {sup['price']:.2f}", "text": (
             f"🔔 <b>{name}</b> closed at {views.px(c)} on {views.nice_date(data_date)}, near support at "
@@ -423,20 +574,28 @@ def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str, cfg:
             _drop_alert(conn, _alert_key(a))
             continue
         text = None
+        ar = subs[a["chat_id"]].get("lang") == "ar"
+        stop_these = (f"\n/unwatch {_e(a['symbol'])} لإيقاف هذه التنبيهات." if ar
+                      else f"\n/unwatch {_e(a['symbol'])} to stop these.")
         if a["kind"] == "buy":
             b = buys.get(a["symbol"])
             if b and a["fired"] != data_date:
-                text = (f"🔔 <b>{_e(a['symbol'])}</b> got a BUY signal at the {views.nice_date(data_date)} close: buy up "
-                        f"to {views.px(b['entry_high'])} · stop {views.px(b['stop'])} · target {views.px(b['target'])}."
-                        f"\nYour share count is on the website. /unwatch {_e(a['symbol'])} to stop these.")
+                lv = (views.px(b["entry_high"]), views.px(b["stop"]), views.px(b["target"]))
+                text = (f"🔔 <b>{_e(a['symbol'])}</b> حصل على إشارة شراء عند إغلاق {_date(data_date, 'ar')}: اشترِ حتى "
+                        f"{lv[0]} · الوقف {lv[1]} · الهدف {lv[2]}.\nعدد الأسهم على الموقع." if ar else
+                        f"🔔 <b>{_e(a['symbol'])}</b> got a BUY signal at the {views.nice_date(data_date)} close: buy up "
+                        f"to {lv[0]} · stop {lv[1]} · target {lv[2]}.\nYour share count is on the website.") + stop_these
         elif a["kind"] == "levels":
-            hit = level_touch(views.Data(conn, cfg or config.DEFAULTS, cache), a["symbol"], data_date)
+            hit = level_touch(views.Data(conn, cfg or config.DEFAULTS, cache), a["symbol"], data_date,
+                              "ar" if ar else "en")
             if hit and a["fired"] != hit["key"]:
-                text = hit["text"] + f"\n/unwatch {_e(a['symbol'])} to stop these."
+                text = hit["text"] + stop_these
         else:
             row = conn.execute("SELECT close FROM prices WHERE symbol=? AND date=?", (a["symbol"], data_date)).fetchone()
             if row and (row["close"] >= a["price"] if a["kind"] == "above" else row["close"] <= a["price"]):
-                text = (f"🔔 <b>{_e(a['symbol'])}</b> closed at {views.px(row['close'])} on "
+                text = (f"🔔 <b>{_e(a['symbol'])}</b> أغلق عند {views.px(row['close'])} يوم {_date(data_date, 'ar')}: "
+                        f"{'فوق' if a['kind'] == 'above' else 'تحت'} سعرك {views.px(a['price'])}. انتهى هذا التنبيه." if ar else
+                        f"🔔 <b>{_e(a['symbol'])}</b> closed at {views.px(row['close'])} on "
                         f"{views.nice_date(data_date)}: {a['kind']} your {views.px(a['price'])}. This alert is done.")
         if not text:
             continue
@@ -474,13 +633,28 @@ def sync_subscribers(conn: sqlite3.Connection, token: str, code: str, updates: l
         if chat.get("type") != "private":
             continue
         cid, text = str(chat["id"]), (msg.get("text") or "").strip()
+        told = _lang_of(msg)
+        if cid in subs and told and not subs[cid].get("lang"):
+            subs[cid]["lang"] = told       # their Telegram app's language, until they choose with /lang
         m = START_RE.match(text)
-        if m and hmac.compare_digest(m.group(1), code):
+        # The site's Connect button may add a browser's link after the code (the Worker links that browser).
+        if m and hmac.compare_digest(m.group(1)[:len(code)], code):
             if subs.get(cid, {}).get("code") != fp:
                 name = " ".join(x for x in (chat.get("first_name"), chat.get("last_name")) if x)
-                subs[cid] = {"name": name or chat.get("username") or "", "code": fp, "since": _now(), "sent_for": None}
+                subs[cid] = {"name": name or chat.get("username") or "", "code": fp, "since": _now(), "sent_for": None,
+                             **({"lang": told} if told else {})}
                 replies.append((cid, WELCOME))
                 joined += 1
+        elif cid in subs and (q := QUIET_RE.match(text)):
+            subs[cid]["quiet"] = (q.group(1) or "on").lower() == "on"
+            replies.append((cid, "OK: after a close I'll only message you when there's something to do." if subs[cid]["quiet"]
+                            else "OK: you'll get every close's message again."))
+            commands += 1
+        elif cid in subs and (lg := LANG_RE.match(text)):
+            now = subs[cid].get("lang") or told or "en"
+            subs[cid]["lang"] = LANG_WORDS.get((lg.group(1) or "").lower()) or ("en" if now == "ar" else "ar")
+            replies.append((cid, "تم: سأرد بالعربية." if subs[cid]["lang"] == "ar" else "OK: I'll answer in English."))
+            commands += 1
         elif STOP_RE.match(text) and cid in subs:
             del subs[cid]
             forget_alerts(conn, cid)
@@ -554,32 +728,48 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
                      sup=_r(plan["supports"][0]["price"]) if plan["supports"] else None,
                      res=_r(plan["resistances"][0]["price"]) if plan["resistances"] else None)
         stocks[sym] = s
-    return {"scan": scan_date, "pred": db.get_meta(conn, "prediction_date"), "stocks": stocks}
+    # final: False while the scan is one taken during the session (the Worker then still asks for the one after it)
+    return {"scan": scan_date, "final": scan.scan_is_final(conn), "pred": db.get_meta(conn, "prediction_date"),
+            "stocks": stocks}
 
 
-def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None) -> dict:
-    """What the Worker needs to answer on its own: who's connected, their alerts, and each stock's last close."""
+def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None, extra: dict | None = None) -> dict:
+    """What the Worker needs to answer on its own: who's connected (and their language and /quiet), their alerts, and
+    each stock's last close. `extra`: the site's address and key (for the mini app) and each linked friend's
+    positions as checked at this close ("mine")."""
     alerts: dict = {}
     for a in conn.execute("SELECT chat_id, symbol, kind, price FROM watch_alerts"):
         alerts.setdefault(a["chat_id"], []).append({"symbol": a["symbol"], "kind": a["kind"], "price": a["price"]})
     stocks = {r["symbol"]: r["close"] for r in conn.execute(
         "SELECT s.symbol, (SELECT close FROM prices p WHERE p.symbol = s.symbol ORDER BY date DESC LIMIT 1) AS close "
         "FROM stocks s")}
+    extra = dict(extra or {})
+    info = {**bot_info(conn, cfg or config.DEFAULTS), **({"site": extra.pop("site")} if extra.get("site") else {})}
     return {"fp": _fingerprint(code), "seen": int(db.get_meta(conn, "site_update_seen") or 0), "stocks": stocks,
-            "subs": {c: {"weekly": s.get("weekly", True)} for c, s in _subscribers(conn).items()}, "alerts": alerts,
-            "info": bot_info(conn, cfg or config.DEFAULTS)}
+            "subs": {c: {"weekly": s.get("weekly", True), **{k: s[k] for k in ("lang", "quiet") if s.get(k)}}
+                     for c, s in _subscribers(conn).items()},
+            "alerts": alerts, "info": info, **{k: v for k, v in extra.items() if k != "site"}}
 
 
-def send_to_subscribers(conn: sqlite3.Connection, token: str, text: str, data_date: str) -> dict:
+def send_to_subscribers(conn: sqlite3.Connection, token: str, text, data_date: str) -> dict:
     """Send this close's message to every connected friend who hasn't had it yet (a friend who connects later
-    gets the latest one). A friend who blocked the bot is removed; other failures are tried again next run."""
+    gets the latest one). A friend who blocked the bot is removed; other failures are tried again next run.
+    `text`: the message, or a function of (chat, friend) giving theirs: {"text", "buttons"}, or None for nothing
+    today (/quiet on a day with nothing to do)."""
     subs = _subscribers(conn)
     sent = failed = gone = 0
     for cid, s in list(subs.items()):
         if s.get("sent_for") == data_date:
             continue
+        mine = text(cid, s) if callable(text) else {"text": text}
+        if mine is None:
+            s["sent_for"] = data_date
+            continue
         try:
-            send(token, cid, text)
+            if mine.get("buttons"):
+                send(token, cid, mine["text"], mine["buttons"])
+            else:
+                send(token, cid, mine["text"])
             s["sent_for"] = data_date
             sent += 1
         except TelegramError as exc:
@@ -618,38 +808,49 @@ def weekly_due(data_date: str | None, sent_for: str | None, today: date | None =
     return date.fromisoformat(data_date).weekday() == 3 or today.weekday() in (4, 5)
 
 
-def build_weekly(d: views.Data, site_url: str = "", mine: bool = True) -> str:
+HEALTH_AR = {"ok": "🟢 على المسار (أفضل اختياراته تتفوق على السهم المتوسط)",
+             "weak": "🟠 أضعف من اختباراته (ما زال أفضل من السهم المتوسط)",
+             "bad": "🔴 لا يعمل مؤخرًا (لا يضيف إشارات شراء خاصة به حتى يتحسن)",
+             "early": "⚪ مبكر للحكم على نتائجه الفعلية"}
+
+
+def build_weekly(d: views.Data, site_url: str = "", mine: bool = True, lang: str = "en") -> str:
     """The week in one message: the market, the week's BUY signals, how the last month's signals are doing, the
     paper account, and whether the prediction model still works. mine: your own positions too (your Mac)."""
+    ar = lang == "ar"
     data_date = db.get_meta(d.conn, "scan_data_date")
     week = week_of(data_date)
-    lines = [f"📅 <b>EGX Agent · the week of {views.nice_date(week)}</b>"]
+    lines = [f"📅 <b>EGX Agent · أسبوع {_date(week, lang)}</b>" if ar
+             else f"📅 <b>EGX Agent · the week of {views.nice_date(week)}</b>"]
     idx = d.prices(scan.prices.INDEX_SYMBOL)["close"]
     before = idx[idx.index < pd.Timestamp(week)]
     if len(idx) and len(before):
-        lines.append(f"EGX30 {idx.iloc[-1]:,.0f}: {idx.iloc[-1] / before.iloc[-1] - 1:+.1%} this week")
+        lines.append(f"EGX30 {idx.iloc[-1]:,.0f}: {idx.iloc[-1] / before.iloc[-1] - 1:+.1%} "
+                     + ("هذا الأسبوع" if ar else "this week"))
     b = views.breadth_data(d)
     m = views.market_info(d.conn)
     if b:
-        lines.append(_switch_line(breadth.verdict(b, m.get("risk_off") if m else None)))
+        lines.append(_switch_line(breadth.verdict(b, m.get("risk_off") if m else None), lang))
 
     week_rows = d.conn.execute("SELECT scan_date, symbol, source FROM scans WHERE action='BUY' AND scan_date >= ? "
                                "ORDER BY scan_date", (week,)).fetchall()
     first = {}
     for r in week_rows:
         first.setdefault(r["symbol"], r)
-    lines += ["", f"<b>BUY signals this week: {len(first)}</b>"]
+    lines += ["", f"<b>إشارات الشراء هذا الأسبوع: {len(first)}</b>" if ar else f"<b>BUY signals this week: {len(first)}</b>"]
     if first:
-        lines.append(", ".join(f"{_e(s)}{' 🎯' if r['source'] == 'model' else ''} ({views.nice_date(r['scan_date'])})"
-                               for s, r in first.items()))
+        lines.append(("، " if ar else ", ").join(
+            f"{_e(s)}{' 🎯' if r['source'] == 'model' else ''} ({_date(r['scan_date'], lang)})" for s, r in first.items()))
     month = (date.fromisoformat(week) - timedelta(days=28)).isoformat()
     past = d.conn.execute("SELECT scan_date, symbol, close FROM scans WHERE action='BUY' AND scan_date >= ? "
                           "AND scan_date < ?", (month, week)).fetchall()
     closes = d.closes()
     moves = [closes[r["symbol"]] / r["close"] - 1 for r in past if r["symbol"] in closes and r["close"]]
     if moves:
-        up = sum(x > 0 for x in moves)
-        lines.append(f"The {len(moves)} BUY signals of the 4 weeks before: {sum(moves) / len(moves):+.1%} on average "
+        up, avg = sum(x > 0 for x in moves), sum(moves) / len(moves)
+        lines.append(f"إشارات الشراء الـ{len(moves)} في الأسابيع الأربعة السابقة: {avg:+.1%} في المتوسط منذ إغلاق "
+                     f"الإشارة، {up} من {len(moves)} صاعدة (قبل الوقف والهدف)." if ar else
+                     f"The {len(moves)} BUY signals of the 4 weeks before: {avg:+.1%} on average "
                      f"since their signal close, {up} of {len(moves)} up (before stops and targets).")
 
     if mine:
@@ -660,14 +861,20 @@ def build_weekly(d: views.Data, site_url: str = "", mine: bool = True) -> str:
                 lines.append(f"{_e(p['symbol'])} {p['pnl_pct']:+.1%} · {p['status'].lower()}")
     paper = portfolio.account_summary(d.conn, "paper", d.cfg, closes)
     if paper["open_count"] or paper["realized"]:
-        lines += ["", f"Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%} since it started)"]
+        lines += ["", f"الحساب التجريبي {paper['equity']:,.0f} جنيه ({paper['return_pct']:+.1%} منذ بدايته)" if ar else
+                  f"Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%} since it started)"]
     meta = predict.load_meta(predict.model_dir(d.conn))
     if meta:
         h = predict.health(d.conn, meta)
         if h["status"] in HEALTH_WORDS:
-            lines += ["", f"Prediction model: {HEALTH_WORDS[h['status']]}"]
-    lines += ["", (f"{site_url}\n" if site_url else "") + "<i>Rules-based signals, not investment advice.</i>"
-              + ("" if mine else " /weekly off stops this summary.")]
+            lines += ["", f"نموذج التوقع: {HEALTH_AR[h['status']]}" if ar else
+                      f"Prediction model: {HEALTH_WORDS[h['status']]}"]
+    if ar:
+        lines += ["", (f"{site_url}\n" if site_url else "") + "<i>إشارات مبنية على قواعد، وليست نصيحة استثمارية.</i>"
+                  + ("" if mine else " /weekly off يوقف هذا الملخص.")]
+    else:
+        lines += ["", (f"{site_url}\n" if site_url else "") + "<i>Rules-based signals, not investment advice.</i>"
+                  + ("" if mine else " /weekly off stops this summary.")]
     text = "\n".join(lines)
     return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + "\n…"
 
@@ -684,15 +891,16 @@ def weekly_after_scan(conn: sqlite3.Connection, cfg: dict) -> str:
     return "weekly summary sent"
 
 
-def send_weekly_to_subscribers(conn: sqlite3.Connection, token: str, text: str, week: str) -> int:
-    """The website: the week's summary to every connected friend who hasn't turned it off (/weekly off)."""
+def send_weekly_to_subscribers(conn: sqlite3.Connection, token: str, text, week: str) -> int:
+    """The website: the week's summary to every connected friend who hasn't turned it off (/weekly off).
+    `text`: one message, or {language: message}."""
     subs = _subscribers(conn)
     sent = 0
     for cid, s in subs.items():
         if s.get("weekly", True) is False or s.get("weekly_for") == week:
             continue
         try:
-            send(token, cid, text)
+            send(token, cid, text.get(s.get("lang") or "en", text["en"]) if isinstance(text, dict) else text)
         except TelegramError:
             continue            # tried again next run
         s["weekly_for"] = week

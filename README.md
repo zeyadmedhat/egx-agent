@@ -47,7 +47,7 @@ The ⚙ button (**More** on a phone) holds Settings, Admin, the language and the
 | **Market → Dividends & results** | Every EGX company's cash dividends from TradingView (coming up, highest yields), the companies whose results are expected in the next 6 weeks, and the bonus shares, rights issues and splits announced on Mubasher. Recent dividends and last year's bonus shares open on a tap |
 | **Stocks → Stock** | A one-line verdict on top (Buy / Hold / Sell / Wait / Avoid, and why: a summary of the cards below). The live price, and the agent's chart (always first) or TradingView's live chart. The agent's chart has daily, 4-hour and 1-hour candles, the support and resistance zones shaded, Fibonacci levels on a tap, averages, volume, RSI, MACD, your levels and your buys/sells marked; a *Stop-loss & target* card gives every stock's stop and target from the chart with the support and resistance behind them; why a stock does or doesn't qualify; the model's chance and rank; the company's numbers (P/E, growth, margins, debt) next to its sector's; news and anything to know now; dividends and Shariah details open on a tap |
 | **Stocks → Screener** | Every stock in one table: trend (above its 20/50/200-day averages), RSI, 1- and 3-month returns, the model's top picks, dividend yield and signal. Quick presets, the main filters, and **More filters**, remembered on the device |
-| **Stocks → Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/watch COMI levels` (a close near a strong support, or at resistance), `/unwatch COMI` (`/unwatch all`) and `/list`, checked after each close; it also answers `/stock COMI` (or just `COMI`), `/top`, `/top 20` and `/buys` from the website's data. Send `/link` and type its code in Settings → Your portfolio in Telegram: your browser then sends the bot a copy of your portfolio whenever it changes, so `/portfolio` and `/watchlist` answer there too (`/unlink` deletes the copy). The bot reads messages every few hours, or at once after a one-time double-click on **Set up instant Telegram replies.command** (a free Cloudflare Worker, `worker/bot.js`) |
+| **Stocks → Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/watch COMI levels` (a close near a strong support, or at resistance), `/unwatch COMI` (`/unwatch all`) and `/list`, checked after each close; it also answers `/stock COMI` (or just `COMI`), `/top`, `/top 20` and `/buys` from the website's data. *Connect Telegram* in Settings also links your portfolio (or send `/link` and type its code there): your browser then sends the bot a copy whenever it changes, so `/portfolio` and `/watchlist` answer there too and each close's message says what to do with your positions (`/unlink` deletes the copy). The bot reads messages every few hours, or at once after a one-time double-click on **Set up instant Telegram replies.command** (a free Cloudflare Worker, `worker/bot.js`) |
 | **Portfolio → My portfolio** | Three tabs. **Positions**: log real buys and sells. Click a position to sell some or all of it, record a cash dividend, see its transactions, or delete it if it was logged by mistake. Buying more of a stock you hold joins it at the average price. See status, days held (of 20) and P&L after fees and dividends. **Health**: your account against EGX30 since your first buy, money by sector, what you'd lose if every stop were hit, and how closely your stocks move together. **Journal**: win rate, average win and loss, profit factor, results by signal setup, exit reason and month, and your profit after Egypt's inflation |
 | **Portfolio → Paper** | A virtual 100k account the agent trades by itself. Watch it for 3–4 weeks before using real money |
 | **Portfolio → Calculator** | How many shares to buy with your own risk rules (the same sizing as the BUY signals): amount, fees, loss at the stop, gain at the target, and a check against your portfolio limits. Full or half size |
@@ -63,8 +63,9 @@ history open on a tap.
 
 **Arabic.** العربية in the ⚙ menu switches the whole site to Arabic, right to left (English switches
 back); each device remembers its choice. Menus, titles, labels, buttons and explanations are translated
-(`app/static/js/i18n.js`); the agent's own detailed notes (a signal's reasons, an order's details, sector names) stay
-in English for now.
+(`app/static/js/i18n.js`), and so are the agent's own notes (a signal's reasons, an order's details, the exit rules'
+notes, sizing notes, sector names), by their patterns (`tn()`); anything new it doesn't know yet shows in English.
+The password screen has its own English/العربية button.
 
 **Market words explained.** Words with a dotted underline (stop-loss, target, 50-day average, breadth, RSI, ADX,
 risk-off, ex-dividend, results…) show a two-line explanation when you tap them. Longer fine print sits under
@@ -282,21 +283,40 @@ without a server and without your Mac being on.
   Nothing to do on your side. The run's page on GitHub shows a one-line summary (counts only).
   A scan during trading hours is redone after the close; Telegram waits for that one.
   The site has no Paper Trading or Backtest pages: those stay in the Mac app.
+- **On time.** GitHub starts its timed runs late, or skips them, when it's busy (on 29 Sep 2026 nothing ran between
+  16:16 and 21:18 Cairo time). So the Telegram bot (`worker/bot.js`, a Cloudflare timer every 10 minutes) checks
+  after each close whether that close's scan has arrived and, if not, starts it on GitHub at 15:40, 16:10, 16:40,
+  17:40, 19:10 and 21:10 Cairo time until it has. It needs a GitHub key that can only start this repository's runs:
+  double-click **Set up on-time scans.command** once. A run that finds no new prices tries again 25 minutes later
+  (the Mac still waits 2 hours).
 - **One group password.** Everything the scan publishes is encrypted with it (AES-256, key from the password with
   600,000 PBKDF2 rounds), so the link alone shows nothing. Friends type it once per device. To remove someone,
   change the `SITE_PASSWORD` secret and give the new one to the others.
 - **Each friend's portfolio stays in their own browser**: buys, sells, dividends, bonus-share updates and
-  their own numbers (capital, risk, Shariah filter). Nobody else sees it, not even you. It doesn't
-  sync between devices: *Settings → Download a backup* / *Restore from a backup* moves it. On iPhone, use the
-  site from its Home Screen icon (Safari can delete a website's data after 7 days without a visit).
+  their own numbers (capital, risk, Shariah filter). Nobody else sees it, not even you. Once they connect Telegram
+  (below), the bot keeps a copy for their chat only, and each of their devices they connect brings the newest one
+  (the latest change wins; *Bring my portfolio from Telegram* in Settings does it by hand). Without Telegram,
+  *Settings → Download a backup* / *Restore from a backup* moves it. On iPhone, use the site from its Home Screen
+  icon (Safari can delete a website's data after 7 days without a visit).
+- **Opens at once, even offline.** The site keeps an offline copy of its code and the last close's data on the
+  device (`app/sw.js`), so the Home Screen app opens straight away and shows the last close with no signal. After an
+  update, a page still holding the old front page reloads itself once instead of showing a blank screen.
 - **Same rules as the Mac.** The browser runs a copy of the exit and sizing rules
   (`app/static/js/local/`), and `tests/test_static_site.py` checks it gives exactly the same answers.
 - **Telegram, to each friend:** with the `TELEGRAM_TOKEN` secret set (your bot's token), each friend presses
-  *Settings → Connect Telegram* on the site, then Start. The job checks for new people every 3 hours, answers
-  "Connected", and from then on sends each of them the day's signals after every close (without share counts:
-  each person sizes them on the site). `/stop` stops them. The link comes from the password, so only people who can
-  open the site have it, and changing the password disconnects everyone until they press the new link. After
-  Thursday's close each friend also gets the week's summary (`/weekly off` stops it).
+  *Settings → Connect Telegram* on the site, then Start. The bot answers "Connected" at once (with the Cloudflare
+  Worker; otherwise the job checks for new people every 3 hours), and from then on sends each of them the day's
+  signals after every close (without share counts: each person sizes them on the site). The same tap links that
+  browser's portfolio: after each close the job checks their positions with the exit rules and adds **their own
+  orders** to the message (sell at the open, move a stop up, decide on day 10, lower a stop for a dividend). `/stop`
+  stops them. The link comes from the password, so only people who can open the site have it, and changing the
+  password disconnects everyone until they press the new link. After Thursday's close each friend also gets the
+  week's summary (`/weekly off` stops it); `/quiet` sends the close's message only on days with a BUY or something to
+  do with their positions. Replies and messages are in Arabic for people whose Telegram is in Arabic (`/lang` to
+  switch). The bot answers a stock's symbol or part of its Arabic name (and suggests the closest for a typo), has
+  buttons under its answers (an alert, the stock's page), and sets its own command menu in both languages.
+  **Open the app** (a button under its messages) opens the website inside Telegram: Telegram vouches for a
+  connected friend, so there's no password to type there, and their portfolio comes with them.
 - **Alarms, to you only:** add the `OWNER_TELEGRAM` secret with your Telegram @username and press *Connect
   Telegram* on the site like a friend. You then get the same alarms as on the Mac (a failed run, prices stuck
   for 2 sessions, a source down for a day, the model not retrained), once when they start and once when they're
@@ -350,7 +370,8 @@ If the free price source stops working, the code is ready for a paid provider (E
 - `data/last_backtest.json`: the last backtest result
 - `data/daily.log`: what the daily scan did each time it ran
 - `data/models/`: the trained prediction model and its test results
-- `app/static_site.py` builds the GitHub Pages site, `app/site_daily.py` is its daily job, `app/static/js/local/` runs your portfolio in the browser, `site/strategy.yaml` is the strategy it uses
+- `app/static_site.py` builds the GitHub Pages site, `app/site_daily.py` is its daily job, `app/static/js/local/` runs your portfolio in the browser, `app/sw.js` is its offline copy, `site/strategy.yaml` is the strategy it uses
+- `worker/bot.js`: the Telegram bot on Cloudflare (instant replies, on-time scans, the portfolio link, the mini app); `node worker/bot.test.mjs` tests it
 - `app/health.py`: the alarms (what counts as broken, sent once when it starts and once when it's fixed) · `app/backup.py`: the site's locked daily backup
 - `deploy/` (kept on this Mac only): the older Oracle server plan; `app/auth.py` and `app/accounts.py` are its logins
 - `egx_agent/`: the analysis code · `tests/`: automated checks (`.venv/bin/python -m pytest`)

@@ -42,7 +42,8 @@ def scan_is_final(conn: sqlite3.Connection) -> bool:
     return not (t.date().isoformat() == data_date and t.time() < DATA_READY)
 
 
-def scan_is_stale(conn: sqlite3.Connection) -> bool:
+def scan_is_stale(conn: sqlite3.Connection, retry: timedelta = timedelta(hours=2)) -> bool:
+    """Is a newer close due than the last scan? A try that found no new close waits `retry` before the next one."""
     data_date = db.get_meta(conn, "scan_data_date")
     expected = expected_session_date().isoformat()
     if data_date and (data_date > expected or data_date == expected and scan_is_final(conn)):
@@ -52,7 +53,7 @@ def scan_is_stale(conn: sqlite3.Connection) -> bool:
         tried = datetime.fromisoformat(attempted)
         # Only a try after this close's data was due counts: a scan during the session doesn't hold back the one after.
         due = datetime.combine(date.fromisoformat(expected), DATA_READY, CAIRO).astimezone().replace(tzinfo=None)
-        if tried >= due and tried > datetime.now() - timedelta(hours=2):
+        if tried >= due and tried > datetime.now() - retry:
             return False  # tried recently; probably a holiday or data not published yet
     return True
 

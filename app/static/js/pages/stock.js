@@ -4,7 +4,7 @@ import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, Chance, WatchStar,
   Cautions, NewsList, Why, LiveChart, LiveQuote, LIVE_NOTE, Term, More, Change, StockAvatar, Fold,
 } from '../ui.js';
-import { t } from '../i18n.js';
+import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
 
 const RANGES = [
@@ -51,7 +51,7 @@ export function StockPage({ route }) {
           ${data.signal && html`<${StatusChip} status=${data.signal.action} />`}
           ${data.position && html`<span class="tag"><${Icon} name="briefcase" size=${13} />${t('You hold it')}</span>`}</div>
         <div class="row" style="gap:8px"><span class="stock-name" dir="rtl">${info.name_ar || ''}</span>
-          <span class="faint">·</span><span class="stock-sector">${info.sector || ''}</span></div>
+          <span class="faint">·</span><span class="stock-sector">${tn(info.sector || '')}</span></div>
         <${Badges} info=${info} />
       </div>
       ${st && html`<div class="price"><div class="big">${fmt.price(st.close)}</div>
@@ -127,11 +127,11 @@ export function verdictFor(data) {
     else if (pr.rank10 && pr.count && pr.rank10 > pr.count / 2) notes.push(t('The model ranks it in its bottom half (#{rank} of {n}).', { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
   };
   if (pos) {
-    if (pos.status === 'EXIT') return { kind: 'sell', label: 'Sell', line: pos.reason, notes };
+    if (pos.status === 'EXIT') return { kind: 'sell', label: 'Sell', line: tn(pos.reason), notes };
     const line = t('{a} above your stop ({stop}), {b} to your target ({target}).', {
       a: fmt.pct(close / pos.stop - 1, 1, false), stop: fmt.price(pos.stop),
       b: fmt.pct(pos.target / close - 1, 1, false), target: fmt.price(pos.target) });
-    if (pos.status && pos.status !== 'HOLD') notes.push(pos.reason);
+    if (pos.status && pos.status !== 'HOLD') notes.push(tn(pos.reason));
     modelNote();
     return { kind: 'hold', label: 'Hold', line, notes };
   }
@@ -194,7 +194,7 @@ function SignalPanel({ data }) {
       <span class="k">${t('Shares')}</span><span class="v">${s.shares ? fmt.int(s.shares) : '–'}</span>
       <span class="k">${t('Max loss')}</span><span class="v">${fmt.egp(s.risk_egp)}</span></div>`}
     ${!buy && html`<p class="muted" style="font-size:13px;margin-bottom:8px">${t('In a strong uptrend but no entry trigger yet.')}</p>`}
-    <ul class="reasons" dir="ltr">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${r}</li>`)}</ul>
+    <ul class="reasons" dir="auto">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${tn(r)}</li>`)}</ul>
     ${buy && html`<a class="btn primary block" style="margin-top:14px"
       href=${`#/portfolio?buy=${encodeURIComponent(data.symbol)}&price=${s.entry_high.toFixed(2)}&shares=${s.shares || ''}`}>
       <${Icon} name="plus" />${t('Log this buy')}</a>`}
@@ -359,7 +359,7 @@ function PositionPanel({ p, hold }) {
       <span class="k">${t('Target')}</span><span class="v up">${fmt.price(p.target)}</span>
       <span class="k">${t('First buy')}</span><span class="v">${fmt.date(p.first_buy)}</span>
     </div>
-    <p class="muted" style="font-size:13px;margin:12px 0">${p.reason}</p>
+    <p class="muted" style="font-size:13px;margin:12px 0">${tn(p.reason)}</p>
     <${DayBar} day=${p.day} max=${hold.max} review=${hold.review} />
     <a class="btn sm block" style="margin-top:12px" href="#/portfolio">${t('Manage in My Portfolio')}</a>
   </div>`;

@@ -8,7 +8,7 @@ import {
   Icon, StatusChip, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, DayBar, Field,
   StockPicker, Confirm, Callout, Seg, Empty, LiveQuotes, LIVE_NOTE, Fold, More,
 } from '../ui.js';
-import { t } from '../i18n.js';
+import { t, tn } from '../i18n.js';
 import { LineChart } from '../charts.js';
 import { equityCurve, correlations, sectorMix, stopRisk, journal } from '../insights.js';
 
@@ -27,7 +27,7 @@ export function PortfolioPage({ route }) {
         sub=${r.n_buys > 1 ? `${r.n_buys} buys combined` : r.info.name_ar} />` },
     { key: 'status', label: 'Status', sortValue: r => ['ADJUST', 'EXIT', 'REVIEW', 'TIGHTEN STOP', 'HOLD'].indexOf(r.status),
       render: r => html`<${StatusChip} status=${r.status} />` },
-    { key: 'reason', label: 'What to do', sortable: false, render: r => html`<span class="muted" style="font-size:12.5px">${r.reason}</span>` },
+    { key: 'reason', label: 'What to do', sortable: false, render: r => html`<span class="muted" style="font-size:12.5px">${tn(r.reason)}</span>` },
     { key: 'shares', label: 'Shares', align: 'r', fmt: v => fmt.int(v) },
     { key: 'avg_price', label: 'Avg price', align: 'r', fmt: v => fmt.price(v) },
     { key: 'last', label: 'Last', align: 'r', fmt: v => fmt.price(v) },
@@ -141,7 +141,7 @@ function HealthTab({ data }) {
       <section class="section">
         <${SectionHead} title="Where your money is" hint="Each sector's share of your account, at the last close." />
         <div class="card">${mix.map(m => html`<div class="mix-row">
-          <div class="mix-label"><b>${m.sector}</b><span class="faint">${m.symbols.join(', ')}</span></div>
+          <div class="mix-label"><b>${tn(m.sector)}</b><span class="faint">${m.symbols.join(', ')}</span></div>
           <div class="gauge"><b class="gauge-v">${fmt.pct(m.pct, 0, false)}</b>
             <div class=${cls('bar', m.sector === 'Cash' ? '' : m.pct > 0.4 ? 'warn' : 'up')}><span style=${`width:${(m.pct / top) * 100}%`}></span></div></div>
           <span class="faint mix-value">${fmt.short(m.value)}</span></div>`)}

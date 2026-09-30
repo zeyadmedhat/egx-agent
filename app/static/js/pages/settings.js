@@ -178,6 +178,9 @@ function DataCard({ d, running, admin }) {
 function DeviceCard({ telegram, scanUrl }) {
   const [restore, setRestore] = useState(null);
   const owner = useStore(s => s.owner);
+  const [connect, setConnect] = useState(null);     // the Connect link, with a fresh code for this browser each tap
+  const [armed, setArmed] = useState(0);
+  useEffect(() => { if (telegram) import('../local/api.js').then(m => setConnect(m.connectLink(telegram))); }, [armed]);
   const download = async () => {
     const site = await import('../local/site.js');
     const blob = new Blob([site.backupText(site.loadBook())], { type: 'application/json' });
@@ -212,7 +215,8 @@ function DeviceCard({ telegram, scanUrl }) {
     <div class="card-title" style="font-size:14px;color:var(--text)"><${Icon} name="shield" size=${16} />Your data on this device</div>
     <p class="muted" style="font-size:13px">Your portfolio and settings are saved only in this browser.
       Nobody else can see them, not even the person who runs the site. They don't move to your other phone or computer by
-      themselves: download a backup here and restore it there.</p>
+      themselves: connect Telegram below (it keeps the newest copy for your other devices), or download a backup here and
+      restore it there.</p>
     <div class="device-actions">
       <button class="btn primary" onClick=${download}><${Icon} name="download" />${t('Download a backup')}</button>
       <label class="btn"><${Icon} name="refresh" />Restore from a backup
@@ -228,14 +232,18 @@ function DeviceCard({ telegram, scanUrl }) {
           <li><div>Press <b>Connect Telegram</b> below, then <b>Start</b> in Telegram.</div></li>
           <li><div>The bot answers <b>"Connected"</b>${telegram.worker ? ' right away' : ' within about 3 hours: it checks for'
             + ' new people a few times a day'}. Then you get the latest signals, and new ones after each close.</div></li>
+          ${telegram.worker && html`<li><div>It also links your portfolio on this device: after each close the bot tells
+            you what to do with your own positions (sell, move a stop), and your portfolio comes with you to your
+            other phone or computer.</div></li>`}
         </ol>
         <div class="device-actions">
-          <a class="btn primary" href=${telegram.link} target="_blank" rel="noopener noreferrer">
+          <a class="btn primary" href=${connect ? connect.href : telegram.link} target="_blank" rel="noopener noreferrer"
+            onClick=${() => { if (connect) connect.arm(); setTimeout(() => setArmed(x => x + 1), 300); }}>
             <${Icon} name="send" />${t('Connect Telegram')}</a>
         </div>
         <p class="faint" style="font-size:12.5px;margin-top:10px">To stop, send <b>/stop</b> to @${telegram.bot}. Keep this
           button's link to yourself: anyone who opens it gets the messages too.</p>
-        ${telegram.worker && html`<${BotPortfolio} bot=${telegram.bot} />`}`
+        ${telegram.worker && html`<${BotPortfolio} bot=${telegram.bot} key=${armed} />`}`
       : html`<div class="muted" style="font-size:12.5px">The site has no Telegram alerts yet. Open it after each close
           (from about 4 pm Cairo time) for the next session's orders.</div>`}
     </div>
@@ -256,12 +264,27 @@ function DeviceCard({ telegram, scanUrl }) {
   </div>`;
 }
 
-// Your portfolio in Telegram: the bot's /link code, typed here, lets this browser send the bot a copy of it.
+// Your portfolio in Telegram: linked by the Connect button above (or the bot's /link code, typed here), this browser
+// sends the bot a copy whenever it changes. The bot checks your positions after each close, and your other devices
+// bring the newest copy here.
 function BotPortfolio({ bot }) {
-  const [linked, setLinked] = useState(false);
+  const [status, setStatus] = useState(null);       // 'linked', 'waiting' or null
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { import('../local/api.js').then(m => setLinked(!!m.botLink())); }, []);
+  const [asking, setAsking] = useState(false);
+  const read = () => import('../local/api.js').then(m => setStatus(m.botStatus()));
+  useEffect(() => { read(); }, []);
+  useEffect(() => {        // waiting for Start in Telegram: check every few seconds, for a few minutes
+    if (status !== 'waiting') return undefined;
+    let n = 0;
+    const id = setInterval(async () => {
+      const m = await import('../local/api.js');
+      await m.syncNow().catch(() => null);
+      setStatus(m.botStatus());
+      if (++n > 60) clearInterval(id);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [status]);
   const run = async fn => {
     setBusy(true);
     try { await fn(await import('../local/api.js')); } catch (err) { toast(err.message, 'error', 9000); }
@@ -269,28 +292,40 @@ function BotPortfolio({ bot }) {
   };
   const link = () => run(async m => {
     await m.linkBot(code);
-    setLinked(true);
     setCode('');
-    toast('Linked. Send /portfolio to the bot.');
+    await read();
+    toast(t('Linked. Send /portfolio to the bot.'));
   });
-  const unlink = () => run(async m => { await m.unlinkBot(); setLinked(false); toast('Unlinked.'); });
+  const unlink = () => run(async m => { await m.unlinkBot(); await read(); toast(t('Unlinked.')); });
+  const bring = () => run(async m => {
+    toast(t(await m.restoreFromBot() ? 'Brought your portfolio from Telegram.' : "The bot has no copy of your portfolio yet."));
+  });
   return html`<div class="sub-block"><h3>${t('Your portfolio in Telegram')}</h3>
-    <div class="muted" style="font-size:12.5px">Ask the bot about your own positions (<b>/portfolio</b>) and watchlist
-      (<b>/watchlist</b>). This browser then sends the bot a copy of your portfolio whenever it changes, kept for your
-      Telegram chat only.</div>
-    ${linked ? html`
-      <p style="font-size:13px;margin-top:10px">✅ Linked to @${bot} from this browser.</p>
-      <div class="device-actions"><button class="btn" disabled=${busy} onClick=${unlink}>Unlink</button></div>`
-    : html`
-      <ol class="steps" style="margin-top:10px">
-        <li><div>Send <b>/link</b> to @${bot}. It answers with a code.</div></li>
-        <li><div>Type the code here and press <b>Link</b>.</div></li>
-      </ol>
+    <div class="muted" style="font-size:12.5px">${t('The bot keeps a copy of your portfolio for your Telegram chat only. '
+      + 'After each close it tells you what to do with your own positions, it answers /portfolio and /watchlist, and '
+      + 'your other phone or computer brings the newest copy when you link it too.')}</div>
+    ${status === 'linked' ? html`
+      <p style="font-size:13px;margin-top:10px">✅ ${t('Linked to @{bot} from this browser.', { bot })}</p>
       <div class="device-actions">
-        <input class="input" style="max-width:160px;text-transform:uppercase" placeholder="Code" maxlength="8"
+        <button class="btn" disabled=${busy} onClick=${() => setAsking(true)}><${Icon} name="download" />
+          ${t('Bring my portfolio from Telegram')}</button>
+        <button class="btn ghost" disabled=${busy} onClick=${unlink}>${t('Unlink')}</button>
+      </div>`
+    : status === 'waiting' ? html`
+      <p style="font-size:13px;margin-top:10px"><span class="spinner" style="width:12px;height:12px"></span>
+        ${t('Waiting for you to press Start in Telegram…')}</p>
+      <div class="device-actions"><button class="btn ghost" disabled=${busy} onClick=${unlink}>${t('Cancel')}</button></div>`
+    : html`
+      <p class="muted" style="font-size:12.5px;margin-top:10px">${t('Press Connect Telegram above: it links this portfolio '
+        + 'too. Or send /link to @{bot} and type its code here:', { bot })}</p>
+      <div class="device-actions">
+        <input class="input" style="max-width:160px;text-transform:uppercase" placeholder=${t('Code')} maxlength="8"
           value=${code} onInput=${e => setCode(e.target.value.trim())} />
-        <button class="btn primary" disabled=${busy || code.length !== 8} onClick=${link}>Link</button>
+        <button class="btn primary" disabled=${busy || code.length !== 8} onClick=${link}>${t('Link')}</button>
       </div>`}
+    ${asking && html`<${Confirm} title=${t('Bring your portfolio from Telegram?')} confirmLabel=${t('Bring it here')} danger
+      text=${t("This browser's portfolio is replaced by the copy the bot has (the newest from any of your devices).")}
+      onConfirm=${bring} onClose=${() => setAsking(false)} />`}
   </div>`;
 }
 

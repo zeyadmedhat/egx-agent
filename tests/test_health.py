@@ -122,7 +122,7 @@ def test_the_website_finds_the_owner_by_username_and_tells_only_them(tmp_path, m
     strategy = tmp_path / "strategy.yaml"
     static_site.export_strategy(dict(config.DEFAULTS), strategy)
     monkeypatch.setattr(config, "CONFIG_PATH", strategy)
-    monkeypatch.setattr(scan, "scan_is_stale", lambda conn: False)
+    monkeypatch.setattr(scan, "scan_is_stale", lambda conn, *_: False)
     monkeypatch.setattr(scan, "run_scan", lambda *a, **k: {"date": "x", "buys": 1, "watches": 0})
     monkeypatch.setattr(jobs, "train_job", lambda conn, say: None)
     monkeypatch.setattr(news, "update", lambda conn, **k: {"new": 0, "actions": 0, "stocks": 0,

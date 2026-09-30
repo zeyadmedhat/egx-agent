@@ -4,7 +4,7 @@
 // bonus shares, rights issues and splits.
 import { html, useApi, useState, useMemo, useStore, fmt, go, stockHref } from '../lib.js';
 import { Icon, PageHead, PageLoading, SectionHead, DataTable, StockCell, Seg, Callout, Fold, Term, More } from '../ui.js';
-import { t } from '../i18n.js';
+import { t, tn } from '../i18n.js';
 
 const SHOW = [{ value: 'all', label: 'All stocks' }, { value: 'mine', label: 'My stocks' }];
 
@@ -37,7 +37,7 @@ export function DividendsPage() {
   ];
   const yieldCols = [
     stock,
-    { key: 'sector', label: 'Sector', sortValue: r => r.info.sector || '', render: r => html`<span class="muted">${r.info.sector || ''}</span>` },
+    { key: 'sector', label: 'Sector', sortValue: r => r.info.sector || '', render: r => html`<span class="muted">${tn(r.info.sector || '')}</span>` },
     { key: 'yield', label: 'Yield a year', align: 'r', fmt: v => html`<b class="up">${fmt.pct(v, 1, false)}</b>` },
     { key: 'value', label: 'Traded per day', align: 'r', fmt: v => (v ? `${fmt.short(v)} EGP` : '–') },
   ];

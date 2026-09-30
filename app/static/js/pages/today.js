@@ -6,7 +6,7 @@ import {
   StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, LiveQuotes, LIVE_NOTE, StockAvatar, Change, Term,
   SessionBadge, More, ScoreBar, ShariahNote,
 } from '../ui.js';
-import { t, tp, isAr } from '../i18n.js';
+import { t, tp, isAr, tn } from '../i18n.js';
 import { Sparkline } from '../charts.js';
 
 // Both tabs read /today; before the first scan they explain how to get one.
@@ -164,7 +164,7 @@ function Positions({ positions, cfg, alerts }) {
       <div class="stock-cell"><${StockAvatar} symbol=${p.symbol} size=${34} /><div><a class="sym-big" style="font-size:15px" href=${stockHref(p.symbol)}>${p.symbol}</a>
         <div class="faint" style="font-size:12px;white-space:nowrap">${fmt.int(p.shares)} ${t('sh')} · <span class=${tone(p.pnl_pct)}>${fmt.pct(p.pnl_pct)}</span></div></div></div>
       <div><${StatusChip} status=${p.status} /></div>
-      <div class="reason" dir="auto">${p.reason}${p.cautions && p.cautions.length > 0 && html`<div style="margin-top:4px">
+      <div class="reason" dir="auto">${tn(p.reason)}${p.cautions && p.cautions.length > 0 && html`<div style="margin-top:4px">
         <${Cautions} items=${p.cautions} compact /></div>`}</div>
       <${DayBar} day=${p.day} max=${cfg.max_hold_days} review=${cfg.review_day} />
     </div>`)}</div></section>`;
@@ -240,7 +240,7 @@ function OrdersCard({ o }) {
       <button class=${cls('tick', done.has(it.key) && 'on')} onClick=${() => toggle(it)}
         aria-label=${done.has(it.key) ? 'Mark as not done' : 'Mark as done'} title="Done"><${Icon} name="check" /></button>
       <span class=${`kind ${it.kind}`}>${t(KIND[it.kind])}</span>
-      <div class="o-body" dir="auto"><div class="o-title">${it.title}</div><div class="o-detail">${it.detail}</div>
+      <div class="o-body" dir="auto"><div class="o-title">${tn(it.title)}</div><div class="o-detail">${tn(it.detail)}</div>
         ${it.kind === 'buy' && html`<div class="o-shariah"><${Badges} info=${it.info} compact /></div>`}</div>
       <div class="o-act"><${OrderAction} it=${it} /></div>
     </div>`)}
@@ -270,7 +270,7 @@ function SignalCard({ s, model }) {
           ${s.source === 'model'
             ? html`<span class="model-pick" title="One of the prediction model's top picks today that also passes the liquidity and uptrend checks. Same stop, target and sizing as any BUY."><${Icon} name="target" size=${12} />${t('Model pick')}</span>`
             : s.setup && html`<span class="tag">${t(s.setup)}</span>`}</div>
-        <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}<span class="faint"> · ${i.sector}</span></div>
+        <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}<span class="faint"> · ${tn(i.sector)}</span></div>
       </div>
       <${ScoreRing} score=${s.score} />
     </div>
@@ -287,7 +287,7 @@ function SignalCard({ s, model }) {
       <span>${t('Max loss')} <b class="down">${fmt.egp(s.risk_egp)}</b></span>
     </div>
     <${More} label="Why this signal">
-      <ul class="reasons" dir="ltr">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${r}</li>`)}</ul>
+      <ul class="reasons" dir="auto">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${tn(r)}</li>`)}</ul>
       ${model && s.pred && html`<div class="model-line"><${Icon} name="target" size=${14} />
         ${s.pred.top10 === false
           ? html`<a href="#/predict">${t('Model: #{rank} of {n}, not one of its top picks today', { rank: fmt.int(s.pred.rank10), n: fmt.int(model.count) })}</a>`
@@ -298,7 +298,7 @@ function SignalCard({ s, model }) {
       ${cautions.some(c => c.kind === 'ex_dividend') && html`<p>${t('It goes ex-dividend before this trade would end. The price drops by the dividend that morning and you get it in cash, so the agent lowers the stop and target by the same amount (a to-do reminds you the evening before). Counting the dividend, BUYs this close to an ex-date did as well as the others in 10 years of tests.')}</p>`}
       ${results && html`<p>${t('Results are expected around {date}, before this trade would end. The price can jump either way that day; the agent keeps the same stop.', {
         date: fmt.date(results.date, false) })}</p>`}
-      <p class="faint">${t('Sizing')}: <span dir="ltr">${s.size_note}</span> · ${t('hold at most until')} <b class="muted">${fmt.date(s.sell_by)}</b></p>
+      <p class="faint">${t('Sizing')}: <span dir="auto">${tn(s.size_note)}</span> · ${t('hold at most until')} <b class="muted">${fmt.date(s.sell_by)}</b></p>
     <//>
     <div class="sig-foot">
       <a class="btn sm ghost" href=${stockHref(s.symbol)}><${Icon} name="chart" />${t('Chart')}</a>

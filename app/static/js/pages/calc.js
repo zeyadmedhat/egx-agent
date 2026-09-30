@@ -4,7 +4,7 @@ import { html, useApi, useState, useEffect, fmt, go, cls } from '../lib.js';
 import {
   Icon, PageLoading, StockPicker, Field, Seg, Callout, MarketSwitch, StatusChip, Chance, Empty,
 } from '../ui.js';
-import { t } from '../i18n.js';
+import { t, tn } from '../i18n.js';
 import { planTrade } from '../sizing.js';
 
 const SIZES = [{ value: 'full', label: 'Full size' }, { value: 'half', label: 'Half size' }];
@@ -91,7 +91,7 @@ function Result({ res, sym, entry }) {
   return html`<div class="card calc-result">
     <div class="eyebrow">Buy</div>
     <div class=${cls('calc-shares', res.shares ? 'up' : 'down')}>${fmt.int(res.shares)} <span>shares</span></div>
-    <div class="faint" style="font-size:12.5px;margin-bottom:14px">Sized by: ${res.size_note}</div>
+    <div class="faint" style="font-size:12.5px;margin-bottom:14px">Sized by: ${tn(res.size_note)}</div>
     <div class="stat-list">
       <span class="k">${t('Amount')}</span><span class="v">${fmt.egp(res.amount)}
         <span class="faint" style="font-weight:500"> ${fmt.pct(res.position_pct, 1, false)} of the account</span></span>

@@ -21,6 +21,7 @@ The logs are public on a public repository, so they only ever show counts, never
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import html
 import json
@@ -28,7 +29,7 @@ import os
 import re
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -40,6 +41,7 @@ from . import alerts, backup, health, jobs, static_site, views
 
 
 NEWS_BUDGET_S = 120   # runs without a new close read the news too, a little less of it
+RETRY = timedelta(minutes=25)   # after a try that found no new close; the Telegram Worker asks for runs half-hourly
 
 
 def log(msg: str) -> None:
@@ -95,6 +97,14 @@ def owner_chat(conn, token: str, owner: str) -> str | None:
     return chat
 
 
+def app_button(site_url: str, lang: str = "en") -> list | None:
+    """A button under the evening message that opens the website inside Telegram (a mini app)."""
+    if not site_url.startswith("https://"):
+        return None
+    return [[{"text": "📱 افتح التطبيق" if lang == "ar" else "📱 Open the app",
+              "web_app": {"url": site_url.rstrip("/") + "/"}}]]
+
+
 def live_stamp(site_url: str) -> str | None:
     """The stamp of the site people see now, or None if it can't be read (then the site is published)."""
     if not site_url:
@@ -140,7 +150,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         changed = db.get_meta(conn, "site_strategy") != strategy
 
         # 1. prices and signals
-        if fresh or force_scan or scan.scan_is_stale(conn):
+        if fresh or force_scan or scan.scan_is_stale(conn, RETRY):
             first = {**cfg, "history_years": prices.DEEP_YEARS} if fresh else cfg
             log("First run: downloading 10 years of prices for every stock." if fresh else "Downloading new prices.")
             market = scan.run_scan(conn, first, progress=_progress("Scan"))
@@ -223,30 +233,66 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         report["publish"] = always_publish or live_stamp(site_url) != res["stamp"]
         if not report["publish"]:
             report["site"] += ", unchanged (not published again)"
+        # The portfolios friends linked to the bot (their browsers keep them; the Worker holds a copy), checked with
+        # the exit rules at this close: their own orders go into their evening message.
+        mine: dict[str, list] = {}
+        if subs is not None and all(worker) and data_date:
+            try:
+                books = alerts.worker_call(*worker, "/books")["books"]
+            except (alerts.TelegramError, KeyError, TypeError) as exc:
+                report["worker"] = str(exc)
+                books = {}
+            d = views.Data(conn, cfg, views.Cache())
+            connected = alerts._subscribers(conn)
+            for cid, book in books.items():
+                if cid in connected and isinstance(book, dict):
+                    try:
+                        mine[cid] = views.book_positions(d, book)
+                    except Exception:  # one odd record must not stop everyone's messages
+                        traceback.print_exc()
         if subs is not None:
             sent = {"sent": 0, "failed": 0, "gone": 0}
             fired = 0
             weekly = 0
             if data_date and final and subs["connected"]:
-                text = alerts.build_site_message(views.Data(conn, cfg, views.Cache()), site_url)
-                sent = alerts.send_to_subscribers(conn, token, text, data_date)
+                d = views.Data(conn, cfg, views.Cache())
+                has_buys = any(r["action"] == "BUY" for r in views.records(views.current_scan(conn)[1]))
+
+                def message(cid: str, s: dict) -> dict | None:
+                    lang = s.get("lang") or "en"
+                    part, todo = alerts.personal_part(d, mine[cid], lang) if cid in mine else ([], False)
+                    if s.get("quiet") and not has_buys and not todo:
+                        return None           # /quiet: nothing to do today
+                    return {"text": alerts.build_site_message(d, site_url, lang, part if cid in mine else None),
+                            "buttons": app_button(site_url, lang)}
+
+                sent = alerts.send_to_subscribers(conn, token, message, data_date)
                 fired = alerts.fire_watch_alerts(conn, token, data_date, cfg)
                 week = alerts.week_of(data_date)
                 if alerts.weekly_due(data_date, None) and any(     # each friend once a week (they can turn it off)
                         s.get("weekly", True) and s.get("weekly_for") != week for s in alerts._subscribers(conn).values()):
-                    weekly = alerts.send_weekly_to_subscribers(
-                        conn, token, alerts.build_weekly(views.Data(conn, cfg, views.Cache()), site_url, mine=False), week)
+                    weekly = alerts.send_weekly_to_subscribers(conn, token, {
+                        lang: alerts.build_weekly(views.Data(conn, cfg, views.Cache()), site_url, mine=False, lang=lang)
+                        for lang in ("en", "ar")}, week)
             report["telegram"] = (f"{subs['connected'] - sent['gone']} connected ({subs['joined']} new, "
                                   f"{subs['left'] + sent['gone']} left), sent to {sent['sent']}"
                                   + (f", {sent['failed']} failed" if sent["failed"] else "")
                                   + (f", {subs['commands']} commands answered" if subs.get("commands") else "")
                                   + (f", {fired} alerts" if fired else "")
+                                  + (f", {len(mine)} linked portfolios checked" if mine else "")
                                   + (f", weekly summary to {weekly}" if weekly else ""))
         elif not token:
             report["telegram"] = "not set up"
         if subs is not None and all(worker):      # after the alerts that fired: the Worker's copy of who's watching what
+            key = static_site.derive_key(password, static_site.salt_for(site_id))
+            extra = {"site": site_url, "mine": {cid: {"date": data_date, "positions": [
+                        {k: p.get(k) for k in ("symbol", "last", "stop", "target", "status", "reason")} for p in ps]}
+                        for cid, ps in mine.items()},
+                     # the mini app: Telegram vouches for a connected friend, so they needn't type the password there
+                     "sitekey": {"salt": base64.b64encode(static_site.salt_for(site_id)).decode(),
+                                 "iter": static_site.ITERATIONS, "key": base64.b64encode(key).decode()}}
             try:
-                alerts.worker_call(*worker, "/state", alerts.worker_state(conn, code, cfg))
+                alerts.worker_call(*worker, "/state", alerts.worker_state(conn, code, cfg, extra))
                 report.setdefault("worker", "up to date")
             except alerts.TelegramError as exc:
                 report["worker"] = str(exc)

@@ -38,7 +38,7 @@ st.info = { scan: "2026-09-29", pred: "2026-09-29", stocks: {
 assert.match(await ask("comi"), /<b>COMI<\/b> CIB\nClose 128.01 \(-0.4%\) on 29 Sep\nNo signal today.\nChance to reach the target: 13.4% in 10 days \(rank 2\) · 25.0% in 20 days \(rank 1, expected \+2.1%\)\nChart: support 127.11 · resistance 129.73/)
 assert.match(await ask("/stock abuk"), /BUY<\/b> up to 50.50 · stop 47.00 · target 56.00/)
 assert.match(await ask("/s XXXX"), /don't know XXXX/)
-assert.equal(await ask("hello there"), null)
+assert.match(await ask("hello there"), /didn't find “hello there”/)       // a hint, not silence
 assert.match(await ask("/top"), /1\. <b>ABUK<\/b> 40.0%.*\n2\. <b>COMI<\/b>/)
 assert.match(await ask("/top 20"), /in 20 days.*\n1\. <b>COMI<\/b> 25.0% · expected \+2.1%/)
 assert.match(await ask("/buys"), /ABUK<\/b> up to 50.50/)
@@ -56,7 +56,7 @@ assert.match(await handle(st, next), /ABUK closes near a strong support/)
 assert.equal(next.message.text, "/watch abuk levels")          // what the website's run will read
 assert.match(await handle(st, u("/stock")), /Which stock\?/)
 assert.match(await handle(st, u("/list")), /ABUK: near support/)   // another command: the question is dropped
-assert.equal(await handle(st, u("hello")), null)
+assert.match(await handle(st, u("hello")), /didn't find/)
 assert.match(await handle(st, u("/unwatch")), /or all/)
 assert.match(await handle(st, u("all")), /Removed all your alerts \(1\)/)
 console.log("menu ok")
@@ -79,7 +79,8 @@ console.log("portfolio ok")
 import { Bot } from "./bot.js"
 const kv = new Map(), sentMsgs = []
 const storage = { get: async k => structuredClone(kv.get(k)), put: async (k, v) => { kv.set(k, structuredClone(v)) },
-  delete: async ks => { for (const k of [].concat(ks)) kv.delete(k) } }
+  delete: async ks => { for (const k of [].concat(ks)) kv.delete(k) },
+  list: async ({ prefix }) => new Map([...kv].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k, structuredClone(v)])) }
 globalThis.fetch = async (url, init) => {
   const body = JSON.parse(init.body)
   if (url.endsWith("/sendMessage")) sentMsgs.push(body.text)
@@ -115,3 +116,119 @@ assert.equal((await post("/book", { token, book })).status, 401)                
 await tg("/portfolio")
 assert.match(sentMsgs.at(-1), /isn't linked yet/)
 console.log("link ok")
+
+// Buttons, names, typos, Arabic, /quiet
+import { respond, callbackText, search, plain, arNote, scanDue, cairo, webAppUser } from "./bot.js"
+import { createHmac } from "node:crypto"
+st.info.site = "https://example.github.io/egx-agent"
+st.info.stocks.COMI.n = "البنك التجاري الدولي-مصر (سى اى بى )"
+const card = await respond(st, u("comi"))
+assert.deepEqual(card.kb[0].map(b => b.callback_data), ["w:COMI", "l:COMI"])
+assert.equal(card.kb.at(-1)[0].web_app.url, "https://example.github.io/egx-agent/?go=stock%2FCOMI")
+assert.equal(callbackText("w:COMI"), "/watch COMI")
+assert.equal(callbackText("l:COMI"), "/watch COMI levels")
+assert.equal(callbackText("t20"), "/top 20")
+assert.equal(callbackText("w:<b>"), null)
+assert.equal(callbackText("x:COMI"), null)
+assert.equal(plain("التجارى"), plain("التجاري"))
+assert.deepEqual(search(st.info, "التجارى"), ["COMI"])                     // ى or ي, either way
+assert.deepEqual(search(st.info, "COMMI"), ["COMI"])                        // a typo
+assert.equal(search(st.info, "zz").length, 0)
+assert.match(await handle(st, u("البنك التجاري")), /<b>COMI<\/b>/)
+const tapped = await respond(st, u("/watch COMI"))
+assert.equal(tapped.kb[0][0].callback_data, "u:COMI")                     // a way to undo it
+const arMsg = text => ({ update_id: 5, message: { chat: { id: 9, type: "private" }, from: { language_code: "en" }, text } })
+assert.match(await handle(st, arMsg("/lang ar")), /سأرد بالعربية/)
+assert.equal(st.subs[9].lang, "ar")
+assert.match(await handle(st, arMsg("comi")), /الإغلاق 128.01/)
+assert.match(await handle(st, arMsg("/lang")), /answer in English/)          // no word: the other language
+assert.match(await handle(st, arMsg("/quiet")), /only message you/)
+assert.equal(st.subs[9].quiet, true)
+assert.match(await handle(st, arMsg("/quiet off")), /every close/)
+assert.equal(st.subs[9].quiet, false)
+const newbie = { fp, seen: 0, stocks: {}, subs: {}, alerts: {} }
+await handle(newbie, { update_id: 6, message: { chat: { id: 4, type: "private" }, from: { language_code: "ar-EG" },
+                                               text: "/start secretcode1" } })
+assert.equal(newbie.subs[4].lang, "ar")                                      // their Telegram is in Arabic
+assert.equal(arNote("Trend break (closed below 50-day average): sell at the next open"),
+             "كسر الاتجاه (أغلق تحت متوسط 50 يومًا): بع عند الافتتاح القادم")
+console.log("buttons and languages ok")
+
+// On-time scans: when the bot asks GitHub to scan
+const at = (day, hm, weekday = "Wed") => ({ day, minute: +hm.slice(0, 2) * 60 + +hm.slice(3), weekday })
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:30")).key, undefined)          // prices not out yet
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:45")).key, "2026-09-30 940")
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "16:20")).key, "2026-09-30 970")
+assert.equal(scanDue({ scan: "2026-09-30", final: true }, at("2026-09-30", "16:20")).key, undefined)  // it's in
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "16:20")).key, "2026-09-30 970")
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-10-02", "16:20", "Fri")).key, undefined)
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "23:00")).key, undefined)
+assert.deepEqual(cairo(new Date("2026-09-30T13:05:00Z")), { day: "2026-09-30", minute: 16 * 60 + 5, weekday: "Wed" })
+console.log("scan times ok")
+
+// One tap: the website's Connect button links the browser; the whole record syncs between devices; the Mac's link
+const kv2 = new Map(), sent2 = [], github = []
+const storage2 = { get: async k => structuredClone(kv2.get(k)), put: async (k, v) => { kv2.set(k, structuredClone(v)) },
+  delete: async ks => { for (const k of [].concat(ks)) kv2.delete(k) },
+  list: async ({ prefix }) => new Map([...kv2].filter(([k]) => k.startsWith(prefix))) }
+globalThis.fetch = async (url, init) => {
+  if (String(url).startsWith("https://api.github.com/")) { github.push(JSON.parse(init.body)); return new Response(null, { status: 204 }) }
+  const body = JSON.parse(init.body)
+  if (url.endsWith("/sendMessage")) sent2.push(body)
+  return new Response(JSON.stringify({ ok: true, result: url.endsWith("/getWebhookInfo") ? { url: "" } : true }))
+}
+const env2 = { BOT_TOKEN: "123:test", SYNC_KEY: "k".repeat(48), GH_TOKEN: "gh", GITHUB_REPO: "me/egx" }
+const bot2 = new Bot({ storage: storage2 }, env2)
+const post2 = (path, body, headers = {}) => bot2.fetch(new Request(W + path, { method: "POST", body: JSON.stringify(body),
+  headers: { "content-type": "application/json", ...headers } }))
+const auth = { Authorization: `Bearer ${env2.SYNC_KEY}` }
+const code24 = "secretcode1secretcode1ab"
+const fp24 = createHash("sha256").update(code24).digest("hex").slice(0, 16)
+await post2("/state", { fp: fp24, seen: 0, stocks: { COMI: 128 }, subs: {}, alerts: {}, info: st.info,
+                        sitekey: { salt: "c2FsdA==", iter: 600000, key: "a2V5" } }, auth)
+let uid2 = 100
+const tg2 = (text, id = 11, extra = {}) => post2("/telegram", { update_id: ++uid2,
+  message: { chat: { id, type: "private", first_name: "Sam" }, from: { language_code: "en" }, text }, ...extra },
+  { "X-Telegram-Bot-Api-Secret-Token": hook })
+const nonce = "0123456789abcdef0123456789abcdef"
+await tg2(`/start ${code24}${nonce}`)
+assert.match(sent2.at(-1).text, /Connected[\s\S]*portfolio is linked too/)
+assert.ok(sent2.at(-1).reply_markup.inline_keyboard.flat().some(b => b.web_app))
+const full = { v: 1, trades: [{ id: 1, account: "real", status: "open", symbol: "COMI" }], fills: [], dividends: [], adjustments: [] }
+assert.equal((await post2("/book", { token: nonce, book, full, changed: "2026-09-30T10:00:00Z" })).status, 200)
+assert.equal((await post2("/book", { token: nonce, book, full, changed: "2026-09-30T09:00:00Z" })).status, 409)  // older
+assert.equal((await (await post2("/restore", { token: nonce })).json()).book.trades[0].symbol, "COMI")
+assert.equal((await post2("/books", {})).status, 403)
+assert.deepEqual(Object.keys((await (await post2("/books", {}, auth)).json()).books), ["11"])
+// a second browser of the same person: already connected, so only the link
+await tg2(`/start ${code24}${"f".repeat(32)}`)
+assert.match(sent2.at(-1).text, /This browser's portfolio is linked/)
+// your Mac's own Connect link: noted for the Mac to find, once
+await tg2("/start macCode12345", 12)
+assert.deepEqual(await (await post2("/started", { code: "macCode12345" })).json(), { found: true, id: "12", name: "Sam" })
+assert.deepEqual(await (await post2("/started", { code: "macCode12345" })).json(), { found: false })
+// a button press is the command it stands for, logged for the website's run
+await tg2(null, 11, { message: undefined, callback_query: { id: "q1", data: "w:COMI", from: { id: 11 },
+                                                            message: { message_id: 5, chat: { id: 11, type: "private" } } } })
+const logged = (await (await bot2.fetch(new Request(W + "/updates", { headers: auth }))).json()).updates.at(-1)
+assert.equal(logged.message.text, "/watch COMI")
+assert.match(sent2.at(-1).text, /tell you when COMI gets a BUY/)
+// the mini app: Telegram's signature gets the site's key and a link, a wrong one nothing
+const user = JSON.stringify({ id: 11, first_name: "Sam" }), authDate = String(Math.floor(Date.now() / 1000))
+const check = `auth_date=${authDate}\nquery_id=AAA\nuser=${user}`
+const secret = createHmac("sha256", "WebAppData").update(env2.BOT_TOKEN).digest()
+const signed = new URLSearchParams({ query_id: "AAA", user, auth_date: authDate,
+  hash: createHmac("sha256", secret).update(check).digest("hex") }).toString()
+assert.equal((await webAppUser(signed, env2.BOT_TOKEN)).id, 11)
+assert.equal(await webAppUser(signed.replace("Sam", "Tom"), env2.BOT_TOKEN), null)
+const mini = await (await post2("/miniapp", { initData: signed })).json()
+assert.equal(mini.key.iter, 600000)
+assert.equal((await post2("/restore", { token: mini.token })).status, 200)
+assert.equal((await post2("/miniapp", { initData: signed.replace("Sam", "Tom") })).status, 403)
+// /unlink forgets every link, the mini app's too
+await tg2("/unlink")
+assert.equal((await post2("/restore", { token: mini.token })).status, 401)
+assert.equal((await post2("/restore", { token: nonce })).status, 401)
+// on-time scans: asks GitHub once per slot
+assert.equal((await post2("/tick", {}, auth)).status, 200)
+console.log("one tap, sync, Mac, mini app ok")

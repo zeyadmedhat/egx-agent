@@ -184,10 +184,35 @@ def index_html(worker: str | None = None, version: str = "") -> str:
              '  <meta name="referrer" content="no-referrer">\n'
              '  <meta name="apple-mobile-web-app-capable" content="yes">\n'
              '  <meta name="apple-mobile-web-app-title" content="EGX Agent">\n'
-             '  <link rel="manifest" href="manifest.webmanifest">\n')
+             '  <link rel="manifest" href="manifest.webmanifest">\n' + RELOAD_ON_OLD_PAGE)
     page = page.replace('  <title>', extra + '  <title>', 1)
     csp = f'  <meta http-equiv="Content-Security-Policy" content="{_csp(page, _origin(worker))}">\n'
     return page.replace('  <meta charset="utf-8">\n', '  <meta charset="utf-8">\n' + csp, 1)
+
+
+# A browser may keep the front page for 10 minutes (GitHub Pages' rule) and ask for page code an update has removed:
+# then it gets a fresh front page and reloads, once a minute at most, instead of showing an empty screen.
+RELOAD_ON_OLD_PAGE = """  <script>
+    addEventListener('error', function (e) {
+      var src = e.target && (e.target.src || e.target.href) || '';
+      if (src.indexOf('static/') < 0) return;
+      try {
+        if (Date.now() - (+sessionStorage.getItem('egx-reloaded') || 0) < 60000) return;
+        sessionStorage.setItem('egx-reloaded', String(Date.now()));
+      } catch (x) { return; }
+      fetch('./', { cache: 'reload' }).then(function () { location.reload(); }, function () {});
+    }, true);
+  </script>
+"""
+SERVICE_WORKER = Path(__file__).resolve().parent / "sw.js"
+
+
+def service_worker(version: str, out: Path) -> str:
+    """app/sw.js with this version's page code listed, so it's kept on the device for offline use."""
+    files = sorted(f"static/{version}/{p.relative_to(out / 'static' / version).as_posix()}"
+                   for p in (out / "static" / version).rglob("*") if p.is_file())
+    return (SERVICE_WORKER.read_text(encoding="utf-8").replace("__VERSION__", version)
+            .replace("__FILES__", json.dumps(files)))
 
 
 MANIFEST = {"name": "EGX Trading Agent", "short_name": "EGX Agent", "start_url": "./", "scope": "./",
@@ -209,6 +234,7 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
     (out / "index.html").write_text(index_html((telegram or {}).get("worker"), ver), encoding="utf-8")
     manifest = {**MANIFEST, "icons": [{**MANIFEST["icons"][0], "src": f"static/{ver}/favicon.svg"}]}
     (out / "manifest.webmanifest").write_text(json.dumps(manifest), encoding="utf-8")
+    (out / "sw.js").write_text(service_worker(ver, out), encoding="utf-8")
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
 
@@ -225,8 +251,9 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
         path = out / "data" / f"{name}.bin"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(seal(body, key))
+    # worker: the Telegram bot's address (already in the page's security header), for opening inside Telegram
     info = {"v": 1, "salt": base64.b64encode(salt).decode(), "iter": ITERATIONS, "stamp": stamp,
-            "built": files["core"]["built"]}
+            "built": files["core"]["built"], "worker": (telegram or {}).get("worker")}
     (out / "data" / "site.json").write_text(json.dumps(info), encoding="utf-8")
     return {"stamp": stamp, "files": len(plain), "stocks": sum(1 for n in plain if n.startswith("stock/")),
             "bytes": sum(p.stat().st_size for p in (out / "data").rglob("*.bin"))}

@@ -2,7 +2,7 @@
 // shapes app/views.py and app/server.py give on your Mac. The shared parts come from the scan's published files;
 // your portfolio and settings come from this browser (site.js). Paper trading and the backtest are only on the Mac.
 import * as E from './engine.js';
-import { load, loadBook, saveBook } from './site.js';
+import { load, loadBook, saveBook, validBook, emptyBook } from './site.js';
 
 export class LocalError extends Error {
   constructor(message, status = 400, detail = null) { super(message); this.status = status; this.detail = detail ?? { message }; }
@@ -576,12 +576,24 @@ export const ME = {
 };
 
 // ------------------------------------------------------------------ your portfolio in Telegram (worker/bot.js)
-// Once linked (a code from the bot's /link, typed in Settings), this browser sends the bot a copy of your portfolio
-// after every change and once a day when the site opens. The link is kept only in this browser.
+// Once linked (the Connect Telegram button, a /link code typed in Settings, or opening the site inside Telegram), this
+// browser sends the bot a copy of your portfolio after every change and once a day when the site opens: a summary for
+// /portfolio, and the whole record, which the site's run checks with the exit rules after each close and your other
+// devices bring back. The newest change wins: a device holding an older copy takes the newer one. The link is kept
+// only in this browser.
 const BOT_LINK = 'egx-bot-link';
+const WAIT_DAYS = 2;        // a Connect link that nobody pressed Start on in Telegram by then is dropped
 
 export function botLink() {
   try { return JSON.parse(localStorage.getItem(BOT_LINK) || 'null'); } catch { return null; }
+}
+function setLink(v) {
+  try { if (v) localStorage.setItem(BOT_LINK, JSON.stringify(v)); else localStorage.removeItem(BOT_LINK); } catch { /* */ }
+}
+// 'linked', 'waiting' (Connect pressed, Start not yet), or null
+export function botStatus() {
+  const link = botLink();
+  return !link ? null : link.pending ? 'waiting' : 'linked';
 }
 
 async function botPost(url, path, body) {
@@ -592,20 +604,50 @@ async function botPost(url, path, body) {
   return out;
 }
 
+const changedOf = book => (book.meta && book.meta.changed) || '';
+const hasAnything = book => book.trades.length > 0 || (book.watchlist || []).length > 0;
+
+// The bot's copy, brought here when it's newer than this browser's (or this browser has nothing yet). True if it was.
+async function pullBook(link, force = false) {
+  const got = await botPost(link.url, '/restore', { token: link.token });
+  if (!got.book || !validBook(got.book)) return false;
+  const local = loadBook();
+  if (!force && hasAnything(local) && changedOf(local) >= (got.changed || '')) return false;
+  saveBook({ ...emptyBook(), ...got.book, meta: { ...(got.book.meta || {}), changed: got.changed || '' } }, true);
+  window.dispatchEvent(new CustomEvent('egx-book'));        // the page shows the new portfolio (main.js)
+  return true;
+}
+
 async function sendBook(c) {
   const link = botLink();
   if (!link) return;
-  const pv = await portfolioView(c);
-  const book = { date: c.core.scan_date, start: pv.summary.start, cash: pv.summary.cash, closed: pv.closed_stats,
-    watchlist: c.book.watchlist || [],
-    positions: pv.positions.map(p => ({ symbol: p.symbol, shares: p.shares, avg: p.avg_price, last: p.last, stop: p.stop,
-      target: p.target, status: p.status, reason: p.reason || '' })) };
   try {
-    await botPost(link.url, '/book', { token: link.token, book });
-    try { localStorage.setItem(BOT_LINK, JSON.stringify({ ...link, sent: c.core.scan_date })); } catch { /* */ }
+    if (!link.synced) {                       // newly linked: a portfolio on another device comes here first
+      if (await pullBook(link)) c = await context();
+    }
+    const pv = await portfolioView(c);
+    const book = { date: c.core.scan_date, start: pv.summary.start, cash: pv.summary.cash, closed: pv.closed_stats,
+      watchlist: c.book.watchlist || [],
+      positions: pv.positions.map(p => ({ symbol: p.symbol, shares: p.shares, avg: p.avg_price, last: p.last, stop: p.stop,
+        target: p.target, status: p.status, reason: p.reason || '' })) };
+    await botPost(link.url, '/book', { token: link.token, book, full: c.book, changed: changedOf(c.book) });
+    setLink({ url: link.url, token: link.token, synced: true, sent: c.core.scan_date });
   } catch (err) {
-    if (err.status === 401) try { localStorage.removeItem(BOT_LINK); } catch { /* unlinked in Telegram */ }
+    if (err.status === 409) {                 // another device changed it since: take that one
+      await pullBook(link, true).catch(() => null);
+      setLink({ url: link.url, token: link.token, synced: true, sent: c.core.scan_date });
+    } else if (err.status === 401 && !(link.pending && Date.now() - link.pending < WAIT_DAYS * 86400000)) {
+      setLink(null);                          // unlinked in Telegram (or Start never pressed)
+    }
   }
+}
+
+// The Connect Telegram button: its link carries a one-time code for this browser after the site's own code, so
+// pressing Start in Telegram connects the messages and links this portfolio in one go. arm() on the tap.
+export function connectLink(telegram) {
+  const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+  return { href: telegram.link + (telegram.worker ? nonce : ''),
+    arm: () => { if (telegram.worker) setLink({ url: telegram.worker, token: nonce, pending: Date.now() }); } };
 }
 
 export async function linkBot(code) {
@@ -613,25 +655,41 @@ export async function linkBot(code) {
   const url = c.core.telegram && c.core.telegram.worker;
   if (!url) throw new Error("The site's bot can't answer about portfolios yet.");
   const { token } = await botPost(url, '/pair', { code });
-  localStorage.setItem(BOT_LINK, JSON.stringify({ url, token }));
+  setLink({ url, token });
   await sendBook(c);
 }
 
 export async function unlinkBot() {
   const link = botLink();
-  try { localStorage.removeItem(BOT_LINK); } catch { /* */ }
+  setLink(null);
   if (link) await botPost(link.url, '/unpair', { token: link.token }).catch(() => null);
 }
 
-let syncing = null, again = false;
+// "Bring my portfolio from Telegram": replaces this browser's with the bot's copy. False if the bot has none.
+export async function restoreFromBot() {
+  const link = botLink();
+  if (!link || link.pending) throw new Error('Link this browser to the bot first.');
+  const done = await pullBook(link, true);
+  if (done) setLink({ ...link, synced: true });
+  return done;
+}
 
-// In the background, so the page doesn't wait: after a change (force), or when the site has a newer close.
+export const syncNow = () => context().then(sendBook);
+
+let syncing = null, again = false, checked = false;
+
+// In the background, so the page doesn't wait: after a change (force), when the site has a newer close, and once
+// each time the site opens (a newer copy from another device comes here).
 function syncBot(force) {
   const link = botLink();
   if (!link) return;
   if (syncing) { again = again || force; return; }
-  syncing = context().then(c => (force || c.core.scan_date !== link.sent ? sendBook(c) : null)).catch(() => null)
-    .finally(() => { syncing = null; if (again) { again = false; syncBot(true); } });
+  const first = !checked && link.synced;
+  checked = true;
+  syncing = context().then(async c => {
+    if (first && await pullBook(link)) return;
+    if (force || link.pending || c.core.scan_date !== link.sent) await sendBook(c);
+  }).catch(() => null).finally(() => { syncing = null; if (again) { again = false; syncBot(true); } });
 }
 
 export async function localApi(path, opts = {}) {

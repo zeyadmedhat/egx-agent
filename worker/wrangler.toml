@@ -2,6 +2,13 @@ name = "egx-bot"
 main = "bot.js"
 compatibility_date = "2026-09-01"
 
+# Every 10 minutes: after each close, start the website's scan on GitHub if it hasn't run yet (bot.js, tick).
+[triggers]
+crons = ["*/10 * * * *"]
+
+[vars]
+GITHUB_REPO = "zeyadmedhat/egx-agent"
+
 [[durable_objects.bindings]]
 name = "BOT"
 class_name = "Bot"

@@ -2,7 +2,7 @@
 // bottom bar, and page routing.
 import {
   html, render, useState, useEffect, useStore, useRoute, pollStatus, loadStocks, setTheme, fmt, cls, go, stockHref,
-  loadMe, api, toast, setStore, setLang, STATIC,
+  loadMe, api, toast, setStore, setLang, refreshAll, STATIC,
 } from './lib.js';
 import { t } from './i18n.js';
 import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm, Change, Disclaimer } from './ui.js';
@@ -22,6 +22,27 @@ import { PortfolioPage } from './pages/portfolio.js';
 import { PaperPage } from './pages/paper.js';
 import { BacktestPage } from './pages/backtest.js';
 import { SettingsPage } from './pages/settings.js';
+
+// Opened inside Telegram (the bot's "Open the app" button, a mini app): Telegram puts who opened it after the # and the
+// bot's page after ?go=. Both are read once and the address goes back to the page's own #/route.
+const TELEGRAM = (() => {
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const go = new URLSearchParams(location.search).get('go');
+  const initData = hash.get('tgWebAppData');
+  if (initData || go) {
+    history.replaceState(null, '', location.pathname + '#/' + (go && /^[\w/.-]+$/.test(go) ? go : 'today'));
+  }
+  if (!initData) return null;
+  const post = (type, data = {}) => {       // Telegram's own messages to its app (core.telegram.org/api/web-events)
+    try {
+      if (window.TelegramWebviewProxy) window.TelegramWebviewProxy.postEvent(type, JSON.stringify(data));
+      else window.parent.postMessage(JSON.stringify({ eventType: type, eventData: data }), '*');
+    } catch { /* not in Telegram after all */ }
+  };
+  post('web_app_ready');
+  post('web_app_expand');
+  return { initData };
+})();
 
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
 const PAGES = Object.fromEntries(Object.entries({
@@ -237,7 +258,8 @@ function Root() {
   const [bootError, setBootError] = useState('');
   useEffect(() => {
     const start = STATIC
-      ? loadMe().then(() => import('./local/site.js')).then(site => site.resume())
+      ? loadMe().then(() => import('./local/site.js'))
+        .then(async site => (await site.resume()) || (TELEGRAM ? site.telegramUnlock(TELEGRAM.initData) : false))
         .then(ok => setStore({ auth: ok ? null : 'unlock' }))
         .catch(e => { setBootError(e.message); setStore({ auth: 'unlock' }); })
       : loadMe().catch(() => setStore({ offline: true }));
@@ -255,3 +277,12 @@ function Root() {
 }
 
 render(html`<${Root} />`, document.getElementById('app'));
+
+// The website keeps an offline copy of itself (sw.js), so it opens at once, even with weak or no signal.
+if (STATIC && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => null);
+
+// Your portfolio came from the Telegram bot: changed on another device, or brought to this one (local/api.js).
+addEventListener('egx-book', () => {
+  toast(t('Your portfolio was updated from your other device.'));
+  refreshAll();
+});

@@ -244,7 +244,8 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
     res = static_site.build(conn, cfg, tmp_path / "site", PASSWORD, "me/egx")
     out = tmp_path / "site"
     info = json.loads((out / "data" / "site.json").read_text())
-    assert set(info) == {"v", "salt", "iter", "stamp", "built"} and info["iter"] >= 600_000
+    assert set(info) == {"v", "salt", "iter", "stamp", "built", "worker"} and info["iter"] >= 600_000
+    assert info["worker"] is None                     # the bot's address, only when it has one
     assert res["stocks"] == 2 and (out / "data" / "stock" / "AAA.bin").exists()
 
     page = (out / "index.html").read_text()
@@ -324,7 +325,7 @@ class FakeBot:
         assert method == "getUpdates" and "offset" not in params
         return list(self.updates)
 
-    def send(self, token, chat, text):
+    def send(self, token, chat, text, buttons=None):
         from app import alerts
         if chat in self.blocked:
             raise alerts.TelegramError("Telegram: Forbidden: bot was blocked by the user", 403)
@@ -338,7 +339,7 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     strategy = tmp_path / "strategy.yaml"
     static_site.export_strategy(dict(config.DEFAULTS), strategy)
     monkeypatch.setattr(config, "CONFIG_PATH", strategy)
-    monkeypatch.setattr(scan, "scan_is_stale", lambda conn: False)          # no downloads in tests
+    monkeypatch.setattr(scan, "scan_is_stale", lambda conn, *_: False)          # no downloads in tests
     scans = []
     monkeypatch.setattr(scan, "run_scan", lambda conn, cfg, progress=None, update_data=True: scans.append(update_data)
                         or {"date": "x", "buys": 1, "watches": 0})
@@ -416,7 +417,7 @@ def test_scheduled_runs_publish_only_when_something_changed(tmp_path, monkeypatc
     strategy = tmp_path / "strategy.yaml"
     static_site.export_strategy(dict(config.DEFAULTS), strategy)
     monkeypatch.setattr(config, "CONFIG_PATH", strategy)
-    monkeypatch.setattr(scan, "scan_is_stale", lambda conn: False)
+    monkeypatch.setattr(scan, "scan_is_stale", lambda conn, *_: False)
     monkeypatch.setattr(scan, "run_scan", lambda *a, **k: {"date": "x", "buys": 1, "watches": 0})
     monkeypatch.setattr(jobs, "train_job", lambda conn, say: None)
     first = site_daily.run(src, tmp_path / "site", PASSWORD, "me/egx")

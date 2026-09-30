@@ -5,7 +5,7 @@ import {
   Kpi, Callout, PageHead, SectionHead, PageLoading, DataTable, Empty, MarketSwitch, Seg, Term, SessionBadge,
   Fold,
 } from '../ui.js';
-import { t, tp } from '../i18n.js';
+import { t, tp, tn } from '../i18n.js';
 import { BreadthChart } from '../charts.js';
 
 const TONE = { ok: 'ok', warn: 'warn', bad: 'bad' };
@@ -34,7 +34,7 @@ export function MarketPage() {
   const v = data.verdict;
   const change = v.change_week;
   const columns = [
-    { key: 'sector', label: 'Sector', render: r => html`<b>${r.sector}</b>` },
+    { key: 'sector', label: 'Sector', render: r => html`<b>${tn(r.sector)}</b>` },
     { key: 'stocks', label: 'Stocks', align: 'r' },
     { key: 'above50', label: 'Above 50-day avg', width: '190px', render: r => html`<${Gauge} v=${r.above50} />` },
     { key: 'r5', label: '1 week', align: 'r', render: r => html`<${Heat} v=${r.r5} />` },
