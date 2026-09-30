@@ -249,7 +249,7 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
 
     page = (out / "index.html").read_text()
     assert 'data-mode="static"' in page and "Content-Security-Policy" in page and "noindex" in page
-    assert '"./static/vendor/preact.module.js"' in page and '"/static/' not in page
+    assert f'"./static/{static_site.code_version()}/vendor/preact.module.js"' in page and '"/static/' not in page
     assert (out / "robots.txt").read_text().startswith("User-agent: *\nDisallow: /")
 
     # Every published byte: no token, no chat, no portfolio; the data only opens with the password.
@@ -657,3 +657,9 @@ def test_the_page_may_send_only_to_the_bots_worker():
     page = static_site.index_html("https://egx-bot.x.workers.dev/")
     assert "connect-src 'self' https://egx-bot.x.workers.dev;" in page
     assert "connect-src 'self';" in static_site.index_html("http://evil.example")      # https only
+
+
+def test_each_code_version_is_published_under_its_own_address(tmp_path):
+    ver = static_site.code_version()
+    page = static_site.index_html(None, ver)
+    assert f'"./static/{ver}/js/main.js"' in page and f'"./static/{ver}/vendor/preact.module.js"' in page

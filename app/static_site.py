@@ -164,11 +164,21 @@ def _origin(url: str | None) -> str:
     return m.group(0) if m else ""
 
 
-def index_html(worker: str | None = None) -> str:
+def code_version() -> str:
+    """A fingerprint of the page's code: its files are published under static/<this>/, so a browser can't keep using
+    an old copy after an update (it would otherwise, for up to hours on some browsers and phones)."""
+    h = hashlib.sha256()
+    for f in sorted(STATIC.rglob("*")):
+        if f.is_file() and f.name != ".DS_Store":
+            h.update(str(f.relative_to(STATIC)).encode() + f.read_bytes())
+    return h.hexdigest()[:10]
+
+
+def index_html(worker: str | None = None, version: str = "") -> str:
     """The Mac's index.html with relative paths (the site lives under /<repository>/), marked as the static site.
     `worker`: the Telegram bot's Worker, the one other address the page may send to (your portfolio, if you link it)."""
     page = (STATIC / "index.html").read_text(encoding="utf-8")
-    page = page.replace('"/static/', '"./static/').replace('<html lang="en" data-theme="dark">',
+    page = page.replace('"/static/', f'"./static/{version + "/" if version else ""}').replace('<html lang="en" data-theme="dark">',
                                                            '<html lang="en" data-theme="dark" data-mode="static">')
     extra = ('  <meta name="robots" content="noindex, nofollow">\n'
              '  <meta name="referrer" content="no-referrer">\n'
@@ -194,9 +204,11 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
     out = Path(out)
     if out.exists():
         shutil.rmtree(out)
-    shutil.copytree(STATIC, out / "static", ignore=shutil.ignore_patterns("index.html", ".DS_Store"))
-    (out / "index.html").write_text(index_html((telegram or {}).get("worker")), encoding="utf-8")
-    (out / "manifest.webmanifest").write_text(json.dumps(MANIFEST), encoding="utf-8")
+    ver = code_version()
+    shutil.copytree(STATIC, out / "static" / ver, ignore=shutil.ignore_patterns("index.html", ".DS_Store"))
+    (out / "index.html").write_text(index_html((telegram or {}).get("worker"), ver), encoding="utf-8")
+    manifest = {**MANIFEST, "icons": [{**MANIFEST["icons"][0], "src": f"static/{ver}/favicon.svg"}]}
+    (out / "manifest.webmanifest").write_text(json.dumps(manifest), encoding="utf-8")
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
 
