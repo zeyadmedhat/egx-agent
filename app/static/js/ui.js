@@ -126,6 +126,15 @@ export function ScoreRing({ score }) {
   </div>`;
 }
 
+// The rating (views.rating): where the model's 2-week chance puts a stock among the day's liquid stocks, 1–100.
+// 91+ is its top 10%, the group its tests are about.
+export function Rating({ v, big }) {
+  if (v == null) return html`<span class="faint" title=${t('No rating: the model rates only stocks with enough daily trading.')}>–</span>`;
+  const band = v >= 91 ? 'top' : v >= 71 ? 'good' : v >= 51 ? 'mid' : 'low';
+  return html`<span class=${cls('rating', band, big && 'big')}
+    title=${t('Rating {v}/100: where the model puts it among the liquid stocks today (100 = its first).', { v })}>${v}</span>`;
+}
+
 export function ScoreBar({ score }) {
   const v = Math.max(0, Math.min(100, score || 0));
   return html`<div class="score-cell"><b>${Math.round(v)}</b><div class=${cls('bar', v >= 70 ? 'up' : '')} style="flex:1">

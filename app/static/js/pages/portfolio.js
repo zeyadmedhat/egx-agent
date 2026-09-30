@@ -2,7 +2,7 @@
 // transactions), log a buy, closed trades. Health: sectors, money at risk, how your stocks move together, your
 // account against EGX30. Journal: how your closed trades did, including after inflation.
 import {
-  html, useApi, useState, useEffect, useStore, api, toast, refreshAll, fmt, tone, cls, go, todayISO,
+  html, useApi, useState, useEffect, useStore, api, toast, refreshAll, fmt, tone, cls, go, todayISO, STATIC,
 } from '../lib.js';
 import {
   Icon, StatusChip, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, DayBar, Field,
@@ -10,7 +10,7 @@ import {
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { LineChart } from '../charts.js';
-import { equityCurve, correlations, sectorMix, stopRisk, journal } from '../insights.js';
+import { equityCurve, correlations, sectorMix, stopRisk, journal, inMoney, checkup } from '../insights.js';
 
 const TABS = [{ value: 'positions', label: 'Positions' }, { value: 'health', label: 'Health' },
   { value: 'journal', label: 'Journal' }];
@@ -92,6 +92,9 @@ export function PortfolioPage({ route }) {
     <section class="section" id="buy-form" style="scroll-margin-top:80px">
       <${SectionHead} title="Log a buy" hint="Record a buy you placed at your broker." />
       <${BuyForm} data=${data} query=${route.query} />
+      ${STATIC && html`<${Fold} title="Add from a screenshot"
+        hint="A picture of your broker's portfolio screen (Thndr or another): the holdings fill in by themselves.">
+        <${ImportPanel} data=${data} /><//>`}
     </section>
 
     <section class="section">
@@ -106,24 +109,45 @@ export function PortfolioPage({ route }) {
 const togetherWords = r => (r >= 0.7 ? 'move closely together' : r >= 0.4 ? 'often move together' : r >= 0.1
   ? 'move a little together' : 'move independently');
 
+const UNITS = [{ value: 'egp', label: 'In pounds' }, { value: 'usd', label: 'In dollars' }, { value: 'gold', label: 'In gold' }];
+const UNIT_HINT = {
+  egp: 'Its value after every session since your first buy (cash plus your shares at each close), next to EGX30 and a bank deposit as if you had put the same money in them.',
+  usd: "The same, in dollars at each day's rate: a rise in pounds can be a fall in dollars when the pound weakens.",
+  gold: "The same, in grams of 24-carat gold at each day's price: how many grams your account would buy.",
+};
+
 function HealthTab({ data }) {
   const { data: h, error } = useApi('/portfolio/history');
+  const [unit, setUnit] = useState('egp');
   const s = data.summary;
   const mix = sectorMix(data.positions, s.cash);
   const risk = stopRisk(data.positions, s.equity);
   const held = data.positions.map(p => p.symbol);
   const corr = h ? correlations(h.series, held) : null;
-  const curve = h ? equityCurve(h) : null;
+  const base = h ? equityCurve(h) : null;
+  const units = UNITS.filter(u => u.value === 'egp' || (base && inMoney(base, h.money, u.value)));
+  const curve = base && (inMoney(base, h.money, unit) || inMoney(base, h.money, 'egp'));
   const top = Math.max(...mix.map(m => m.pct), 0.01);
+  const issues = data.limits ? checkup({ positions: data.positions, summary: s, limits: data.limits, mix, corr }) : [];
+  const series = key => curve.time.map((d, i) => ({ time: d, value: curve[key][i] }));
   const lines = curve && [
-    { title: 'Your account', data: curve.time.map((d, i) => ({ time: d, value: curve.value[i] })), area: true },
-    { title: 'EGX30, same start', color: '--text-3', dashed: true, width: 1.5,
-      data: curve.time.map((d, i) => ({ time: d, value: curve.index[i] })) },
+    { title: t('Your account'), data: series('value'), area: true },
+    { title: t('EGX30, same start'), color: '--text-3', dashed: true, width: 1.5, data: series('index') },
+    ...(curve.deposit ? [{ title: t('Bank deposit, same start'), color: '--info', dashed: true, width: 1.5, data: series('deposit') }] : []),
   ];
   return html`
+    ${data.positions.length > 0 && html`<section class="section">
+      <${SectionHead} title="Checkup" hint="Your portfolio against your own limits in Settings, and what to do about anything out of line." />
+      <div class="card">${issues.length ? html`<ul class="checkup">${issues.map(x => html`<li class=${x.level}>
+          <${Icon} name=${x.level === 'bad' ? 'xCircle' : 'alert'} />
+          <div><b>${t(x.title[0], { ...x.title[1], sector: x.title[1].sector && tn(x.title[1].sector) })}</b>
+            <span>${t(x.todo[0], { ...x.todo[1], sector: x.todo[1].sector && tn(x.todo[1].sector) })}</span></div></li>`)}</ul>`
+        : html`<div class="checkup-ok"><${Icon} name="checkCircle" /><span>${t('Nothing to fix: no stock or sector is too big, and your risk is inside your limits.')}</span></div>`}
+      </div>
+    </section>`}
     <section class="section">
-      <${SectionHead} title="Your account against EGX30"
-        hint="Its value after every session since your first buy (cash plus your shares at each close), next to EGX30 as if you had put the same money in it." />
+      <${SectionHead} title="Your account against EGX30" hint=${UNIT_HINT[unit]}>
+        ${units.length > 1 && html`<${Seg} options=${units} value=${unit} onChange=${setUnit} />`}<//>
       ${!h ? html`<${PageLoading} error=${error} />` : !curve ? html`<div class="card"><${Empty} icon="chart"
         title="No buys yet" text="Once you log a buy, your account's value is drawn here after every session." /></div>` : html`
         <div class="kpis">
@@ -131,10 +155,14 @@ function HealthTab({ data }) {
             sub=${`since ${fmt.date(curve.time[0])}`} />
           <${Kpi} label="EGX30 over the same time" value=${fmt.pct(curve.index_ret, 1)} valueClass=${tone(curve.index_ret)}
             sub=${curve.ret >= curve.index_ret ? 'you did better' : 'EGX30 did better'} />
+          ${curve.deposit_ret != null && html`<${Kpi} label="A bank deposit" value=${fmt.pct(curve.deposit_ret, 1)}
+            valueClass=${tone(curve.deposit_ret)} sub=${curve.ret >= curve.deposit_ret ? 'you did better' : 'the deposit did better'} />`}
           <${Kpi} label="Worst drop from a high" value=${fmt.pct(curve.max_drawdown, 1)}
             valueClass=${curve.max_drawdown < -0.1 ? 'down' : ''} sub="your account's biggest fall" />
         </div>
-        <div class="card flush" style="margin-top:14px"><${LineChart} lines=${lines} height=${300} /></div>`}
+        <div class="card flush" style="margin-top:14px"><${LineChart} key=${unit} lines=${lines} height=${300}
+          format=${unit === 'gold' ? 'grams' : unit === 'usd' ? 'usd' : 'egp'} /></div>
+        ${curve.deposit && html`<p class="faint" style="font-size:12px;margin-top:8px">${t('The bank deposit earns the interbank rate of each day, added daily: close to what a bank certificate paid over the same time.')}</p>`}`}
     </section>
 
     <div class="grid grid-2" style="margin-top:4px;align-items:start">
@@ -494,4 +522,124 @@ function BuyForm({ data, query }) {
       <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="plus" />${t('Save buy')}</button>
     </div>
   </form>`;
+}
+
+// ------------------------------------------------------------------ holdings from a broker screenshot
+// The site's bot reads the picture with Cloudflare's free AI (worker/bot.js read, local/api.js readScreenshot); you
+// check every row here before anything is added, and each row is logged like a buy on the form above.
+const plainName = x => String(x || '').toLowerCase().replace(/[ً-ٰٟـ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي')
+  .replace(/ة/g, 'ه').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+// A smaller JPEG of the picture (the site's page rules allow data: pictures, not blob: ones).
+function shrink(file, most = 1600) {
+  return new Promise((resolve, reject) => {
+    const fail = () => reject(new Error(t("That file isn't a picture this browser can open.")));
+    const reader = new FileReader();
+    reader.onerror = fail;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = fail;
+      img.onload = () => {
+        const k = Math.min(1, most / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL('image/jpeg', 0.88));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function matchStock(stocks, h) {
+  if (h.symbol && stocks.some(s => s.symbol === h.symbol)) return h.symbol;
+  const name = plainName(h.name);
+  if (name.length >= 3) {
+    const hit = stocks.find(s => { const n = plainName(s.name_ar); return n && (n.includes(name) || name.includes(n)); });
+    if (hit) return hit.symbol;
+  }
+  return h.symbol || '';
+}
+
+function ImportPanel({ data }) {
+  const stocks = useStore(s => s.stocks) || [];
+  const [linked, setLinked] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState(null);
+  const [date, setDate] = useState(todayISO());
+  useEffect(() => { import('../local/api.js').then(m => setLinked(m.botStatus() === 'linked')); }, []);
+  if (linked === null) return null;
+  if (!linked) {
+    return html`<p class="muted" style="font-size:13px">${t('Connect Telegram first (Settings → Connect Telegram): the site\'s bot reads the picture with Cloudflare\'s free AI. The picture isn\'t kept.')}
+      ${' '}<a href="#/settings">${t('Settings →')}</a></p>`;
+  }
+  const held = sym => data.positions.find(p => p.symbol === sym);
+  const known = sym => stocks.some(s => s.symbol === sym);
+  const pickFile = async e => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true); setRows(null);
+    try {
+      const m = await import('../local/api.js');
+      const got = await m.readScreenshot(await shrink(file));
+      setRows(got.holdings.map((h, i) => {
+        const symbol = matchStock(stocks, h);
+        return { id: i, symbol, name: h.name || '', shares: String(h.shares || ''), price: String(h.avg_price || h.last || ''),
+          guessed: !h.avg_price, on: known(symbol) && !held(symbol) && !!h.avg_price };
+      }));
+    } catch (err) {
+      toast(t(err.message), 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const edit = (id, k) => e => setRows(rs => rs.map(r => (r.id === id
+    ? { ...r, [k]: k === 'on' ? e.target.checked : k === 'symbol' ? e.target.value.toUpperCase().trim() : e.target.value } : r)));
+  const ok = r => known(r.symbol) && parseInt(r.shares, 10) >= 1 && parseFloat(r.price) > 0;
+  const chosen = (rows || []).filter(r => r.on && ok(r));
+  const add = async () => {
+    setBusy(true);
+    let done = 0;
+    for (const r of chosen) {
+      try {
+        await api('/portfolio/buy', { method: 'POST', body: { symbol: r.symbol, date, price: parseFloat(r.price),
+          shares: parseInt(r.shares, 10), stop: null, notes: t('Added from a screenshot') } });
+        done += 1;
+        setRows(rs => rs.filter(x => x.id !== r.id));
+      } catch (err) {
+        toast(`${r.symbol}: ${err.message}`, 'error', 9000);
+      }
+    }
+    setBusy(false);
+    setRows(rs => (rs && rs.length ? rs : null));          // all added: back to the button
+    if (done) { toast(t('Added {n} to My Portfolio.', { n: done })); refreshAll(); }
+  };
+  return html`<div class="import-panel">
+    <p class="muted" style="font-size:13px">${t('Take a screenshot of the holdings screen in your broker\'s app and pick it here. The bot reads it with Cloudflare\'s free AI (about 15 seconds); the picture isn\'t kept. Check every number before adding: the reader can misread.')}</p>
+    <label class=${cls('btn', busy && 'disabled')} style="margin-top:10px"><${Icon} name="plus" />
+      ${busy && !rows ? t('Reading the picture…') : t('Pick a screenshot')}
+      <input type="file" accept="image/*" hidden disabled=${busy} onChange=${pickFile} /></label>
+    ${rows && (rows.length ? html`
+      <div class="table-wrap" style="margin-top:12px"><table class="table import-table">
+        <thead><tr><th></th><th>${t('Stock')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Avg price')}</th><th></th></tr></thead>
+        <tbody>${rows.map(r => html`<tr key=${r.id}>
+          <td><input type="checkbox" checked=${r.on} disabled=${!ok(r)} onChange=${edit(r.id, 'on')}
+            aria-label=${t('Add {sym}', { sym: r.symbol || r.name })} /></td>
+          <td><input class="input sm" value=${r.symbol} onInput=${edit(r.id, 'symbol')} style="width:90px" />
+            ${r.name && html`<div class="faint" style="font-size:11.5px" dir="auto">${r.name}</div>`}</td>
+          <td class="r"><input class="input sm" type="number" min="1" step="1" value=${r.shares} onInput=${edit(r.id, 'shares')} style="width:90px" /></td>
+          <td class="r"><input class="input sm" type="number" min="0.001" step="0.001" value=${r.price} onInput=${edit(r.id, 'price')} style="width:96px" /></td>
+          <td style="font-size:12px">${!known(r.symbol) ? html`<span class="warn">${t("Not an EGX symbol the agent knows: type it.")}</span>`
+            : held(r.symbol) ? html`<span class="warn">${t('Already in My Portfolio ({n} shares): adding joins it.', { n: fmt.int(held(r.symbol).shares) })}</span>`
+            : r.guessed ? html`<span class="warn">${t('No average price on the picture: this is the last price. Type what you paid.')}</span>`
+            : html`<span class="faint">${t('New position')}</span>`}</td></tr>`)}</tbody></table></div>
+      <div class="row" style="margin-top:12px;gap:12px;flex-wrap:wrap;align-items:end">
+        <${Field} label="Bought on" help="Sets each stop and target from the chart on that day. Change it if you bought earlier.">
+          <input class="input" type="date" value=${date} onInput=${e => setDate(e.target.value)} /><//>
+        <button class="btn primary" disabled=${busy || !chosen.length} onClick=${add}>
+          ${t('Add {n} to My Portfolio', { n: chosen.length })}</button>
+      </div>` : html`<p class="muted" style="margin-top:12px;font-size:13px">${t('No holdings found on that picture. Try a screenshot of the portfolio screen itself.')}</p>`)}
+  </div>`;
 }

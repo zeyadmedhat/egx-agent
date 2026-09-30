@@ -208,7 +208,8 @@ export function LineChart({ lines, height = 320, format = 'egp' }) {
   const theme = useStore(s => s.theme);
   useEffect(() => {
     const t = palette();
-    const f = format === 'pct' ? v => fmt.pct(v, 1) : v => fmt.short(v);
+    const f = format === 'pct' ? v => fmt.pct(v, 1) : format === 'grams' ? v => `${fmt.num(v, v < 100 ? 2 : 0)} g`
+      : format === 'usd' ? v => `$${fmt.short(v)}` : v => fmt.short(v);
     const chart = LWC.createChart(box.current, baseOptions(t, {
       localization: { locale: 'en-US', priceFormatter: f },
       timeScale: { borderColor: t.border, fixLeftEdge: true, fixRightEdge: true },

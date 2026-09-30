@@ -22,6 +22,9 @@ SERIES = {
     "inflation": ("EGIRYY", "ECONOMICS", 25),
     "egx70": ("EGX70EWI", "EGX", 0),
 }
+# Downloaded with them but not the model's: gold in dollars an ounce, for your returns in gold and the zakat nisab.
+EXTRA = {"gold": ("XAUUSD", "FX_IDC", 0)}
+OUNCE_G = 31.1035
 FULL_BARS = 5000     # the first download: all of it (the model learns from 2013 on)
 UPDATE_BARS = 60
 
@@ -39,7 +42,7 @@ def update(conn: sqlite3.Connection, provider: TvProvider | None = None) -> list
     provider = provider or TvProvider()
     have = {r[0] for r in conn.execute("SELECT DISTINCT series FROM macro")}
     failed = []
-    for name, (symbol, exchange, _lag) in SERIES.items():
+    for name, (symbol, exchange, _lag) in {**SERIES, **EXTRA}.items():
         df = provider.fetch(symbol, UPDATE_BARS if name in have else FULL_BARS, exchange=exchange)
         if df is None or df.empty:
             failed.append(name)

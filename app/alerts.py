@@ -322,13 +322,7 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
         lines += ["", f"<b>BUY signals for {views.nice_date(session, True)}</b>" if buys
                   else "<b>No BUY signals</b> at this close."]
     for r in sorted(buys, key=views.signal_order):      # the order money goes in: the model's rank first
-        levels_ = (views.px(r["entry_high"]), views.px(r["stop"]), views.px(r["target"]))
-        if ar:
-            pick = " (اختيار النموذج)" if r.get("source") == "model" else ""
-            lines.append(f"🟢 <b>{_e(r['symbol'])}</b>{pick}: اشترِ حتى {levels_[0]} · الوقف {levels_[1]} · الهدف {levels_[2]}")
-        else:
-            pick = " (model pick)" if r.get("source") == "model" else ""
-            lines.append(f"🟢 <b>{_e(r['symbol'])}</b>{pick}: buy up to {levels_[0]} · stop {levels_[1]} · target {levels_[2]}")
+        lines.append(_buy_line(r, lang))
         extra = [f"{'التقييم' if ar else 'score'} {r['score']:.0f}", _shariah(d.info(r["symbol"]))]
         pr = preds["by_symbol"].get(r["symbol"])
         if pr and pr.get("p10") is not None and preds["base"].get(10):
@@ -363,16 +357,64 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
     return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + ("\n…المزيد على الموقع." if ar else "\n…more on the site.")
 
 
+def _buy_line(r: dict, lang: str = "en") -> str:
+    lv = (views.px(r["entry_high"]), views.px(r["stop"]), views.px(r["target"]))
+    if lang == "ar":
+        pick = " (اختيار النموذج)" if r.get("source") == "model" else ""
+        return f"🟢 <b>{_e(r['symbol'])}</b>{pick}: اشترِ حتى {lv[0]} · الوقف {lv[1]} · الهدف {lv[2]}"
+    pick = " (model pick)" if r.get("source") == "model" else ""
+    return f"🟢 <b>{_e(r['symbol'])}</b>{pick}: buy up to {lv[0]} · stop {lv[1]} · target {lv[2]}"
+
+
 def personal_part(d: views.Data, positions: list[dict], lang: str = "en") -> tuple[list[str], bool]:
     """A linked friend's own positions (views.book_positions) for the evening message: what to do at the next
     session, most urgent first, as the orders list on the site. Also whether there is anything to do."""
     o = views.orders(d, positions) if positions else None
     if not o:
         return [], False
+    items = _order_items(o, positions, lang)
+    lines = ["", "<b>مراكزك</b>" if lang == "ar" else "<b>Your positions</b>"]
+    for kind, title, detail in items:
+        lines += [f"{ICON[kind]} <b>{title}</b>", f"      {_e(detail)}"]
+    if o["holds"]:
+        ar = lang == "ar"
+        lines.append(("تحتفظ بـ: " if ar else "Holding: ") + ("، " if ar else ", ").join(
+            f"{_e(h['symbol'])} ({'الوقف' if ar else 'stop'} {views.px(h['stop'])}، {'اليوم' if ar else 'day'} {h['day']})"
+            if ar else f"{_e(h['symbol'])} (stop {views.px(h['stop'])}, day {h['day']})" for h in o["holds"]))
+    return lines, bool(items)
+
+
+def morning_message(d: views.Data, positions: list[dict], lang: str = "en") -> str | None:
+    """The reminder the Worker sends at 9:30 Cairo, before the session the last close's orders are for: only what
+    to do at the open (a linked friend's own orders, then the BUY signals), or None when there's nothing to do."""
+    scan_date, df = views.current_scan(d.conn)
+    if not scan_date:
+        return None
+    o = views.orders(d, positions) if positions else None
+    items = _order_items(o, positions, lang) if o else []
+    buys = sorted((r for r in views.records(df) if r["action"] == "BUY"), key=views.signal_order)
+    if not items and not buys:
+        return None
     ar = lang == "ar"
-    items = [it for it in o["items"] if it["kind"] != "buy"]     # buys are for everyone, above, without share counts
-    lines = ["", "<b>مراكزك</b>" if ar else "<b>Your positions</b>"]
+    lines = [f"☀️ <b>{'قبل الافتتاح' if ar else 'Before the open'}</b> "
+             f"({'من إغلاق' if ar else 'from the'} {_date(scan_date, lang, True) if ar else views.nice_date(scan_date, True)}"
+             f"{'' if ar else ' close'})"]
+    lines += [f"{ICON[kind]} {title}" for kind, title, _ in items]
+    lines += [_buy_line(r, lang) for r in buys]
+    if buys:
+        lines.append("عدد الأسهم لكل صفقة على الموقع." if ar else "Your share counts are on the site.")
+    lines.append("/morning off يوقف هذا التذكير." if ar else "/morning off stops this reminder.")
+    text = "\n".join(lines)
+    return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + "\n…"
+
+
+def _order_items(o: dict, positions: list[dict], lang: str) -> list[tuple[str, str, str]]:
+    """views.orders' items for your own positions (the BUYs are for everyone, without share counts), each
+    (kind, title, detail) in the friend's language; the English title is HTML-escaped here."""
+    ar = lang == "ar"
+    items = [it for it in o["items"] if it["kind"] != "buy"]
     days = {p["symbol"]: p["day"] for p in positions}
+    out = []
     for it in items:
         sym = _e(it["symbol"])
         if not ar:
@@ -392,12 +434,8 @@ def personal_part(d: views.Data, positions: list[dict], lang: str = "en") -> tup
             detail = f"كان {views.px(it['from'])}. بع إذا هبط السعر إلى {views.px(it['to'])}."
         else:
             title, detail = f"قرّر بشأن {sym}: اليوم {days.get(it['symbol'], '')} بدون تقدم", note_ar(it["detail"])
-        lines += [f"{ICON[it['kind']]} <b>{_e(title) if not ar else title}</b>", f"      {_e(detail)}"]
-    if o["holds"]:
-        lines.append(("تحتفظ بـ: " if ar else "Holding: ") + ("، " if ar else ", ").join(
-            f"{_e(h['symbol'])} ({'الوقف' if ar else 'stop'} {views.px(h['stop'])}، {'اليوم' if ar else 'day'} {h['day']})"
-            if ar else f"{_e(h['symbol'])} (stop {views.px(h['stop'])}, day {h['day']})" for h in o["holds"]))
-    return lines, bool(items)
+        out.append((it["kind"], title if ar else _e(title), detail))
+    return out
 
 
 # ------------------------------------------------------------------ the website: a message to each friend
@@ -435,6 +473,7 @@ UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})\s*$", re.I)
 LIST_RE = re.compile(r"^/(?:list|alerts)(?:@\w+)?\s*$", re.I)
 WEEKLY_RE = re.compile(r"^/weekly(?:@\w+)?\s+(on|off)\s*$", re.I)
 QUIET_RE = re.compile(r"^/quiet(?:@\w+)?(?:\s+(on|off))?\s*$", re.I)
+MORNING_RE = re.compile(r"^/morning(?:@\w+)?(?:\s+(on|off))?\s*$", re.I)
 LANG_RE = re.compile(r"^/lang(?:@\w+)?(?:\s+(\S+))?\s*$", re.I)
 LANG_WORDS = {"ar": "ar", "arabic": "ar", "عربي": "ar", "العربية": "ar", "en": "en", "english": "en", "انجليزي": "en",
               "الإنجليزية": "en"}
@@ -655,6 +694,11 @@ def sync_subscribers(conn: sqlite3.Connection, token: str, code: str, updates: l
             replies.append((cid, "OK: after a close I'll only message you when there's something to do." if subs[cid]["quiet"]
                             else "OK: you'll get every close's message again."))
             commands += 1
+        elif cid in subs and (mo := MORNING_RE.match(text)):
+            subs[cid]["morning"] = (mo.group(1) or "on").lower() == "on"
+            replies.append((cid, "OK: I'll remind you at 9:30 on days with something to do at the open."
+                            if subs[cid]["morning"] else "OK: no morning reminder. /morning on to have it again."))
+            commands += 1
         elif cid in subs and (lg := LANG_RE.match(text)):
             now = subs[cid].get("lang") or told or "en"
             subs[cid]["lang"] = LANG_WORDS.get((lg.group(1) or "").lower()) or ("en" if now == "ar" else "ar")
@@ -705,13 +749,16 @@ def _r(v, digits=3):
 
 
 def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
-    """What the bot answers /stock, /top and /buys from: each stock's last close, today's signal, the prediction
-    model's chances and the chart's stop, target and nearest support and resistance. Short keys: it's sent every run."""
+    """What the bot answers /stock, /top, /buys and /why from: each stock's last close, today's signal, the prediction
+    model's chances and rating, the chart's stop, target and nearest support and resistance, and the BUY rule's checks
+    (k: liquid, uptrend, breakout, volume, ADX as 1/0, with the 20-day high, volume ratio and ADX behind them).
+    Short keys: it's sent every run."""
     d = views.Data(conn, cfg, views.Cache())
     scan_date, df = views.current_scan(conn)
     sig = {r["symbol"]: r for r in views.records(df)}
     pred = predict.latest(conn)
     pred = {} if pred.empty else views.clean(pred.to_dict("index"))
+    preds = views.predictions(d)
     names = dict(conn.execute("SELECT symbol, name_ar FROM stocks").fetchall())
     stocks = {}
     for sym, last in d.last_two().items():
@@ -724,10 +771,21 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
         for hz in (10, 20):
             if p.get(f"p{hz}") is not None:
                 s.update({f"p{hz}": _r(p[f"p{hz}"]), f"r{hz}": p.get(f"rank{hz}"), f"x{hz}": _r(p.get(f"exp{hz}"), 4)})
+        g = (preds["by_symbol"].get(sym) or {}).get("rating")
+        if g is not None:
+            s["g"] = g
+        ind = d.indicators(sym)
         try:
-            plan = levels.plan_at(d.indicators(sym), cfg)
+            plan = levels.plan_at(ind, cfg)
         except Exception:
             plan = None
+        try:
+            k = views.rule_checks(ind, cfg) if len(ind) >= 30 else None
+        except Exception:  # one odd price history must not stop the bot's data for every stock
+            k = None
+        if k:
+            s.update(k="".join("1" if k[x] else "0" for x in ("liquid", "trend", "breakout", "volume", "adx")),
+                     h20=_r(k["high20"]), vr=_r(k["vol_ratio"], 2), adx=_r(k["adx14"], 1))
         if plan:
             s.update(cs=_r(plan["stop"]), ct=_r(plan["target"]),
                      sup=_r(plan["supports"][0]["price"]) if plan["supports"] else None,
@@ -735,7 +793,9 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
         stocks[sym] = s
     # final: False while the scan is one taken during the session (the Worker then still asks for the one after it)
     return {"scan": scan_date, "final": scan.scan_is_final(conn), "pred": db.get_meta(conn, "prediction_date"),
-            "stocks": stocks}
+            "stocks": stocks, "bands": [[b["from"], b["to"], _r(b["hit"], 4), _r(b["ret"], 4)] for b in preds.get("bands") or []],
+            "base10": _r((preds.get("base") or {}).get("10"), 4), "rated": preds.get("count") or 0,
+            "min_value": cfg["min_avg_value_egp"]}
 
 
 def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None, extra: dict | None = None) -> dict:
@@ -751,7 +811,8 @@ def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None, e
     extra = dict(extra or {})
     info = {**bot_info(conn, cfg or config.DEFAULTS), **({"site": extra.pop("site")} if extra.get("site") else {})}
     return {"fp": _fingerprint(code), "seen": int(db.get_meta(conn, "site_update_seen") or 0), "stocks": stocks,
-            "subs": {c: {"weekly": s.get("weekly", True), **{k: s[k] for k in ("lang", "quiet") if s.get(k)}}
+            "subs": {c: {"weekly": s.get("weekly", True), **{k: s[k] for k in ("lang", "quiet") if s.get(k)},
+                         **({"morning": False} if s.get("morning") is False else {})}
                      for c, s in _subscribers(conn).items()},
             "alerts": alerts, "info": info, **{k: v for k, v in extra.items() if k != "site"}}
 

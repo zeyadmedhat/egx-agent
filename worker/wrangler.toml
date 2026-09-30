@@ -6,6 +6,10 @@ compatibility_date = "2026-09-01"
 [triggers]
 crons = ["*/10 * * * *"]
 
+# The website's "Add from a screenshot": Cloudflare's free AI reads a broker screenshot (bot.js, read).
+[ai]
+binding = "AI"
+
 [vars]
 GITHUB_REPO = "zeyadmedhat/egx-agent"
 

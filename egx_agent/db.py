@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     PRIMARY KEY (date, symbol, horizon)
 );
 CREATE TABLE IF NOT EXISTS macro (
-    series TEXT NOT NULL,           -- usdegp | interbank | inflation | egx70 (see data/macro.py)
+    series TEXT NOT NULL,           -- usdegp | interbank | inflation | egx70 | gold (see data/macro.py)
     date   TEXT NOT NULL,           -- YYYY-MM-DD, as the source dates it
     value  REAL NOT NULL,
     PRIMARY KEY (series, date)

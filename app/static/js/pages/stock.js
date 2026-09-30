@@ -2,7 +2,7 @@
 import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, Chance, WatchStar,
-  Cautions, NewsList, Why, LiveChart, LiveQuote, LIVE_NOTE, Term, More, Change, StockAvatar, Fold,
+  Cautions, NewsList, Why, LiveChart, LiveQuote, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating,
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
@@ -64,6 +64,7 @@ export function StockPage({ route }) {
     ${!data.has_data ? html`<div style="margin-top:14px"><${Callout} tone="warn"><b>${t('No price data.')}</b> ${data.message}<//></div>`
       : html`
       <${Verdict} data=${data} />
+      <${RatingCard} p=${data.prediction} />
       <div class="kpis" style="margin-top:14px">
         <${Kpi} compact label="Traded per day (20d avg)" value=${`${fmt.short(st.value_avg20)} EGP`} />
         <${Kpi} compact label=${html`<${Term} k="rsi">RSI (14)<//>`} value=${fmt.num(st.rsi14, 0)} sub=${st.rsi14 > 70 ? 'overbought' : st.rsi14 < 30 ? 'oversold' : 'neutral'} />
@@ -370,6 +371,26 @@ const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower
   + 'equity: yearly profit on the owners\' money. Debt / equity: borrowing against the owners\' money; over 1 is a lot for '
   + 'most companies except banks. The agent\'s signals don\'t use these: they are here to know the company.';
 
+// One number for the stock, 1–100: the model's rank among the day's liquid stocks, what stocks rated like it did in
+// its tests, and what pushed it up or down (views.rating, predict.explain).
+function RatingCard({ p }) {
+  if (!p || p.rating == null) {
+    return html`<div class="card rating-card"><${Rating} v=${null} big /><p class="muted" style="font-size:13px">
+      ${t('No rating: the model rates only stocks with enough daily trading.')}</p></div>`;
+  }
+  const b = (p.bands || []).find(x => p.rating >= x.from && p.rating <= x.to);
+  const base = p.base && p.base[10];
+  return html`<div class="card rating-card"><${Rating} v=${p.rating} big />
+    <div class="rating-body">
+      <div class="rating-title">${t('Rating {v}/100', { v: p.rating })}</div>
+      <p class="muted">${t('Where the prediction model puts it among the {n} liquid stocks it rates today (100 = its first).', { n: fmt.int(p.count) })}
+        ${b && b.hit != null ? ' ' + t('In its tests, stocks rated {lo}–{hi} reached the target before the stop {hit} of the time (the average stock {base}), {ret} a trade after fees.', {
+          lo: b.from, hi: b.to, hit: fmt.pct(b.hit, 0, false), base: fmt.pct(base, 0, false), ret: fmt.pct(b.ret, 1) }) : ''}</p>
+      ${p.why10 && p.why10.length > 0 && html`<${Why} items=${p.why10} />`}
+      <a class="linkish" style="font-size:12.5px" href="#/predict">${t('How reliable is it?')}</a>
+    </div></div>`;
+}
+
 function PredictionPanel({ p }) {
   return html`<div class="card"><div class="card-title"><${Icon} name="target" size=${15} />${t('Prediction model')}
     <span class="right faint">${fmt.date(p.date)} close</span></div>
@@ -384,8 +405,6 @@ function PredictionPanel({ p }) {
     </div>
     ${p.top_n && html`<p class="faint" style="font-size:12px;margin-top:10px">It gives a chance only for its top${' '}
       ${fmt.int(p.top_n)} stocks each day (its best 10%): its test results are about those.</p>`}
-    ${p.why10 && p.why10.length > 0 && html`<${More} label="Why it ranks it here">
-      <div class="faint" style="font-size:12px;margin-bottom:6px">Green pushed it up, red down (2 weeks).</div><${Why} items=${p.why10} /><//>`}
     <a class="btn sm block" style="margin-top:14px" href="#/predict">${t('How reliable is it?')}</a></div>`;
 }
 

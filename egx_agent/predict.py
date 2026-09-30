@@ -585,7 +585,9 @@ def age_days(meta: dict | None, today: date | None = None) -> int | None:
 
 def egypt_data_ready(conn: sqlite3.Connection) -> bool:
     """Every Egypt series has been downloaded (the scan does it; so does training when it's missing)."""
-    return conn.execute("SELECT COUNT(DISTINCT series) FROM macro").fetchone()[0] >= len(macro.SERIES)
+    names = list(macro.SERIES)
+    return conn.execute(f"SELECT COUNT(DISTINCT series) FROM macro WHERE series IN ({','.join('?' * len(names))})",
+                        names).fetchone()[0] >= len(names)
 
 
 def events_data_ready(conn: sqlite3.Connection) -> bool:

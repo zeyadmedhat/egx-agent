@@ -137,6 +137,23 @@ def catch_up(conn, cfg: dict) -> dict:
     return out
 
 
+def morning_texts(conn, cfg: dict, mine: dict[str, list], data_date: str) -> dict:
+    """Each connected friend's reminder before the next session: their own orders (if their portfolio is linked) and
+    the BUY signals. Friends with nothing to do that morning get none."""
+    d = views.Data(conn, cfg, views.Cache())
+    texts = {}
+    for cid, s in alerts._subscribers(conn).items():
+        if s.get("morning", True):
+            try:
+                text = alerts.morning_message(d, mine.get(cid, []), s.get("lang") or "en")
+            except Exception:  # one odd record must not stop everyone's reminder
+                traceback.print_exc()
+                text = None
+            if text:
+                texts[cid] = text
+    return {"day": views.sessions_after(data_date, 1), "texts": texts}
+
+
 def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", site_url: str = "",
         force_scan: bool = False, always_publish: bool = True, owner: str = "") -> dict:
     cfg = config.load_config()
@@ -296,6 +313,8 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             extra = {"site": site_url, "mine": {cid: {"date": data_date, "positions": [
                         {k: p.get(k) for k in ("symbol", "last", "stop", "target", "status", "reason")} for p in ps]}
                         for cid, ps in mine.items()},
+                     # the Worker sends each of these at 9:30 Cairo before that session (/morning off stops it)
+                     "morning": morning_texts(conn, cfg, mine, data_date) if data_date and final else None,
                      # the mini app: Telegram vouches for a connected friend, so they needn't type the password there
                      "sitekey": {"salt": base64.b64encode(static_site.salt_for(site_id)).decode(),
                                  "iter": static_site.ITERATIONS, "key": base64.b64encode(key).decode()}}

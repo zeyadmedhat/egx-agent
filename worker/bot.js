@@ -10,6 +10,8 @@ const UNWATCH_RE = /^\/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})\s*$/i
 const LIST_RE = /^\/(?:list|alerts)(?:@\w+)?\s*$/i
 const WEEKLY_RE = /^\/weekly(?:@\w+)?\s+(on|off)\s*$/i
 const QUIET_RE = /^\/quiet(?:@\w+)?(?:\s+(on|off))?\s*$/i
+const MORNING_RE = /^\/morning(?:@\w+)?(?:\s+(on|off))?\s*$/i
+const WHY_RE = /^\/why(?:@\w+)?\s+(.+)$/i
 const LANG_RE = /^\/lang(?:@\w+)?(?:\s+(\S+))?\s*$/i
 const START_RE = /^\/start\s+([A-Za-z0-9_-]{8,64})\s*$/
 const STOP_RE = /^\/stop(@\w+)?\s*$/
@@ -42,7 +44,8 @@ const EN = {
   stopped: "Stopped. To start again, open the website → Settings → Connect Telegram.",
   help: "<b>Ask about any stock</b>: send its symbol (COMI) or part of its Arabic name (التجاري).\n" +
     "/top: the 10 best chances to reach the target in 10 days (/top 20: in 20 days)\n" +
-    "/buys: today's BUY signals\n\n" +
+    "/buys: today's BUY signals\n" +
+    "/why COMI: why it is or isn't a BUY, its rating and its levels\n\n" +
     "<b>Alerts for the stocks you follow</b>, checked after each close:\n" +
     "/watch COMI: when COMI gets a BUY signal\n" +
     "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n" +
@@ -56,6 +59,7 @@ const EN = {
     "/link: connect them (once) · /unlink: disconnect\n\n" +
     "<b>Messages</b>\n" +
     "/quiet: only message me on days with a BUY or something to do (/quiet off: every close)\n" +
+    "/morning off: no 9:30 reminder before the open (/morning on to have it again)\n" +
     "/weekly off: no Thursday summary (/weekly on to have it again)\n" +
     "/lang ar: بالعربية\n" +
     "/stop: stop all messages",
@@ -71,7 +75,23 @@ const EN = {
   quietOn: "OK: after a close I'll only message you when there's a BUY signal or something to do with your " +
     "positions. Your alerts and the Thursday summary still come. /quiet off for every close.",
   quietOff: "OK: you'll get every close's message again.",
+  morningOn: "OK: on session days I'll remind you at 9:30 what to do at the open, when there's something to do.",
+  morningOff: "OK: no morning reminder. /morning on to have it again.",
   langSet: "OK: I'll answer in English. /lang ar for Arabic.",
+  rating: (g, n) => `<b>Rating ${g}/100</b>: where the model's 2-week chance puts it among the ${n} liquid stocks it ` +
+    "rates today (100 = its first)",
+  band: (lo, hi, hit, base, ret) => `In its tests, stocks rated ${lo}–${hi} reached the target before the stop ${hit} ` +
+    `of the time${base ? ` (the average stock ${base})` : ""}${ret ? `, ${ret} a trade after fees` : ""}.`,
+  noRating: "No rating: the model rates only stocks with enough daily trading.",
+  checks: "The BUY rule's checks:",
+  notBuy: "Not a BUY today. The BUY rule's checks:",
+  check: [m => `Liquid: at least ${m}M EGP traded a day, a year of history`,
+          () => "Uptrend: above its 20- and 50-day averages",
+          h => `Breakout: a close above its 20-day high (${h})`,
+          v => `Volume at least 1.5× normal (last session ${v}×)`,
+          a => `Trend strength ADX above 20 (now ${a})`],
+  whyFoot: "Rules and a model, not advice.",
+  bWhy: "❓ Why",
   close: (c, ch, d) => `Close ${c}${ch} on ${d}`,
   buy: (e, s, t) => `🟢 <b>BUY</b> up to ${e} · stop ${s} · target ${t}`,
   signal: (a, e, s, t) => `Signal: ${a}${e ? ` (entry up to ${e} · stop ${s} · target ${t})` : ""}`,
@@ -136,7 +156,8 @@ const AR = {
   stopped: "تم الإيقاف. للبدء من جديد افتح الموقع ← الإعدادات ← ربط تيليجرام.",
   help: "<b>اسأل عن أي سهم</b>: أرسل رمزه (COMI) أو جزءًا من اسمه (التجاري).\n" +
     "/top: أفضل 10 فرص للوصول إلى الهدف خلال 10 أيام (/top 20: خلال 20 يومًا)\n" +
-    "/buys: إشارات الشراء اليوم\n\n" +
+    "/buys: إشارات الشراء اليوم\n" +
+    "/why COMI: لماذا هو إشارة شراء أو لا، وتقييمه ومستوياته\n\n" +
     "<b>تنبيهات للأسهم التي تتابعها</b>، تُفحص بعد كل إغلاق:\n" +
     "/watch COMI: عندما يحصل COMI على إشارة شراء\n" +
     "/watch COMI 45: عندما يغلق COMI فوق 45 (أو تحته إذا كان 45 أقل من سعر اليوم)\n" +
@@ -149,6 +170,7 @@ const AR = {
     "/link: ربطها (مرة واحدة) · /unlink: فك الربط\n\n" +
     "<b>الرسائل</b>\n" +
     "/quiet: راسلني فقط في الأيام التي فيها إشارة شراء أو شيء أفعله (/quiet off: بعد كل إغلاق)\n" +
+    "/morning off: بدون تذكير 9:30 قبل الافتتاح (/morning on لإعادته)\n" +
     "/weekly off: بدون ملخص الخميس (/weekly on لإعادته)\n" +
     "/lang en: English\n" +
     "/stop: إيقاف كل الرسائل",
@@ -164,6 +186,21 @@ const AR = {
   quietOn: "تم: بعد الإغلاق سأراسلك فقط عندما توجد إشارة شراء أو شيء تفعله في مراكزك. تنبيهاتك وملخص الخميس تصلك كما هي. " +
     "/quiet off لرسالة بعد كل إغلاق.",
   quietOff: "تم: ستصلك رسالة بعد كل إغلاق مرة أخرى.",
+  morningOn: "تم: في أيام الجلسات سأذكّرك الساعة 9:30 بما تفعله عند الافتتاح، إذا كان هناك ما تفعله.",
+  morningOff: "تم: بدون تذكير صباحي. /morning on لإعادته.",
+  rating: (g, n) => `<b>التقييم ${g}/100</b>: ترتيب فرصة النموذج خلال أسبوعين بين ${n} سهمًا سائلًا يقيّمها اليوم (100 = الأول)`,
+  band: (lo, hi, hit, base, ret) => `في اختباراته، الأسهم المقيّمة ${lo}–${hi} وصلت إلى الهدف قبل الوقف في ${hit} من المرات` +
+    `${base ? ` (متوسط الأسهم ${base})` : ""}${ret ? `، و${ret} للصفقة بعد الرسوم` : ""}.`,
+  noRating: "بدون تقييم: يقيّم النموذج الأسهم ذات التداول اليومي الكافي فقط.",
+  checks: "شروط قاعدة الشراء:",
+  notBuy: "ليست إشارة شراء اليوم. شروط قاعدة الشراء:",
+  check: [m => `السيولة: تداول ${m} مليون جنيه يوميًا على الأقل، وسنة من التاريخ`,
+          () => "اتجاه صاعد: فوق متوسطي 20 و50 يومًا",
+          h => `اختراق: إغلاق فوق أعلى سعر في 20 يومًا (${h})`,
+          v => `حجم تداول 1.5 ضعف المعتاد على الأقل (آخر جلسة ${v}×)`,
+          a => `قوة الاتجاه ADX فوق 20 (الآن ${a})`],
+  whyFoot: "قواعد ونموذج، وليست نصيحة.",
+  bWhy: "❓ لماذا",
   langSet: "تم: سأرد بالعربية. /lang en للإنجليزية.",
   close: (c, ch, d) => `الإغلاق ${c}${ch} يوم ${d}`,
   buy: (e, s, t) => `🟢 <b>شراء</b> حتى ${e} · الوقف ${s} · الهدف ${t}`,
@@ -247,7 +284,7 @@ const reply = (text, kb) => ({ text, kb: kb && kb.length ? kb : undefined })
 const cb = (text, data) => ({ text, callback_data: data })
 // Buttons send these; each becomes the command it stands for (the website's run reads it like a typed message).
 const CALLBACKS = { w: s => `/watch ${s}`, l: s => `/watch ${s} levels`, u: s => `/unwatch ${s}`, s: s => `/stock ${s}`,
-                    b: () => "/buys", t: () => "/top", t20: () => "/top 20" }
+                    y: s => `/why ${s}`, b: () => "/buys", t: () => "/top", t20: () => "/top 20" }
 export function callbackText(data) {
   const [k, sym = ""] = String(data || "").split(":")
   if (!Object.hasOwn(CALLBACKS, k)) return null
@@ -281,11 +318,39 @@ function stockCard(state, cid, sym, lang) {
   if (ch.length) lines.push(T.chance + ch.join(" · "))
   if (s.cs != null) lines.push(T.chart(s.sup != null ? px(s.sup) : "–", s.res != null ? px(s.res) : "–", px(s.cs), px(s.ct)))
   lines.push(T.levelsTip(esc(sym)))
-  const kb = [[cb(T.bBuy, `w:${sym}`), cb(T.bLevels, `l:${sym}`)]]
+  const kb = [[cb(T.bBuy, `w:${sym}`), cb(T.bLevels, `l:${sym}`)], [cb(T.bWhy, `y:${sym}`)]]
   if ((state.alerts[cid] || []).some(a => a.symbol === sym)) kb.push([cb(T.bStop, `u:${sym}`)])
   const app = appButton(info, lang, `stock/${sym}`)
   if (app) kb.push([app])
   return reply(lines.join("\n"), kb)
+}
+
+// /why COMI: the agent's own reasons, from the website's data (app/alerts.py bot_info): its rating and what stocks
+// rated like it did in the model's tests, the BUY rule's checks passed or not, and the chart's levels.
+function whyCard(info, sym, lang) {
+  const T = L(lang), s = info.stocks[sym]
+  const lines = [`<b>${esc(sym)}</b> ${esc(s.n)} · ${px(s.c)}${s.ch != null ? ` (${pct(s.ch, true)})` : ""}`]
+  if (s.g != null) {
+    lines.push(T.rating(s.g, info.rated))
+    const b = (info.bands || []).find(([lo, hi]) => s.g >= lo && s.g <= hi)
+    if (b && b[2] != null) {
+      lines.push(T.band(b[0], b[1], pct(b[2]), info.base10 != null ? pct(info.base10) : null,
+                        b[3] != null ? pct(b[3], true) : null))
+    }
+  } else lines.push(T.noRating)
+  lines.push("")
+  if (s.a === "BUY") lines.push(T.buy(px(s.e), px(s.s), px(s.t)))
+  else if (s.a) lines.push(T.signal(esc(s.a), s.e ? px(s.e) : null, s.e ? px(s.s) : null, s.e ? px(s.t) : null))
+  if (s.k) {
+    const vals = [+((info.min_value || 5e6) / 1e6).toFixed(1), null, s.h20 != null ? px(s.h20) : "–",
+                  s.vr != null ? s.vr.toFixed(1) : "–", s.adx != null ? Math.round(s.adx) : "–"]
+    lines.push(s.a === "BUY" ? T.checks : T.notBuy)
+    for (let i = 0; i < 5; i++) lines.push(`${s.k[i] === "1" ? "✅" : "❌"} ${T.check[i](vals[i])}`)
+  }
+  if (s.cs != null) lines.push("", T.chart(s.sup != null ? px(s.sup) : "–", s.res != null ? px(s.res) : "–", px(s.cs), px(s.ct)))
+  lines.push("", `<i>${T.whyFoot}</i>`)
+  const app = appButton(info, lang, `stock/${sym}`)
+  return reply(lines.join("\n"), [[cb(T.bBuy, `w:${sym}`), cb(T.bLevels, `l:${sym}`)], ...(app ? [[app]] : [])])
 }
 
 function top(info, hz, lang) {
@@ -346,6 +411,14 @@ function ask(state, cid, text, lang) {
   if (HELP_RE.test(text)) {
     const app = appButton(info, lang)
     return reply(T.help, [[cb(T.bBuys, "b"), cb(T.bTop, "t")], ...(app ? [[app]] : [])])
+  }
+  m = WHY_RE.exec(text)
+  if (m) {
+    if (!info) return reply(T.noData)
+    const found = search(info, m[1].trim())
+    if (found.length === 1) return whyCard(info, found[0], lang)
+    if (found.length) return reply(T.didYouMean, rows(found.map(sym => cb(sym, `y:${sym}`)), 4))
+    return reply(T.notFound(esc(m[1].trim().slice(0, 40))))
   }
   const command = text.startsWith("/")
   m = command ? ASK_RE.exec(text) : null
@@ -427,7 +500,7 @@ export async function respond(state, update) {
     text = msg.text = `/${pending[cid]} ${text}`
   }
   delete pending[cid]
-  const bare = /^\/(stock|s|watch|unwatch)(?:@\w+)?$/i.exec(text)
+  const bare = /^\/(stock|s|watch|unwatch|why)(?:@\w+)?$/i.exec(text)
   if (bare) {
     pending[cid] = bare[1].toLowerCase()
     return reply(pending[cid] === "watch" ? T.whichWatch : pending[cid] === "unwatch" ? T.whichUnwatch : T.which)
@@ -446,6 +519,11 @@ export async function respond(state, update) {
   if (q) {
     state.subs[cid].quiet = (q[1] || "on").toLowerCase() === "on"
     return reply(state.subs[cid].quiet ? T.quietOn : T.quietOff)
+  }
+  const mo = MORNING_RE.exec(text)
+  if (mo) {
+    state.subs[cid].morning = (mo[1] || "on").toLowerCase() === "on"
+    return reply(state.subs[cid].morning ? T.morningOn : T.morningOff)
   }
   const lg = LANG_RE.exec(text)
   if (lg) {
@@ -513,11 +591,40 @@ export function watchlistText(book, info, lang = "en") {
   }).join("\n") + "\n\n" + T.wlFoot
 }
 
+// ------------------------------------------------------------------ a broker screenshot, read (the website's import)
+// The website's "Add from a screenshot" sends a picture of your broker's portfolio screen; Cloudflare's free AI reads
+// the holdings off it. Only a linked browser can ask (20 a day), and the picture isn't kept.
+const READ_MODEL = "@cf/mistralai/mistral-small-3.1-24b-instruct"
+const MAX_IMAGE = 4_000_000                         // the picture as a data: URL, about 3 MB
+const READS_A_DAY = 20
+const READ_PROMPT = "This is a screenshot of a stock broker app on the Egyptian Exchange (for example Thndr). List " +
+  "every stock holding it shows. Answer with JSON only: {\"holdings\": [{\"symbol\": the ticker as shown or null, " +
+  "\"name\": the company name as shown or null, \"shares\": the number of shares, \"avg_price\": the average buy " +
+  "price or null, \"last\": the current price or null}]}. Plain numbers, without commas or currency. If it shows " +
+  "no holdings, answer {\"holdings\": []}."
+
+// The model's answer, checked: at most 40 rows, each with a share count; anything odd becomes null.
+export function parseHoldings(text) {
+  const m = /\{[\s\S]*\}/.exec(String(text || ""))
+  let got
+  try { got = JSON.parse(m ? m[0] : "") } catch { return [] }
+  const num = v => {
+    const x = typeof v === "string" ? Number(v.replace(/[,\s]|EGP|ج\.?م/gi, "")) : v
+    return typeof x === "number" && Number.isFinite(x) && x > 0 ? x : null
+  }
+  return (Array.isArray(got && got.holdings) ? got.holdings : []).slice(0, 40).map(h => ({
+    symbol: typeof h.symbol === "string" && /^[A-Za-z0-9]{2,12}$/.test(h.symbol.trim()) ? h.symbol.trim().toUpperCase() : null,
+    name: typeof h.name === "string" ? h.name.trim().slice(0, 80) : null,
+    shares: num(h.shares), avg_price: num(h.avg_price), last: num(h.last),
+  })).filter(h => h.shares && (h.symbol || h.name))
+}
+
 // ------------------------------------------------------------------ on-time scans
 // GitHub starts scheduled runs late, or not at all, when it's busy. After each close, every 10 minutes, the bot
 // checks whether that close's scan has reached it; if not, at each of these times (minutes after midnight, Cairo) it
 // asks GitHub to run the scan now. Holidays: the run finds no new prices and only rebuilds the site.
 const SLOTS = [940, 970, 1000, 1060, 1150, 1270]      // 15:40, 16:10, 16:40, 17:40, 19:10, 21:10
+const MORNING = [570, 600]                            // the reminder before the open: 9:30–10:00 Cairo
 const LAST_MINUTE = 1350                              // 22:30
 const SESSION_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu"]
 
@@ -577,16 +684,18 @@ const COMMANDS = {
   en: [["stock", "A stock's price, signal and chances"], ["buys", "Today's BUY signals"],
        ["top", "Best chances to reach the target"], ["portfolio", "Your positions and what to do"],
        ["watchlist", "The stocks you starred"], ["watch", "Alert me about a stock"], ["unwatch", "Stop a stock's alerts"],
-       ["list", "My alerts"], ["quiet", "Only message me when there's something to do"],
+       ["why", "Why a stock is or isn't a BUY"], ["list", "My alerts"],
+       ["quiet", "Only message me when there's something to do"], ["morning", "The 9:30 reminder on or off"],
        ["weekly", "The Thursday summary on or off"], ["lang", "العربية / English"], ["link", "Link your website portfolio"],
        ["unlink", "Unlink it"], ["help", "What I can do"], ["stop", "Stop all messages"]],
   ar: [["stock", "سعر السهم وإشارته وفرصه"], ["buys", "إشارات الشراء اليوم"], ["top", "أفضل فرص الوصول للهدف"],
        ["portfolio", "مراكزك وما تفعله"], ["watchlist", "الأسهم المميزة بنجمة"], ["watch", "نبّهني بخصوص سهم"],
-       ["unwatch", "أوقف تنبيهات سهم"], ["list", "تنبيهاتي"], ["quiet", "راسلني فقط عندما يوجد ما أفعله"],
+       ["unwatch", "أوقف تنبيهات سهم"], ["why", "لماذا السهم إشارة شراء أو لا"], ["list", "تنبيهاتي"],
+       ["quiet", "راسلني فقط عندما يوجد ما أفعله"], ["morning", "تذكير 9:30 تشغيل أو إيقاف"],
        ["weekly", "ملخص الخميس تشغيل أو إيقاف"], ["lang", "English / العربية"], ["link", "اربط محفظتك على الموقع"],
        ["unlink", "فك الربط"], ["help", "ما يمكنني فعله"], ["stop", "أوقف كل الرسائل"]],
 }
-const COMMANDS_VERSION = "2026-09-30"
+const COMMANDS_VERSION = "2026-10-01"
 
 // One Durable Object holds the data, so messages are handled one at a time, in order.
 export class Bot {
@@ -621,8 +730,9 @@ export class Bot {
       return json({})
     }
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
-    if (req.method === "POST" && ["/pair", "/book", "/restore", "/miniapp", "/started", "/unpair"].includes(url.pathname)) {
+    if (req.method === "POST" && ["/pair", "/book", "/restore", "/miniapp", "/started", "/unpair", "/read"].includes(url.pathname)) {
       if (url.pathname === "/book") return this.book(await req.text())
+      if (url.pathname === "/read") return this.read(await req.text())
       const body = await req.json().catch(() => ({}))
       if (url.pathname === "/pair") return this.pair(body)
       if (url.pathname === "/restore") return this.restore(body)
@@ -724,7 +834,7 @@ export class Bot {
 
   async forget(cid) {
     const store = this.ctx.storage, toks = (await store.get("links:" + cid)) || [], mini = await store.get("mini:" + cid)
-    await store.delete(["book:" + cid, "full:" + cid, "links:" + cid, "mini:" + cid,
+    await store.delete(["book:" + cid, "full:" + cid, "links:" + cid, "mini:" + cid, "reads:" + cid,
                         ...toks.map(t => "tok:" + t), ...(mini ? ["tok:" + mini] : [])])
   }
 
@@ -758,6 +868,32 @@ export class Bot {
     }
     await store.put("book:" + cid, { ...b, sent })
     return json({ ok: true })
+  }
+
+  async read(raw) {
+    if (raw.length > MAX_IMAGE) return json({ error: "That picture is too big. Try a plain screenshot." }, 413)
+    let body
+    try { body = JSON.parse(raw) } catch { return json({ error: "Bad request" }, 400) }
+    const cid = await this.owner(body.token), store = this.ctx.storage
+    if (!cid) return json({ error: "Not linked" }, 401)
+    if (!this.env.AI) return json({ error: "The bot can't read pictures yet." }, 503)
+    const image = String(body.image || "")
+    if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(image)) {
+      return json({ error: "Send a PNG or JPEG screenshot." }, 400)
+    }
+    const day = new Date().toISOString().slice(0, 10), used = await store.get("reads:" + cid)
+    const n = used && used.day === day ? used.n : 0
+    if (n >= READS_A_DAY) return json({ error: `That's ${READS_A_DAY} pictures today. Try again tomorrow.` }, 429)
+    await store.put("reads:" + cid, { day, n: n + 1 })
+    let out
+    try {
+      out = await this.env.AI.run(READ_MODEL, { messages: [{ role: "user", content: [{ type: "text", text: READ_PROMPT },
+        { type: "image_url", image_url: { url: image } }] }], max_tokens: 1500, temperature: 0 })
+    } catch {
+      return json({ error: "The picture reader didn't answer. Try again in a minute." }, 502)
+    }
+    const text = out && (out.response ?? (out.choices && out.choices[0] && out.choices[0].message.content))
+    return json({ holdings: parseHoldings(text) })
   }
 
   async restore(body) {
@@ -800,13 +936,34 @@ export class Bot {
     return json({ found: true, id: hit.id, name: hit.name })
   }
 
+  // The reminder before the open (app/site_daily.py morning_texts): once, on the session day it was written for, to
+  // each friend still connected who hasn't sent /morning off since.
+  async morning(now) {
+    const store = this.ctx.storage, base = await store.get("state"), m = base && base.morning
+    if (!m || m.day !== now.day || now.minute < MORNING[0] || now.minute >= MORNING[1]) return 0
+    if ((await store.get("morning_sent")) === m.day) return 0
+    await store.put("morning_sent", m.day)
+    const state = structuredClone(base)
+    for (const u of (await store.get("log")) || []) await respond(state, u)   // what's happened since the run
+    let sent = 0
+    for (const [cid, text] of Object.entries(m.texts || {})) {
+      const s = state.subs[cid]
+      if (!s || s.morning === false) continue
+      const app = appButton(state.info, s.lang, "today")
+      await this.send(cid, reply(text, app ? [[app]] : null))
+      sent += 1
+    }
+    return sent
+  }
+
   async tick(now = new Date()) {
-    const env = this.env, store = this.ctx.storage
-    if (!env.GH_TOKEN || !env.GITHUB_REPO) return json({ ok: false, why: "no GitHub key" })
-    const state = await store.get("state"), due = scanDue(state && state.info, cairo(now))
-    if (!due.key) return json({ ok: true, why: due.why })
+    const env = this.env, store = this.ctx.storage, c = cairo(now)
+    const morning = await this.morning(c)
+    if (!env.GH_TOKEN || !env.GITHUB_REPO) return json({ ok: false, why: "no GitHub key", morning })
+    const state = await store.get("state"), due = scanDue(state && state.info, c)
+    if (!due.key) return json({ ok: true, why: due.why, morning })
     const last = await store.get("dispatch")
-    if (last && last.key === due.key) return json({ ok: true, why: "asked already" })
+    if (last && last.key === due.key) return json({ ok: true, why: "asked already", morning })
     const r = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/site.yml/dispatches`, {
       method: "POST", body: JSON.stringify({ ref: "main", inputs: { force_scan: "false" } }),
       headers: { Authorization: `Bearer ${env.GH_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "egx-bot",
@@ -820,10 +977,11 @@ export default {
   fetch(req, env) {
     return env.BOT.get(env.BOT.idFromName("bot")).fetch(req)
   },
-  // Every 10 minutes (wrangler.toml): only the evening hours can need a scan, so the rest return at once.
+  // Every 10 minutes (wrangler.toml): only the morning (the reminder at 9:30 Cairo, UTC+2 or +3) and the evening
+  // hours (a scan after the close) have anything to do, so the rest return at once.
   scheduled(event, env, ctx) {
     const hour = new Date(event.scheduledTime).getUTCHours()
-    if (hour < 12 || hour > 20 || !env.SYNC_KEY) return
+    if (!env.SYNC_KEY || !((hour >= 6 && hour <= 7) || (hour >= 12 && hour <= 20))) return
     ctx.waitUntil(env.BOT.get(env.BOT.idFromName("bot")).fetch("https://bot/tick",
       { method: "POST", headers: { Authorization: `Bearer ${env.SYNC_KEY}` } }))
   },

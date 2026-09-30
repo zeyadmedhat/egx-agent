@@ -334,14 +334,17 @@ def test_egypt_download_takes_everything_once_then_only_new_values(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     p = MacroProvider()
     assert macro.update(conn, p) == ["inflation"]                          # the old values stay; it's retried
-    assert {(s, e) for s, e, _ in p.calls} == {(v[0], v[1]) for v in macro.SERIES.values()}
+    assert {(s, e) for s, e, _ in p.calls} == {(v[0], v[1]) for v in {**macro.SERIES, **macro.EXTRA}.values()}
     assert {n for _, _, n in p.calls} == {macro.FULL_BARS}
     p.calls.clear()
     macro.update(conn, p)
     assert dict((s, n) for s, _, n in p.calls) == {"USDEGP": macro.UPDATE_BARS, "EGINBR": macro.UPDATE_BARS,
-                                                   "EGIRYY": macro.FULL_BARS, "EGX70EWI": macro.UPDATE_BARS}
+                                                   "EGIRYY": macro.FULL_BARS, "EGX70EWI": macro.UPDATE_BARS,
+                                                   "XAUUSD": macro.UPDATE_BARS}
     raw = db.load_macro(conn)
-    assert set(raw.columns) == {"usdegp", "interbank", "egx70"} and raw["usdegp"].iloc[-1] == 2.0
+    assert set(raw.columns) == {"usdegp", "interbank", "egx70", "gold"} and raw["usdegp"].iloc[-1] == 2.0
+    # gold is for your returns and the zakat nisab, not the model: without inflation the Egypt data isn't ready
+    assert not predict.egypt_data_ready(conn)
 
 
 def test_the_20_session_model_uses_egypt_data_and_an_older_design_is_retrained(tmp_path, cfg, fast_model):

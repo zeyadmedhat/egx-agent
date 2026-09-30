@@ -138,6 +138,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "dividends_coming": dividends.coming(conn, scan_date or datetime.now().date().isoformat()),
         # every BUY published so far and how it went, and what the rules' past signals did by score (record.py)
         "record": views.signal_record(d), "odds": record.public_odds(record.stored_odds(conn)),
+        # the dollar, gold, interest rate and inflation now: the zakat and certificate calculators
+        "money": views.money_rates(conn),
     }
     out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
                               "screener": views.screener(d), "history": views.history_data(d),

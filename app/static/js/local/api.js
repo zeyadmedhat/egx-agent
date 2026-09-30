@@ -297,6 +297,7 @@ async function portfolioView(c) {
     signals: sig.filter(r => r.action === 'BUY').map(r => ({ symbol: r.symbol, entry_high: r.entry_high, shares: r.shares })),
     fee_pct: cfg.fee_pct_per_side, sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
     review_day: cfg.review_day, max_open_risk_pct: cfg.max_open_risk_pct,
+    limits: Object.fromEntries(['max_position_pct', 'max_positions', 'max_per_sector', 'max_open_risk_pct'].map(k => [k, cfg[k]])),
     nothing_saved: !book.trades.some(t => t.account === 'real'),
   };
 }
@@ -377,6 +378,7 @@ function calcView(c) {
     equity: real.equity, cash: real.cash, positions: E.positionsForAllocation(c.book, 'real', ['open']),
     cfg: Object.fromEntries(CALC_KEYS.map(k => [k, c.cfg[k]])),
     risk_off: !!(c.core.market && c.core.market.risk_off), switch: (b && b.switch) || null,
+    money: c.core.money || null, shares_value: real.equity - real.cash,
   };
 }
 
@@ -677,6 +679,14 @@ export async function restoreFromBot() {
 }
 
 export const syncNow = () => context().then(sendBook);
+
+// "Add from a screenshot": the bot's free AI reads the holdings off a picture of your broker's portfolio screen
+// (worker/bot.js read). {holdings: [{symbol, name, shares, avg_price, last}]}; the picture isn't kept.
+export async function readScreenshot(image) {
+  const link = botLink();
+  if (!link || link.pending) throw new Error('Connect Telegram first (Settings → Connect Telegram): the bot reads the picture.');
+  return botPost(link.url, '/read', { token: link.token, image });
+}
 
 let syncing = null, again = false, checked = false;
 

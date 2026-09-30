@@ -64,6 +64,93 @@ export function equityCurve({ start, fills, dividends = [], series = {}, events 
     index_ret: bench[bench.length - 1] / start - 1, max_drawdown: maxDd };
 }
 
+// Your account, EGX30 and a bank deposit (the interbank rate, compounded daily) from the same start, in pounds,
+// dollars or grams of 24-carat gold at each day's price. `money`: history's dollar rate, gold ($ an ounce) and
+// interbank rate (%), each used on or after its date. null when that unit's prices are missing.
+const OUNCE_G = 31.1035;
+function onOrBefore(series) {
+  const time = (series && series.time) || [], value = (series && series.value) || [];
+  let i = 0;
+  return day => {                                   // ask in date order
+    if (!time.length) return null;
+    while (i + 1 < time.length && time[i + 1] <= day) i += 1;
+    return value[i];
+  };
+}
+export function inMoney(curve, money = {}, unit = 'egp') {
+  if (!curve || !curve.time.length) return null;
+  const fx = onOrBefore(money.usdegp), gold = onOrBefore(money.gold), rate = onOrBefore(money.interbank);
+  const hasRate = !!(money.interbank && money.interbank.time.length);
+  const out = { time: curve.time, value: [], index: [], deposit: hasRate ? [] : null };
+  let dep = curve.index[0];
+  for (let i = 0; i < curve.time.length; i += 1) {
+    const t = curve.time[i];
+    if (i && hasRate) dep *= 1 + ((rate(curve.time[i - 1]) || 0) / 100) * (days(curve.time[i - 1], t) / 365);
+    const usd = fx(t), per = unit === 'usd' ? usd : unit === 'gold' ? (gold(t) && usd ? (gold(t) * usd) / OUNCE_G : null) : 1;
+    if (!per) return null;
+    out.value.push(curve.value[i] / per);
+    out.index.push(curve.index[i] / per);
+    if (hasRate) out.deposit.push(dep / per);
+  }
+  const start = out.index[0], last = a => a[a.length - 1];
+  let peak = -Infinity, maxDd = 0;
+  for (const v of out.value) { peak = Math.max(peak, v); maxDd = Math.min(maxDd, v / peak - 1); }
+  return { ...out, ret: last(out.value) / start - 1, index_ret: last(out.index) / start - 1,
+    deposit_ret: hasRate ? last(out.deposit) / start - 1 : null, max_drawdown: maxDd };
+}
+
+// The Health tab's checkup: what's out of line in your portfolio and what to do about it, most serious first.
+// Each item is {level: 'bad' | 'warn', title: [text, params], todo: [text, params]} for t(); none means all's well.
+export function checkup({ positions, summary, limits, mix, corr }) {
+  const out = [], equity = summary.equity || 0;
+  if (!positions.length || !equity) return out;
+  const pct = v => `${Math.round(v * 100)}%`;
+  if (summary.cash < -1) {
+    out.push({ level: 'bad', title: ['Your cash is below zero ({cash} EGP).', { cash: Math.round(summary.cash).toLocaleString('en-US') }],
+      todo: ['A buy was probably logged twice or a sell is missing: check My Portfolio against your broker.', {}] });
+  }
+  for (const p of [...positions].sort((a, b) => b.value - a.value)) {
+    const share = p.value / equity;
+    if (share * 100 > limits.max_position_pct + 0.5) {
+      out.push({ level: share > 1 / 3 ? 'bad' : 'warn',
+        title: ['{sym} is {pct} of your account (your limit is {lim}%).', { sym: p.symbol, pct: pct(share), lim: limits.max_position_pct }],
+        todo: ["Don't add to it. A bad day for {sym} hits your whole account: consider selling part to bring it back under {lim}%.",
+          { sym: p.symbol, lim: limits.max_position_pct }] });
+    }
+  }
+  const sectors = new Map();
+  for (const p of positions) {
+    const s = (p.info && p.info.sector) || 'Other';
+    sectors.set(s, (sectors.get(s) || 0) + 1);
+  }
+  for (const m of mix) {
+    if (m.sector === 'Cash' || m.sector === 'Other') continue;
+    const n = sectors.get(m.sector) || 0;
+    if (m.pct > 0.4) {
+      out.push({ level: m.pct > 0.6 ? 'bad' : 'warn', title: ['{pct} of your money is in {sector}.', { pct: pct(m.pct), sector: m.sector }],
+        todo: ['News about {sector} moves much of your account at once: make your next buys in other sectors.', { sector: m.sector }] });
+    } else if (n > limits.max_per_sector) {
+      out.push({ level: 'warn', title: ['{n} of your stocks are in {sector} (your limit is {lim}).', { n, sector: m.sector, lim: limits.max_per_sector }],
+        todo: ['Skip new buys in {sector} until one of them is sold.', { sector: m.sector }] });
+    }
+  }
+  if (positions.length > limits.max_positions) {
+    out.push({ level: 'warn', title: ['You hold {n} stocks (your limit is {lim}).', { n: positions.length, lim: limits.max_positions }],
+      todo: ["Skip new buys until you're back at {lim}: more positions means smaller, harder-to-watch ones.", { lim: limits.max_positions }] });
+  }
+  const risk = summary.open_risk != null ? summary.open_risk / equity : null;
+  if (risk != null && risk * 100 > limits.max_open_risk_pct + 0.05) {
+    out.push({ level: 'warn', title: ['Your stops put {pct} of your account at risk (your limit is {lim}%).', {
+      pct: `${(risk * 100).toFixed(1)}%`, lim: limits.max_open_risk_pct }],
+    todo: ['The agent sizes new buys at 0 until this comes down, as a stop rises or a position is sold.', {}] });
+  }
+  if (corr && corr.average != null && corr.average >= 0.6 && positions.length >= 2) {
+    out.push({ level: 'warn', title: ['Your stocks move closely together ({r}).', { r: corr.average.toFixed(2) }],
+      todo: ['A bad day for one is likely a bad day for all: pick your next buy from a sector you don\'t hold.', {}] });
+  }
+  return out.sort((a, b) => (a.level === 'bad' ? 0 : 1) - (b.level === 'bad' ? 0 : 1));
+}
+
 // How closely your stocks move together: correlation of daily returns over the last `n` sessions (1 = in step).
 export function correlations(series, symbols, n = 60) {
   const rets = {};

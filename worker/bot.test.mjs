@@ -232,3 +232,60 @@ assert.equal((await post2("/restore", { token: nonce })).status, 401)
 // on-time scans: asks GitHub once per slot
 assert.equal((await post2("/tick", {}, auth)).status, 200)
 console.log("one tap, sync, Mac, mini app ok")
+
+// /why, /morning, the 9:30 reminder and a broker screenshot read
+import { parseHoldings } from "./bot.js"
+st.info.bands = [[91, 100, 0.2116, 0.0093], [71, 90, 0.1654, 0.0053], [51, 70, 0.1353, 0.0025], [1, 50, 0.1041, 0.0003]]
+Object.assign(st.info, { base10: 0.1338, rated: 147, min_value: 5e6 })
+Object.assign(st.info.stocks.COMI, { g: 71, k: "11001", h20: 131.2, vr: 1.08, adx: 31.6 })
+const why = await handle(st, u("/why comi"))
+assert.match(why, /Rating 71\/100<\/b>: where the model's 2-week chance puts it among the 147 liquid stocks/)
+assert.match(why, /stocks rated 71–90 reached the target before the stop 16.5% of the time \(the average stock 13.4%\), \+0.5% a trade/)
+assert.match(why, /Not a BUY today[\s\S]*✅ Liquid: at least 5M EGP[\s\S]*❌ Breakout: a close above its 20-day high \(131.20\)/)
+assert.match(why, /❌ Volume at least 1.5× normal \(last session 1.1×\)\n✅ Trend strength ADX above 20 \(now 32\)/)
+assert.equal(callbackText("y:COMI"), "/why COMI")
+assert.equal((await respond(st, u("comi"))).kb[1][0].callback_data, "y:COMI")        // a Why button under the card
+assert.match(await handle(st, u("/why")), /Which stock\?/)
+assert.match(await handle(st, u("abuk")), /No rating[\s\S]*BUY<\/b> up to 50.50/)     // the answer to "which stock?"
+assert.match(await handle(st, arMsg("/lang ar")), /بالعربية/)
+assert.match(await handle(st, arMsg("/why COMI")), /التقييم 71\/100[\s\S]*❌ اختراق: إغلاق فوق أعلى سعر في 20 يومًا/)
+assert.match(await handle(st, arMsg("/morning off")), /بدون تذكير صباحي/)
+assert.equal(st.subs[9].morning, false)
+assert.match(await handle(st, arMsg("/lang en")), /English/)
+assert.match(await handle(st, u("/morning")), /remind you at 9:30/)
+assert.equal(st.subs[9].morning, true)
+assert.deepEqual(parseHoldings('```json\n{"holdings": [{"symbol": "comi", "name": "CIB", "shares": "1,200", ' +
+  '"avg_price": 81.2, "last": null}, {"symbol": null, "name": null, "shares": 5}, {"symbol": "FWRY", "shares": 0}]}\n```'),
+  [{ symbol: "COMI", name: "CIB", shares: 1200, avg_price: 81.2, last: null }])
+assert.deepEqual(parseHoldings("I can't read that."), [])
+
+// the reminder: once, at 9:30 Cairo on the day it's for, to friends who haven't turned it off
+await post2("/state", { fp: fp24, seen: uid2, stocks: {}, subs: { 11: { weekly: true }, 12: { weekly: true, morning: false } },
+                        alerts: {}, info: st.info, morning: { day: "2026-10-01", texts: { 11: "☀️ Before the open", 12: "x", 13: "y" } } }, auth)
+const before = sent2.length
+await bot2.tick(new Date("2026-10-01T06:05:00Z"))                     // 9:05 Cairo: too early
+assert.equal(sent2.length, before)
+await bot2.tick(new Date("2026-10-01T06:35:00Z"))                     // 9:35
+assert.deepEqual(sent2.slice(before).map(m => [m.chat_id, m.text]), [["11", "☀️ Before the open"]])
+await bot2.tick(new Date("2026-10-01T06:45:00Z"))
+assert.equal(sent2.length, before + 1)                                // once
+await bot2.tick(new Date("2026-10-02T06:35:00Z"))                     // another day: not that day's message
+assert.equal(sent2.length, before + 1)
+
+// a screenshot: only a linked browser, a picture, 20 a day; the model's answer checked
+const nonce2 = "fedcba9876543210fedcba9876543210"
+await tg2(`/start ${code24}${nonce2}`)
+const png = "data:image/png;base64,iVBORw0KGgo="
+assert.equal((await post2("/read", { token: nonce2, image: png })).status, 503)            // no AI binding yet
+bot2.env.AI = { run: async (model, input) => {
+  assert.equal(input.messages[0].content[1].image_url.url, png)
+  return { response: '{"holdings": [{"symbol": "COMI", "name": "CIB", "shares": 450, "avg_price": 81.2, "last": 86.95}]}' }
+} }
+assert.equal((await post2("/read", { token: "x".repeat(32), image: png })).status, 401)
+assert.equal((await post2("/read", { token: nonce2, image: "data:text/html;base64,PGI+" })).status, 400)
+assert.deepEqual((await (await post2("/read", { token: nonce2, image: png })).json()).holdings,
+                 [{ symbol: "COMI", name: "CIB", shares: 450, avg_price: 81.2, last: 86.95 }])
+for (let i = 0; i < 18; i++) await post2("/read", { token: nonce2, image: png })
+assert.equal((await post2("/read", { token: nonce2, image: png })).status, 200)             // the 20th
+assert.equal((await post2("/read", { token: nonce2, image: png })).status, 429)
+console.log("why, morning, screenshots ok")

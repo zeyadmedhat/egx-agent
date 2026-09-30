@@ -58,6 +58,31 @@ def test_a_linked_friend_gets_their_own_orders_in_arabic(tmp_path, monkeypatch):
     assert state["info"]["site"] == "https://me.github.io/egx" and state["sitekey"]["iter"] == static_site.ITERATIONS
     assert state["info"]["final"] is True
     assert "Mona" not in json.dumps(out) and "777" not in json.dumps(out)       # the public log: counts only
+    # the 9:30 reminder before the next session: their own order, then the BUYs, in their language
+    morning = state["morning"]
+    assert morning["day"] == views.sessions_after(dates[-1], 1)
+    assert "قبل الافتتاح" in morning["texts"]["777"] and "بع كل 50 من AAA عند الافتتاح" in morning["texts"]["777"]
+    assert "اشترِ حتى" in morning["texts"]["777"] and "/morning off" in morning["texts"]["777"]
+    # /why answers from the same data: each stock's BUY checks
+    assert set(state["info"]["stocks"]["AAA"]["k"]) <= {"0", "1"} and len(state["info"]["stocks"]["AAA"]["k"]) == 5
+
+
+def test_morning_off_stops_the_reminder(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "egx.db")
+    code = "c" * 24
+    fp = alerts._fingerprint(code)
+    db.set_meta(conn, "site_subscribers", json.dumps({"5": {"code": fp}, "6": {"code": fp}}))
+    monkeypatch.setattr(alerts, "_reply", lambda *a: None)
+    msg = lambda cid, uid, text: {"update_id": uid, "message": {"chat": {"id": cid, "type": "private"}, "text": text}}  # noqa: E731
+    res = alerts.sync_subscribers(conn, "123:abc", code, [msg(5, 1, "/morning off"), msg(6, 2, "/morning")],
+                                  answered=True)
+    assert res["commands"] == 2
+    subs = alerts._subscribers(conn)
+    assert subs["5"]["morning"] is False and subs["6"]["morning"] is True
+    state = alerts.worker_state(conn, code)
+    assert state["subs"]["5"]["morning"] is False and "morning" not in state["subs"]["6"]
+    texts = site_daily.morning_texts(conn, dict(config.DEFAULTS), {}, "2026-09-30")
+    assert texts == {"day": "2026-10-01", "texts": {}}                  # no scan: nothing to remind anyone of
 
 
 def test_quiet_friends_get_nothing_on_a_day_with_nothing_to_do(tmp_path, monkeypatch):
