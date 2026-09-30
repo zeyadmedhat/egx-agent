@@ -384,6 +384,7 @@ function RatingCard({ p }) {
     <div class="rating-body">
       <div class="rating-title">${t('Rating {v}/100', { v: p.rating })}</div>
       <p class="muted">${t('Where the prediction model puts it among the {n} liquid stocks it rates today (100 = its first).', { n: fmt.int(p.count) })}
+        ${' '}${t("It weighs the chart and the company's results together: its price, volume and trend, and its profit, sales, growth, debt and dividend as they were known each day.")}
         ${b && b.hit != null ? ' ' + t('In its tests, stocks rated {lo}–{hi} reached the target before the stop {hit} of the time (the average stock {base}), {ret} a trade after fees.', {
           lo: b.from, hi: b.to, hit: fmt.pct(b.hit, 0, false), base: fmt.pct(base, 0, false), ret: fmt.pct(b.ret, 1) }) : ''}</p>
       ${p.why10 && p.why10.length > 0 && html`<${Why} items=${p.why10} />`}

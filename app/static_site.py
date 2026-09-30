@@ -140,6 +140,7 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "record": views.signal_record(d), "odds": record.public_odds(record.stored_odds(conn)),
         # the dollar, gold, interest rate and inflation now: the zakat and certificate calculators
         "money": views.money_rates(conn),
+        "company": views.company_brief(d),     # each company's results in brief: the BUY cards and Close to a BUY
     }
     out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
                               "screener": views.screener(d), "history": views.history_data(d),

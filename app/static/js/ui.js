@@ -135,6 +135,25 @@ export function Rating({ v, big }) {
     title=${t('Rating {v}/100: where the model puts it among the liquid stocks today (100 = its first).', { v })}>${v}</span>`;
 }
 
+// A company's latest results in brief (views.company_brief): profit and sales growth over a year, or that it lost
+// money, and its P/E next to its sector's. compact: the growth and P/E only, for a table cell.
+export function CompanyLine({ co, compact }) {
+  if (!co) return compact ? html`<span class="faint">–</span>` : null;
+  const lost = co.margin != null && co.margin < 0;
+  const g = v => html`<b class=${v >= 0 ? 'up' : 'down'}>${fmt.pct(v, 0)}</b>`;
+  const pe = co.pe != null && html`<span title=${t('Price ÷ a year of profit: lower is cheaper')}>${t('P/E')} <b>${fmt.num(co.pe, 1)}</b>${
+    co.sector_pe != null && !compact ? html`<span class="faint"> (${t('sector')} ${fmt.num(co.sector_pe, 1)})</span>` : ''}</span>`;
+  const parts = [
+    lost ? html`<b class="down">${t('Lost money')}</b>` : co.growth != null && html`<span>${t('Profit')} ${g(co.growth)}</span>`,
+    !compact && co.sales != null && html`<span>${t('Sales')} ${g(co.sales)}</span>`,
+    pe,
+  ].filter(Boolean);
+  if (!parts.length) return compact ? html`<span class="faint">–</span>` : null;
+  return html`<span class=${cls('company-line', compact && 'compact')}
+    title=${t("The company's last 4 reported quarters against the 4 before (TradingView)")}>${
+    parts.map((p, i) => html`${i ? html`<span class="faint"> · </span>` : ''}${p}`)}</span>`;
+}
+
 export function ScoreBar({ score }) {
   const v = Math.max(0, Math.min(100, score || 0));
   return html`<div class="score-cell"><b>${Math.round(v)}</b><div class=${cls('bar', v >= 70 ? 'up' : '')} style="flex:1">

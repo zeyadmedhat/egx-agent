@@ -9,7 +9,7 @@ import pytest
 
 from app import jobs
 from egx_agent import breadth, config, db, predict
-from egx_agent.data import macro, news, prices
+from egx_agent.data import fundamentals, macro, news, prices
 from tests.conftest import make_ohlcv
 from tests.test_api import H
 from tests.test_prices import FakeProvider
@@ -352,10 +352,10 @@ def test_the_20_session_model_uses_egypt_data_and_an_older_design_is_retrained(t
     _add_macro(conn, start="2020-12-01")
     meta = predict.train(conn, cfg)
     assert meta["version"] == predict.MODEL_VERSION
-    both = len(predict.FEATURES) + len(macro.FEATURES) + len(news.EVENT_FEATURES)
+    both = len(predict.FEATURES) + len(macro.FEATURES) + len(news.EVENT_FEATURES) + len(fundamentals.FEATURES)
     assert meta["horizons"]["10"]["features"] == meta["horizons"]["20"]["features"] == both
     bundle = predict.load_models(tmp_path / "models")
-    assert all("fx_ret63" in bundle["features"][hz] and "div_ex_ahead" in bundle["features"][hz] for hz in (10, 20))
+    assert all({"fx_ret63", "div_ex_ahead", "f_ey"} <= set(bundle["features"][hz]) for hz in (10, 20))
     assert predict.predict_latest(conn, cfg) == 10
     assert meta["egypt_data"] and not predict.needs_training(conn, cfg)
     meta["version"] = 1                                                     # a model from before this design

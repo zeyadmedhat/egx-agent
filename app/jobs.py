@@ -13,7 +13,7 @@ from typing import Callable
 import pandas as pd
 
 from egx_agent import backtest, config, corporate, db, predict, record, scan
-from egx_agent.data import macro, news, prices, shariah, universe
+from egx_agent.data import dividends, fundamentals, macro, news, prices, shariah, universe
 
 from . import accounts, alerts, health, views
 
@@ -179,9 +179,11 @@ def send_alerts(site: "accounts.Site | None", conn, cfg: dict) -> str:
 
 
 def _egypt_data(conn) -> None:
-    """The model learns from the Egypt data and the dividend/bonus-share events. A scan downloads them, but
-    training shouldn't go without them when no scan ran first (a run with no new close, or the first training)."""
-    for ready, fetch in ((predict.egypt_data_ready, macro.update), (predict.events_data_ready, news.update_actions)):
+    """The model learns from the Egypt data, the dividend/bonus-share events and the company results. A scan downloads
+    them, but training shouldn't go without them when no scan ran first (a run with no new close, or the first
+    training)."""
+    for ready, fetch in ((predict.egypt_data_ready, macro.update), (predict.events_data_ready, news.update_actions),
+                         (fundamentals.ready, dividends.update)):
         if ready(conn):
             continue
         try:

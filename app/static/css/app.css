@@ -941,6 +941,9 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .fold > .live-list, .fold > .note { padding: 8px 12px 0; }
 .fold > .note { padding: 0 18px 14px; }
 .sig-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sig-company { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; margin-top: 8px; }
+.company-line { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.company-line.compact { font-size: 12.5px; white-space: nowrap; }
 
 /* Short main text, fine print one tap away. */
 .more { margin-top: 6px; }

@@ -8,8 +8,9 @@ giving it the chart levels as inputs too made it worse (18.1%), so it doesn't se
 sessions (one model per horizon). If both levels are touched on the same day it counts as a loss.
 
 One gradient-boosting model per horizon learns from every liquid EGX stock's history (price, volume, trend,
-momentum, the stock's sector and the whole market's breadth); the 20-session one also sees Egypt-wide numbers
-(the pound, interest rates, inflation: data/macro.py). It is tested walk-forward: every year is predicted by a
+momentum, the stock's sector and the whole market's breadth), Egypt-wide numbers (the pound, interest rates,
+inflation: data/macro.py) and the company's own results as they were known that day (profit, sales, growth, debt,
+dividend: data/fundamentals.py). It is tested walk-forward: every year is predicted by a
 model trained only on the years before it, with a gap so no test trade overlaps a training trade. Those
 out-of-sample results are what the dashboard shows, never results on data the model has seen. Trades whose entry
 day couldn't really be traded (no volume, or locked at one price) are left out of them.
@@ -26,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from . import breadth, config, db, levels, strategy
-from .data import macro, news, prices, universe
+from .data import fundamentals, macro, news, prices, universe
 from .indicators import add_indicators, ema
 
 HORIZONS = (10, 20)
@@ -34,10 +35,11 @@ EXPERIMENT = 5                # a 5-session model on paper only: bought at the n
 RANK_HORIZON = 10             # the model whose daily rank orders the BUYs and adds its own (config model_picks)
 EXTRA_COST = 0.005            # a stress test: 0.25% more slippage on each side of every trade
 PICKS = 5                     # the test portfolio: the day's top 5, bought equally every horizon
-MODEL_VERSION = 5             # 2: Egypt data for the 20-session model, untradeable entry days left out of results;
+MODEL_VERSION = 6             # 2: Egypt data for the 20-session model, untradeable entry days left out of results;
                               # 3: the Egypt data is downloaded before training (2 could train without it);
                               # 4: dividend, bonus-share and rights-issue events (Mubasher, data/news.py);
-                              # 5: trades use the chart's stop and target when levels_mode is chart (levels.py)
+                              # 5: trades use the chart's stop and target when levels_mode is chart (levels.py);
+                              # 6: the company's results as known each day (data/fundamentals.py)
 MIN_TRAIN_YEARS = 3           # the first tested year needs at least this much history before it
 RETRAIN_DAYS = 30
 MODEL_DIR = config.ROOT / "data" / "models"
@@ -63,11 +65,12 @@ FEATURES = [
 # Walk-forward in 2026-09 (the same yearly tests, several random seeds): Egypt data lifted the 20-session model's top
 # picks. Dividend/bonus-share/rights events (Mubasher) then lifted both: the 20-session top 10% from +1.21% to +1.41%
 # a trade (better than the average stock in 10 of 11 years, from 8), and the 10-session one, now with the Egypt data
-# and LightGBM too, from +0.90% to +1.04% (10 of 11 years, from 9).
+# and LightGBM too, from +0.90% to +1.04% (10 of 11 years, from 9). The company's results (2026-10, 4 seeds) then took the
+# rules-plus-picks replay from 30.8% to 33.8% a year and its worst drop from -25.8% to -18.3% (data/fundamentals.py).
 LEVEL_FEATURES = ["lvl_stop_pct", "lvl_target_pct", "lvl_rr", "lvl_support", "lvl_resist", "lvl_support_str"]
 ALL_HORIZONS = HORIZONS + (EXPERIMENT,)
-HORIZON_FEATURES = {hz: FEATURES + macro.FEATURES + news.EVENT_FEATURES for hz in ALL_HORIZONS}
-ALL_FEATURES = FEATURES + macro.FEATURES + news.EVENT_FEATURES
+ALL_FEATURES = FEATURES + macro.FEATURES + news.EVENT_FEATURES + fundamentals.FEATURES
+HORIZON_FEATURES = {hz: ALL_FEATURES for hz in ALL_HORIZONS}
 
 # "Why the model likes it": each measure in plain words and how to show its value. The same for every stock on a
 # day (the whole market, Egypt-wide numbers) moves every score alike, so it isn't a reason for one stock.
@@ -96,6 +99,15 @@ WHY_TEXT = {
     "bonus_ex_ahead": ("Bonus shares coming", "days_ahead"), "bonus_since_ann": ("Bonus shares announced", "days_ago"),
     "rights_ex_ahead": ("Rights issue coming", "days_ahead"),
     "treasury_since_ann": ("Share buyback announced", "days_ago"),
+    # the company's results (data/fundamentals.py), as known that day
+    "f_ey": ("Profit for its price (earnings yield)", "pct"), "f_sy": ("Sales for its price", "x"),
+    "f_fcfy": ("Free cash for its price", "pct"), "f_dy": ("Dividend yield", "pct1"),
+    "f_ni_growth": ("Profit growth in a year", "pct"), "f_rev_growth": ("Sales growth in a year", "pct"),
+    "f_q_yoy": ("Last quarter's profit vs a year before", "pct"), "f_margin": ("Profit margin", "pct1"),
+    "f_roa": ("Return on assets", "pct1"), "f_debt_assets": ("Debt for its assets", "pct1"),
+    "f_profit": ("Profitable over the last year", "yes"),
+    "rank_ey": ("Cheapness for its profit vs other stocks", "rank"),
+    "rank_growth": ("Profit growth vs other stocks", "rank"), "rank_quality": ("Return on assets vs other stocks", "rank"),
 }
 WHY_UP, WHY_DOWN = 3, 2       # reasons shown: the strongest pushes up and down
 
@@ -238,12 +250,14 @@ def _index_features(index_df: pd.DataFrame) -> pd.DataFrame:
 
 def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, sectors: pd.Series, cfg: dict,
                   labels: bool = True, progress: Callable[[float, str], None] | None = None,
-                  macro_raw: pd.DataFrame | None = None, events: pd.DataFrame | None = None) -> pd.DataFrame:
+                  macro_raw: pd.DataFrame | None = None, events: pd.DataFrame | None = None,
+                  fin: pd.DataFrame | None = None) -> pd.DataFrame:
     """One row per stock per day with every feature (and the trade outcomes when labels=True).
 
     frames: OHLCV per symbol. Rows are marked `liquid` when the stock passed the liquidity/price/history rules
     that day: those are the only rows the model trains on or predicts for. macro_raw: db.load_macro (the Egypt
     features are empty without it). events: news.load_events (without it, every stock reads as having none).
+    fin: fundamentals.reports (without it, the company numbers are empty).
     """
     say = progress or (lambda p, m: None)
     index_close = index_df["close"] if len(index_df) else None
@@ -297,6 +311,7 @@ def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
     raw = macro_raw if macro_raw is not None else pd.DataFrame()
     ds = ds.join(macro.features(raw, index_close, days), on="date")
     ds[news.EVENT_FEATURES] = news.event_features(ds, events)
+    ds = pd.concat([ds, fundamentals.features(ds, fin)], axis=1)
     # the rules' own BUY decision on each day, to compare the model with
     ds["rule_rank"] = ds["ret63"].where(ds["liquid"]).groupby(ds["date"]).rank(pct=True).fillna(0)
     ds["rule_score"] = np.clip(ds["rule_base"] + ds["rule_rank"] * 25, 0, 100)
@@ -607,7 +622,8 @@ def needs_training(conn: sqlite3.Connection, cfg: dict, today: date | None = Non
             # trained before the 5-session experiment and the rules-with-the-model replay were added (2026-09)
             or str(EXPERIMENT) not in meta.get("horizons", {}) or "combo" not in meta
             or (not meta.get("egypt_data", True) and egypt_data_ready(conn))
-            or (not meta.get("events_data", True) and events_data_ready(conn)))
+            or (not meta.get("events_data", True) and events_data_ready(conn))
+            or (not meta.get("fin_data", True) and fundamentals.ready(conn)))
 
 
 def load_frames(conn: sqlite3.Connection, cfg: dict) -> tuple[dict, pd.DataFrame, pd.Series]:
@@ -627,7 +643,7 @@ def train(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], 
     say(0.01, "Loading price history…")
     frames, index_df, sectors = load_frames(conn, cfg)
     ds = build_dataset(frames, index_df, sectors, cfg, progress=lambda p, m: say(0.02 + 0.13 * p, m),
-                       macro_raw=db.load_macro(conn), events=news.load_events(conn))
+                       macro_raw=db.load_macro(conn), events=news.load_events(conn), fin=fundamentals.reports(conn))
     if ds.empty or not ds["liquid"].any():
         raise RuntimeError("Not enough price history to train on. Run a scan first.")
     liquid = ds[ds["liquid"]]
@@ -662,6 +678,7 @@ def train(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], 
     data_to = str(liquid["date"].max().date())
     meta = {
         "version": MODEL_VERSION, "egypt_data": egypt_data_ready(conn), "events_data": events_data_ready(conn),
+        "fin_data": fundamentals.ready(conn),
         # the live track record counts predictions from this model design only, not an older one's
         "live_since": before.get("live_since", data_to) if before.get("version") == MODEL_VERSION else data_to,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
@@ -684,7 +701,7 @@ def predict_latest(conn: sqlite3.Connection, cfg: dict, root: Path | None = None
     if ds is None:
         frames, index_df, sectors = load_frames(conn, cfg)
         ds = build_dataset(frames, index_df, sectors, cfg, labels=False, macro_raw=db.load_macro(conn),
-                           events=news.load_events(conn))
+                           events=news.load_events(conn), fin=fundamentals.reports(conn))
     if ds.empty:
         return 0
     day = ds["date"].max()

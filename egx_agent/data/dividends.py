@@ -25,7 +25,7 @@ import pandas as pd
 import requests
 
 from .. import db
-from . import prices
+from . import fundamentals, prices
 
 URL = "https://scanner.tradingview.com/egypt/scan"
 COLUMNS = ["name", "dividends_yield_current", "dividend_ex_date_recent", "dividend_amount_recent",
@@ -38,7 +38,7 @@ FUNDAMENTALS = {"market_cap_basic": ("market_cap", 1), "price_earnings_ttm": ("p
                 "earnings_per_share_diluted_yoy_growth_ttm": ("eps_growth", 0.01),
                 "total_revenue_yoy_growth_ttm": ("revenue_growth", 0.01), "net_margin_ttm": ("net_margin", 0.01),
                 "return_on_equity_fq": ("roe", 0.01), "debt_to_equity_fq": ("debt_equity", 1)}
-COLUMNS = COLUMNS + list(FUNDAMENTALS)
+COLUMNS = COLUMNS + list(FUNDAMENTALS) + fundamentals.COLUMNS     # and each company's past results
 EARNINGS_STALE_DAYS = 400     # a company whose last results on TradingView are older gets no expected date: it
                               # doesn't report there regularly, so the estimate would be a guess
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -83,6 +83,7 @@ def save(conn: sqlite3.Connection, rows: list[dict]) -> int:
         if nums:
             conn.execute("INSERT OR REPLACE INTO fundamentals(symbol, data, updated) VALUES (?,?,?)",
                          (sym, json.dumps(nums), now))
+    fundamentals.save(conn, rows, {v: k for k, v in prices.TV_ALIASES.items()})   # under the agent's own symbols
     conn.commit()
     return conn.execute("SELECT COUNT(*) FROM cash_dividends").fetchone()[0] - before
 

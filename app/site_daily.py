@@ -35,7 +35,7 @@ from pathlib import Path
 import requests
 
 from egx_agent import config, db, predict, record, scan
-from egx_agent.data import dividends, macro, news, prices
+from egx_agent.data import dividends, fundamentals, macro, news, prices
 
 from . import alerts, backup, health, jobs, static_site, views
 
@@ -128,7 +128,7 @@ def catch_up(conn, cfg: dict) -> dict:
             out["hourly"] = f"{res['updated']} stocks" + (f", {len(res['failed'])} failed" if res["failed"] else "")
         except Exception as exc:  # only the hourly charts need them
             out["hourly"] = f"not updated ({type(exc).__name__})"
-    if not conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0]:
+    if not conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0] or not fundamentals.ready(conn):
         try:
             dividends.update(conn)
             out["company numbers"] = "downloaded"

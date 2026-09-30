@@ -40,7 +40,7 @@ The ⚙ button (**More** on a phone) holds Settings, Admin, the language and the
 | Section → tab | What it's for |
 |---|---|
 | **Today → Summary** | "Today in one minute" (the market, the signals and your positions in a few plain sentences), a badge saying whether the session is open and the numbers are final, the orders checklist for the next session, your open positions and what to do with each, the market with a 6-month EGX30 chart, and live prices (tap to open) |
-| **Today → Signals** | The BUY signals (each with **Log buy**, **Size it**, **Why this signal** and what BUYs with a score like it did in the 10-year test), the stocks close to a BUY, and the **track record**: every BUY the agent published, followed with the same exit rules from the next open (fees included), set against the test, with a warning when the live results run clearly worse |
+| **Today → Signals** | The BUY signals (each with its rating, the company's results in brief (profit and sales growth over a year, or that it lost money, and its P/E next to its sector's), **Log buy**, **Size it**, **Why this signal** and what BUYs with a score like it did in the 10-year test), the stocks close to a BUY (best rated first, with the same company line), and the **track record**: every BUY the agent published, followed with the same exit rules from the next open (fees included), set against the test, with a warning when the live results run clearly worse |
 | **Today → News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month |
 | **Market → Overview** | Breadth: how many stocks are above their 50-day average, up/down counts, 1-year highs/lows, the biggest movers (day, week, month), a sector table and the market switch for the model's picks. The 1-year breadth chart and the 20-/200-day counts open on a tap. Context only: it doesn't change the BUY rules |
 | **Market → Heatmap** | The whole market in one picture: a tile for every stock that traded at the last close, grouped by sector, sized by the company's market value (or the money traded in it), green or red by its move over the last session, week or month. Tap a tile for the stock |
@@ -232,6 +232,24 @@ inside the month reach the target less often (the price drops by the dividend), 
 they did better than the others (+2.9% against +1.7% a trade, 38 trades), so they aren't skipped: the stop moves down
 for the dividend instead, and the signal says so.
 
+**Company results (both models, since Oct 2026).** The same TradingView request as the dividends brings every EGX
+company's last 32 quarters and about 20 years of results (`egx_agent/data/fundamentals.py`). The model sees each
+company as it was known on each day: profit, sales and free cash for its price, its dividend yield, profit and sales
+growth over a year, the last quarter against the same quarter a year before, the profit margin, return on assets,
+debt against assets, whether it made a profit, and how cheap, fast-growing and profitable it is against the other
+stocks that day. A quarter counts only 120 days after it ends (150 for the fiscal year's last one), later than most
+companies publish, so the tests never use numbers that weren't out yet. In the Oct 2026 tests (4 random seeds, the
+rules plus the model's picks replayed day by day on 2016–2026): **33.8% a year against 30.8%, the worst drop −18%
+against −26%**, better in both halves. Counting quarters as known after 75 days did worse in the second half, and only
+a few of the numbers (value and growth) did worse than all of them. The 20-session model neither gains nor loses.
+
+**What was tested for the BUY rules (Oct 2026) and left as it is.** Skipping companies that lost money or whose
+profit shrank, or the dearest 30% for their profit, made the drops smaller but cut the return more (breakouts in
+companies that lost money did *better* over two weeks: 32% reached the target against 22%). A lower or higher score
+bar (60 or 80 instead of 70), 2 or 5 model picks instead of 3, and adding the pullback and MACD setups did no better.
+Taking only the rule BUYs the model ranks in its top 30–40% helped the old model, but not the one with company
+results. So the company results change the BUYs through the model: its rank orders them and picks 3 more.
+
 **News.** Headlines from Mubasher (each stock's page, Arabic and English, and the latest Egypt news), Reuters and
 Zawya (through TradingView, tagged to the stock), Al Borsa News and Daily News Egypt. Only headlines, dates and links
 are kept. Each gets topics and a good/bad tone from keyword rules. Bad news this week shows as a caution on signals,
@@ -271,7 +289,8 @@ first, and 91–100 is its top 10%. It's on each stock page (with the reasons), 
 in the bot's `/why`, next to how stocks rated in the same band did on the years the model never saw. When it was built:
 91–100 reached the target first 21% of the time (+0.9% a trade after fees), 71–90 17% (+0.5%), 51–70 14% (+0.3%),
 1–50 10% (+0.0%); the average stock 13%. The rules' own BUY score isn't used for it: it barely changed the odds in the
-10-year test. Illiquid stocks get no rating.
+10-year test. Since Oct 2026 it mixes the chart and the company's results (the model sees both). Illiquid stocks get
+no rating.
 
 **Honest numbers.** The Predict page also shows its top 5 as a test portfolio (every 10 or 20 sessions, sized by the
 market switch), the same with 0.5% more cost per trade, and whether its chance numbers beat simply giving every stock

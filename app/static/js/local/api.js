@@ -211,7 +211,8 @@ async function today(c) {
   const buys = [], watch = [];
   const warn = core.cautions || {};
   for (const x of rows) {
-    const r = { ...x, info: info(c, x.symbol), pred: preds.by_symbol[x.symbol] ?? null, cautions: warn[x.symbol] || [] };
+    const r = { ...x, info: info(c, x.symbol), pred: preds.by_symbol[x.symbol] ?? null, cautions: warn[x.symbol] || [],
+      co: (core.company || {})[x.symbol] || null };
     if (r.action === 'BUY') {
       delete r.trigger; delete r.to_trigger;
       r.sell_by = E.sessionsAfter(scanDate, cfg.max_hold_days);

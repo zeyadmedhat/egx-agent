@@ -750,7 +750,8 @@ def _r(v, digits=3):
 
 def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
     """What the bot answers /stock, /top, /buys and /why from: each stock's last close, today's signal, the prediction
-    model's chances and rating, the chart's stop, target and nearest support and resistance, and the BUY rule's checks
+    model's chances and rating, the company's results in brief (co), the chart's stop, target and nearest support and
+    resistance, and the BUY rule's checks
     (k: liquid, uptrend, breakout, volume, ADX as 1/0, with the 20-day high, volume ratio and ADX behind them).
     Short keys: it's sent every run."""
     d = views.Data(conn, cfg, views.Cache())
@@ -759,6 +760,7 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
     pred = predict.latest(conn)
     pred = {} if pred.empty else views.clean(pred.to_dict("index"))
     preds = views.predictions(d)
+    firms = views.company_brief(d)
     names = dict(conn.execute("SELECT symbol, name_ar FROM stocks").fetchall())
     stocks = {}
     for sym, last in d.last_two().items():
@@ -774,6 +776,8 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
         g = (preds["by_symbol"].get(sym) or {}).get("rating")
         if g is not None:
             s["g"] = g
+        if co := firms.get(sym):                # the company's results in brief, for /why
+            s["co"] = [_r(co.get(k), 3) for k in ("growth", "sales", "margin", "pe", "sector_pe")]
         ind = d.indicators(sym)
         try:
             plan = levels.plan_at(ind, cfg)

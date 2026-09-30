@@ -79,7 +79,9 @@ const EN = {
   morningOff: "OK: no morning reminder. /morning on to have it again.",
   langSet: "OK: I'll answer in English. /lang ar for Arabic.",
   rating: (g, n) => `<b>Rating ${g}/100</b>: where the model's 2-week chance puts it among the ${n} liquid stocks it ` +
-    "rates today (100 = its first)",
+    "rates today, from its chart and the company's results (100 = its first)",
+  co: { head: "Company", lost: "lost money over the last year", profit: g => `profit ${g} in a year`,
+        sales: g => `sales ${g}`, pe: (pe, sec) => `P/E ${pe}${sec ? ` (sector ${sec})` : ""}` },
   band: (lo, hi, hit, base, ret) => `In its tests, stocks rated ${lo}–${hi} reached the target before the stop ${hit} ` +
     `of the time${base ? ` (the average stock ${base})` : ""}${ret ? `, ${ret} a trade after fees` : ""}.`,
   noRating: "No rating: the model rates only stocks with enough daily trading.",
@@ -188,7 +190,9 @@ const AR = {
   quietOff: "تم: ستصلك رسالة بعد كل إغلاق مرة أخرى.",
   morningOn: "تم: في أيام الجلسات سأذكّرك الساعة 9:30 بما تفعله عند الافتتاح، إذا كان هناك ما تفعله.",
   morningOff: "تم: بدون تذكير صباحي. /morning on لإعادته.",
-  rating: (g, n) => `<b>التقييم ${g}/100</b>: ترتيب فرصة النموذج خلال أسبوعين بين ${n} سهمًا سائلًا يقيّمها اليوم (100 = الأول)`,
+  rating: (g, n) => `<b>التقييم ${g}/100</b>: ترتيب فرصة النموذج خلال أسبوعين بين ${n} سهمًا سائلًا يقيّمها اليوم، من الرسم البياني ونتائج الشركة (100 = الأول)`,
+  co: { head: "الشركة", lost: "خسرت خلال آخر سنة", profit: g => `الأرباح ${g} خلال سنة`,
+        sales: g => `المبيعات ${g}`, pe: (pe, sec) => `مكرر الربحية ${pe}${sec ? ` (القطاع ${sec})` : ""}` },
   band: (lo, hi, hit, base, ret) => `في اختباراته، الأسهم المقيّمة ${lo}–${hi} وصلت إلى الهدف قبل الوقف في ${hit} من المرات` +
     `${base ? ` (متوسط الأسهم ${base})` : ""}${ret ? `، و${ret} للصفقة بعد الرسوم` : ""}.`,
   noRating: "بدون تقييم: يقيّم النموذج الأسهم ذات التداول اليومي الكافي فقط.",
@@ -338,6 +342,14 @@ function whyCard(info, sym, lang) {
                         b[3] != null ? pct(b[3], true) : null))
     }
   } else lines.push(T.noRating)
+  if (s.co) {                            // [profit growth, sales growth, margin, P/E, sector P/E] (app/alerts.py)
+    const [g, sales, margin, pe, secPe] = s.co, parts = []
+    if (margin != null && margin < 0) parts.push(T.co.lost)
+    else if (g != null) parts.push(T.co.profit(pct(g, true)))
+    if (sales != null) parts.push(T.co.sales(pct(sales, true)))
+    if (pe != null) parts.push(T.co.pe(pe.toFixed(1), secPe != null ? secPe.toFixed(1) : null))
+    if (parts.length) lines.push(`${T.co.head}: ${parts.join(" · ")}`)
+  }
   lines.push("")
   if (s.a === "BUY") lines.push(T.buy(px(s.e), px(s.s), px(s.t)))
   else if (s.a) lines.push(T.signal(esc(s.a), s.e ? px(s.e) : null, s.e ? px(s.s) : null, s.e ? px(s.t) : null))

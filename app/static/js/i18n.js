@@ -1194,4 +1194,14 @@ export const AR = {
   "A year after inflation ({infl}%)": "في السنة بعد التضخم ({infl}%)",
   "To beat it, your trades need more than {rate}% a year after fees ({fee}% a side) and after the losing trades.": "لتتفوق عليها، تحتاج صفقاتك أكثر من {rate}% في السنة بعد الرسوم ({fee}% لكل جانب) وبعد الصفقات الخاسرة.",
   "The interest is fixed when you buy, isn't added to the amount (it's paid out), and the money is locked until the end: breaking a certificate early usually costs some of the interest. Your account against a bank deposit is on My Portfolio → Health.": "العائد ثابت من يوم الشراء، ولا يُضاف إلى المبلغ (يُصرف لك)، والمال مجمد حتى النهاية: كسر الشهادة مبكرًا عادةً يكلفك جزءًا من العائد. حسابك مقارنة بوديعة بنكية في محفظتي ← الصحة.",
+  // company results on the BUY cards and Close to a BUY (ui.js CompanyLine)
+  "Company": "الشركة",
+  "Profit": "الأرباح",
+  "Sales": "المبيعات",
+  "Lost money": "خسرت",
+  "Price ÷ a year of profit: lower is cheaper": "السعر ÷ أرباح سنة: الأقل أرخص",
+  "The company's last 4 reported quarters against the 4 before (TradingView)": "آخر 4 أرباع أعلنتها الشركة مقارنة بالأربعة التي قبلها (TradingView)",
+  "The model's rank among the day's liquid stocks, 1–100, from the chart and the company's results": "ترتيب النموذج بين الأسهم السائلة اليوم، 1–100، من الرسم البياني ونتائج الشركة",
+  "Profit growth over a year, and the P/E": "نمو الأرباح خلال سنة، ومكرر الربحية",
+  "It weighs the chart and the company's results together: its price, volume and trend, and its profit, sales, growth, debt and dividend as they were known each day.": "يجمع بين الرسم البياني ونتائج الشركة: السعر والحجم والاتجاه، والأرباح والمبيعات والنمو والديون والتوزيعات كما كانت معروفة كل يوم.",
 };

@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from egx_agent import breadth, config, corporate, db, levels, portfolio, predict, record, risk, scan, strategy
-from egx_agent.data import dividends, macro, news, prices, shariah, universe
+from egx_agent.data import dividends, fundamentals, macro, news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
 EGX_DAY = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
@@ -345,10 +345,12 @@ def today(d: Data) -> dict:
     buys, watch = [], []
     preds = predictions(d)
     warn = cautions_map(d)
+    firms = company_brief(d)
     for r in [dict(x) for x in rows]:
         r["info"] = d.info(r["symbol"])
         r["pred"] = preds["by_symbol"].get(r["symbol"])
         r["cautions"] = warn.get(r["symbol"], [])
+        r["co"] = firms.get(r["symbol"])
         if r["action"] == "BUY":
             r["sell_by"] = sessions_after(scan_date, cfg["max_hold_days"])
             buys.append(r)
@@ -774,8 +776,46 @@ def money_rates(conn: sqlite3.Connection) -> dict | None:
 
 
 def company_values(conn: sqlite3.Connection) -> dict[str, dict]:
-    """Each company's numbers from TradingView (data/dividends.py FUNDAMENTALS): market_cap, pe, …"""
-    return {r["symbol"]: json.loads(r["data"]) for r in conn.execute("SELECT symbol, data FROM fundamentals")}
+    """Each company's numbers from TradingView (data/dividends.py FUNDAMENTALS): market_cap, pe, …, under the agent's
+    own symbols (TradingView's names for a few companies differ)."""
+    back = {v: k for k, v in prices.TV_ALIASES.items()}
+    return {back.get(r["symbol"], r["symbol"]): json.loads(r["data"])
+            for r in conn.execute("SELECT symbol, data FROM fundamentals")}
+
+
+def company_brief(d: Data) -> dict[str, dict]:
+    """Each company's latest results in brief, for the BUY cards, Close to a BUY and the bot's /why: its last 4
+    reported quarters (or last year) against the 4 before (data/fundamentals.py; about 3 times as many companies as
+    TradingView's own ratios): profit and sales growth (when the year before made a profit / had sales), the profit
+    margin (below 0: it lost money), and its P/E (the last close ÷ a year of profit per share) next to the middle P/E
+    of its sector (at least 3 companies). The same for everyone."""
+    def build():
+        rep = fundamentals.reports(d.conn)
+        rep = rep[rep["ni"].notna()]
+        if rep.empty:
+            return {}
+        # the newest numbers each company has published: its quarters when it has them, otherwise its years
+        last = rep.assign(q=rep["kind"].eq("q")).sort_values(["q", "known"]).groupby("symbol").tail(1).set_index("symbol")
+        closes = d.closes()
+        sector = d.table["sector"].to_dict() if "sector" in d.table else {}
+        grow = lambda now, before: now / before - 1 if before and before > 0 and np.isfinite(now) else None  # noqa: E731
+        out, pes = {}, {}
+        for sym, r in last.iterrows():
+            c = closes.get(sym)
+            pe = c / r["eps"] if c and r["ni"] > 0 and (r["eps"] or 0) > 0 else None
+            b = {"growth": grow(r["ni"], r["ni_prev"]), "sales": grow(r["rev"], r["rev_prev"]),
+                 "margin": r["ni"] / r["rev"] if (r["rev"] or 0) > 0 else None, "pe": pe}
+            b = {k: round(float(v), 4) for k, v in b.items() if v is not None and np.isfinite(v)}
+            if b:
+                out[sym] = b
+            if pe and sector.get(sym):
+                pes.setdefault(sector[sym], []).append(pe)
+        middle = {s: float(np.median(v)) for s, v in pes.items() if len(v) >= 3}
+        for sym, b in out.items():
+            if "pe" in b and sector.get(sym) in middle:
+                b["sector_pe"] = round(middle[sector[sym]], 4)
+        return out
+    return d.cache.get(d.version, ("company_brief",), build)
 
 
 def portfolio_history(d: Data) -> dict:
