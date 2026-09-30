@@ -67,6 +67,8 @@ def run(db_path: Path | str, health_url: str = HEALTH) -> tuple[bool, str]:
         model = jobs.retrain_if_due(conn, cfg, lambda p, m: None)
         if model:
             parts.append(f"Prediction model {model}.")
+        if odds := jobs.refresh_odds(conn, cfg):
+            parts.append(f"Past signals by score {odds}.")
         if alarms := jobs.check_health(None, conn, cfg, {**market, "model": model}):
             parts.append(f"Alarms: {alarms}.")
         return ok and not model.startswith("retraining failed"), " ".join(parts)

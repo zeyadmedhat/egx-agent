@@ -12,7 +12,7 @@ import pytest
 from cryptography.exceptions import InvalidTag
 
 from app import static_site
-from egx_agent import config, corporate, db, portfolio, risk, scan, strategy
+from egx_agent import config, corporate, db, levels, portfolio, risk, scan, strategy
 from egx_agent.data import prices as prices_mod
 from egx_agent.indicators import add_indicators
 from tests.conftest import make_ohlcv
@@ -49,9 +49,12 @@ def assert_same(py: dict, js: dict, keys):
 
 
 def bars_of(ind: pd.DataFrame) -> list[dict]:
+    """The bars the site's browser code gets, with the support stop the site build adds (levels.with_support)."""
+    ind = levels.with_support(ind, config.DEFAULTS)
     num = lambda v: None if pd.isna(v) else float(v)  # noqa: E731
     return [{"date": str(t.date()), "open": float(r.open), "high": float(r.high), "low": float(r.low),
              "close": float(r.close), "atr14": num(r.atr14), "ema50": num(r.ema50),
+             "sup": num(r["sup"]) if "sup" in ind else None,
              "div": float(r["div"]) if "div" in ind and r["div"] > 0 else 0} for t, r in ind.iterrows()]
 
 

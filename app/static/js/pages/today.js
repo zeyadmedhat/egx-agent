@@ -54,7 +54,7 @@ export function SignalsPage() {
       <${SectionHead} title="BUY signals" count=${data.buys.length}
         hint=${data.buys.length ? "Don't pay more than Buy up to. If it opens higher, skip it." : ''} />
       ${data.buys.length
-        ? html`<div class="signal-grid">${data.buys.map(s => html`<${SignalCard} s=${s} model=${data.model} key=${s.symbol} />`)}</div>`
+        ? html`<div class="signal-grid">${data.buys.map(s => html`<${SignalCard} s=${s} model=${data.model} odds=${data.odds} key=${s.symbol} />`)}</div>`
         : html`<div class="card"><${Empty} icon="shield" title="No BUY signals for the next session" text=${blocked
           ? "The market is in risk-off mode (EGX30 is below its 50-day average), so the agent isn't making new BUY calls. Sitting in cash is a valid decision. The list below shows what is close to a BUY once the market recovers."
           : 'No stock met all the entry rules at the last close. Sitting in cash is a valid decision. The list below shows what is close to a BUY.'} /></div>`}
@@ -64,6 +64,7 @@ export function SignalsPage() {
         hint="Strong uptrends without an entry trigger yet."><${ShariahNote} mode=${data.cfg.shariah_filter} /><//>
       <div class="card flush"><${NearList} rows=${data.watch} model=${data.model} /></div>
     </section>
+    ${data.record && html`<section class="section"><${TrackRecord} rec=${data.record} odds=${data.odds} /></section>`}
     ${data.cfg.auto_paper && data.paper && data.paper.last_scan && html`<p class="faint note">
       ${t('Paper trading at this scan: {filled} filled, {closed} closed, {skipped} skipped, {orders} new orders for the next session.', {
         filled: data.paper.last_scan.filled || 0, closed: data.paper.last_scan.closed || 0,
@@ -258,7 +259,60 @@ function Level({ label, value, sub, subCls }) {
     ${sub && html`<div class=${cls('l-sub', subCls)}>${sub}</div>`}</div>`;
 }
 
-function SignalCard({ s, model }) {
+// What the rules' BUYs with a score like this one did in the 10-year test (egx_agent/record.py). Not for the model's
+// picks: its own test is on the Predict page.
+function Odds({ s, odds }) {
+  if (!odds || s.source === 'model') return null;
+  const b = (odds.bands || []).find(x => s.score >= x.from && s.score < (x.to === 100 ? 101 : x.to));
+  if (!b || !b.n) return null;
+  return html`<p class="odds-line">${t('In {years} of tests, BUYs scored {from}–{to} won {win} of the time, {avg} a trade on average after fees ({n} trades).', {
+    years: t('10 years'), from: b.from, to: b.to, win: fmt.pct(b.win_rate, 0, false), avg: fmt.pct(b.avg, 1), n: fmt.int(b.n) })}</p>`;
+}
+
+// Every BUY the agent published, followed with the same exit rules from the next open (egx_agent/record.py), set
+// against the 10-year test. The live record is the honest check; the test only says what to expect.
+function TrackRecord({ rec, odds }) {
+  const s = rec.summary, h = rec.health, test = odds && odds.all;
+  const ended = x => (x.status === 'closed' ? tn(x.reason) : x.status === 'open' ? t('Still open')
+    : x.status === 'waiting' ? t('Buys at the next open') : t('Skipped: the open was past its limits'));
+  const columns = [
+    { key: 'date', label: 'Signal', fmt: v => fmt.date(v) },
+    { key: 'symbol', label: 'Stock', render: r => html`<a href=${stockHref(r.symbol)}>${r.symbol}</a>` },
+    { key: 'status', label: 'How it went', sortable: false, render: r => html`<span dir="auto">${ended(r)}</span>` },
+    { key: 'days', label: 'Days', align: 'r', fmt: v => (v ? fmt.int(v) : '–') },
+    { key: 'return', label: 'Result', align: 'r', fmt: v => (v == null ? '–' : html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>`) },
+  ];
+  return html`<${SectionHead} title="Track record" hint=${s.since ? t('Every BUY since {date}, followed with the same exit rules', { date: fmt.date(s.since) }) : ''} />
+    <div class="card">
+      ${s.signals ? html`<div class="stat-list">
+          <span class="k">${t('BUY signals')}</span><span class="v">${fmt.int(s.signals)}${s.open ? html` <span class="faint" style="font-weight:500">· ${t('{n} still open', { n: fmt.int(s.open) })}</span>` : ''}</span>
+          <span class="k">${t('Ended')}</span><span class="v">${fmt.int(s.n)}</span>
+          ${s.n > 0 && html`<span class="k">${t('Won')}</span><span class="v">${fmt.pct(s.win_rate, 0, false)}</span>
+            <span class="k">${t('Average per trade, after fees')}</span><span class=${cls('v', tone(s.avg))}>${fmt.pct(s.avg, 1)}</span>`}
+        </div>`
+        : html`<p class="muted" style="font-size:13px">${t('No BUY signals published yet. Each one is added here and followed until it ends.')}</p>`}
+      ${h.status === 'cold' && html`<div style="margin-top:12px"><${Callout} tone="warn">${t('The last {n} signals did clearly worse than the tests: {win} won against {test}, and they lost on average. Consider smaller positions until they recover.', {
+        n: fmt.int(h.closed), win: fmt.pct(s.win_rate, 0, false), test: fmt.pct(h.test_win_rate, 0, false) })}<//></div>`}
+      ${h.status === 'ok' && html`<p class="muted" style="font-size:13px;margin-top:10px">${t('In line with the tests: {win} won against {test}.', {
+        win: fmt.pct(s.win_rate, 0, false), test: fmt.pct(h.test_win_rate, 0, false) })}</p>`}
+      ${h.status === 'early' && html`<p class="muted" style="font-size:13px;margin-top:10px">${t('{closed} of the {need} ended signals needed to judge it. Until then, go by the test below, not these numbers.', {
+        closed: fmt.int(h.closed), need: fmt.int(h.need) })}</p>`}
+      ${test && test.n > 0 && html`<p class="faint" style="font-size:12.5px;margin-top:10px">${t('The same rules on {from} – {to}: {n} trades, {win} won, {avg} a trade on average, {cagr} a year, worst drop {dd}.', {
+        from: fmt.date(odds.from), to: fmt.date(odds.to), n: fmt.int(test.n), win: fmt.pct(test.win_rate, 0, false),
+        avg: fmt.pct(test.avg, 1), cagr: fmt.pct(odds.cagr, 1), dd: fmt.pct(odds.max_drawdown, 1) })}</p>`}
+      ${rec.signals.length > 0 && html`<${More} label="Every signal"><div class="flush"><${DataTable} columns=${columns} rows=${rec.signals}
+        rowKey=${r => `${r.date}:${r.symbol}`} sort=${{ key: 'date', dir: 'desc' }} /></div><//>`}
+      <${More} label="How far to trust these numbers"><p>${t(TRUST)}</p><//>
+    </div>`;
+}
+
+const TRUST = 'The test replays the current rules on 10 years of prices, from the open after each signal, fees included. It '
+  + 'flatters them a little: it only knows the companies listed today (ones that failed and left the exchange are missing), '
+  + 'and the rules were chosen by testing on those same years. The track record is the honest check: every BUY the agent '
+  + 'published, followed the same way. Judge it after about 30 ended signals; a handful proves nothing either way. In the '
+  + 'test a higher score barely changed the odds, so treat every BUY about the same.';
+
+function SignalCard({ s, model, odds }) {
   const i = s.info;
   const logHref = buyHref(s.symbol, s.entry_high, s.shares);
   const cautions = s.cautions || [];
@@ -286,6 +340,7 @@ function SignalCard({ s, model }) {
       <span>${t('Amount')} <b>${fmt.egp(s.amount)}</b></span>
       <span>${t('Max loss')} <b class="down">${fmt.egp(s.risk_egp)}</b></span>
     </div>
+    <${Odds} s=${s} odds=${odds} />
     <${More} label="Why this signal">
       <ul class="reasons" dir="auto">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${tn(r)}</li>`)}</ul>
       ${model && s.pred && html`<div class="model-line"><${Icon} name="target" size=${14} />

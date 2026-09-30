@@ -104,8 +104,8 @@ export function StockPage({ route }) {
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
-          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} />`}
-          ${data.chart && html`<${LevelsPanel} c=${data.chart} held=${!!data.position} sym=${data.symbol} tg=${data.telegram} />`}
+          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} />`}
+          ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} />`}
           <${SignalPanel} data=${data} />
           ${data.prediction && html`<${PredictionPanel} p=${data.prediction} />`}
           ${data.fundamentals && html`<${CompanyPanel} f=${data.fundamentals} />`}
@@ -210,18 +210,69 @@ function source(what) {
 }
 const sources = list => (list || []).map(source).join(' · ');
 
-// "Stop" / "Target" beside the zone each one sits under.
-function tagFor(z, c) {
-  const same = (a, b) => (a || []).slice(0, 3).join('|') === (b || []).slice(0, 3).join('|');
-  if (z.side === 'down' && c.stop_why.length && same(z.sources, c.stop_why)) return html` <span class="tag down">${t('Stop')}</span>`;
-  if (z.side === 'up' && c.target_why.length && same(z.sources, c.target_why)) return html` <span class="tag up">${t('Target')}</span>`;
+// The chart zone your stop or target sits at. levels.py puts a stop 0.3× the daily range under a support's low and a
+// target 0.1× under a resistance's low; the range has moved since they were set, so the match is a little loose.
+const stopZone = (p, c, atr) => ((c && c.supports) || []).find(z => z.low >= p.stop && z.low - p.stop <= 0.6 * atr) || null;
+const targetZone = (p, c, atr) => ((c && c.resistances) || []).find(z => Math.abs(z.low - 0.1 * atr - p.target) <= 0.3 * atr) || null;
+function nextTarget(p, c, atr) {
+  const z = ((c && c.resistances) || []).find(r => r.low - 0.1 * atr > p.target * 1.02);
+  return z ? z.low - 0.1 * atr : null;
+}
+
+function stopWhy(p, c, atr) {
+  const z = stopZone(p, c, atr);
+  if (z) return `${t('just under support:')} ${sources(z.sources)}`;
+  if (p.stop >= p.avg_price * 0.9995) return t('raised as the price rose: it now protects at least your buy price');
+  if (p.stop_src === 'yours') return t('the stop you entered');
+  if (p.stop_src === 'formula') return t('no support in reach when you bought, so 2× the daily range under your price');
+  if (p.stop_src === 'chart') return t('just under a support on the chart the day you bought');
   return '';
 }
 
-// Stop-loss and target from the chart's support and resistance (egx_agent/levels.py), for every stock.
-function LevelsPanel({ c, held, sym, tg }) {
-  const zones = [...(c.resistances || []).slice().reverse().map(z => ({ ...z, side: 'up' })),
-    { price: c.close, now: true }, ...(c.supports || []).map(z => ({ ...z, side: 'down' }))];
+function targetWhy(p, c, atr) {
+  const z = targetZone(p, c, atr);
+  if (z) return `${t('just under resistance:')} ${sources(z.sources)}`;
+  if (p.target_src === 'formula') return t('no resistance within reach when you bought, so 2× the risk');
+  if (p.target_src === 'chart') return t('just under a resistance on the chart the day you bought');
+  return '';
+}
+
+// "Stop" / "Target" beside the zone each one sits under: the plan's, or your position's when you hold it.
+function tagFor(z, down, c, pos, atr) {
+  if (pos) {
+    if (down && z === stopZone(pos, c, atr)) return html` <span class="tag down">${t('Your stop')}</span>`;
+    if (!down && z === targetZone(pos, c, atr)) return html` <span class="tag up">${t('Your target')}</span>`;
+    return '';
+  }
+  const same = (a, b) => (a || []).slice(0, 3).join('|') === (b || []).slice(0, 3).join('|');
+  if (down && c.stop_why.length && same(z.sources, c.stop_why)) return html` <span class="tag down">${t('Stop')}</span>`;
+  if (!down && c.target_why.length && same(z.sources, c.target_why)) return html` <span class="tag up">${t('Target')}</span>`;
+  return '';
+}
+
+function ZoneList({ c, pos, atr }) {
+  const zone = (z, down) => html`<div class=${cls('zone', down ? 'down' : 'up')}><span class="p">${fmt.price(z.price)}</span>
+    <span class="s" title=${t('Strength')}>${'●'.repeat(Math.min(5, Math.round(z.strength / 1.5)) || 1)}</span>
+    <span class="w">${sources(z.sources)}${tagFor(z, down, c, pos, atr)}</span></div>`;
+  return html`<div class="zone-list">
+      ${(c.resistances || []).slice().reverse().map(z => zone(z, false))}
+      <div class="zone now"><span class="p">${fmt.price(c.close)}</span><span>${t('Last close')}</span></div>
+      ${(c.supports || []).map(z => zone(z, true))}</div>
+    <p class="faint" style="font-size:12px;margin-top:8px">${t('More dots: more tools agree on the level.')}</p>`;
+}
+
+// Stop-loss and target from the chart's support and resistance (egx_agent/levels.py), for every stock. When you hold
+// it, your position's stop and target are the only ones shown (Your position), and this card lists the levels.
+function LevelsPanel({ c, pos, atr, sym, tg }) {
+  const hint = tg && tg.bot && html`<p class="faint tg-hint"><${Icon} name="bell" size=${13} />${' '}
+    ${t('A Telegram message when it nears support or reaches resistance: send {cmd} to @{bot}.', { cmd: `/watch ${sym} levels`, bot: tg.bot })}</p>`;
+  if (pos) {
+    return html`<div class="card levels-card">
+      <div class="card-title"><${Icon} name="target" size=${15} />${t('Support & resistance levels')}
+        <span class="right faint">${t('from the chart')}</span></div>
+      <${ZoneList} c=${c} pos=${pos} atr=${atr} />
+      <${More} label="How these are worked out"><p>${t(LEVELS_HOW)}</p><//>${hint}</div>`;
+  }
   return html`<div class="card levels-card">
     <div class="card-title"><${Icon} name="target" size=${15} />${t('Stop-loss & target')}
       <span class="right faint">${t('from the chart')}</span></div>
@@ -241,19 +292,9 @@ function LevelsPanel({ c, held, sym, tg }) {
       ${!c.target_why.length && html`<li><b class="up">${t('Target')}</b> ${t('no resistance within reach, so {r}× the risk', { r: fmt.num(c.rr, 1) })}</li>`}
       ${c.hurdle && html`<li class="caution">${t('Resistance at {price} comes first: {what}', { price: fmt.price(c.hurdle.price), what: sources(c.hurdle.sources) })}</li>`}
     </ul>
-    <p class="faint" style="font-size:12px;margin-top:10px">${held
-      ? t('For a buy at the last close ({price}). Your position keeps its own stop and target below.', { price: fmt.price(c.close) })
-      : t('For a buy at the last close ({price}). The agent logs these with your buy.', { price: fmt.price(c.close) })}</p>
-    <${More} label="Support & resistance levels">
-      <div class="zone-list">${zones.map(z => z.now
-        ? html`<div class="zone now"><span class="p">${fmt.price(z.price)}</span><span>${t('Last close')}</span></div>`
-        : html`<div class=${cls('zone', z.side)}><span class="p">${fmt.price(z.price)}</span>
-            <span class="s" title=${t('Strength')}>${'●'.repeat(Math.min(5, Math.round(z.strength / 1.5)) || 1)}</span>
-            <span class="w">${sources(z.sources)}${tagFor(z, c)}</span></div>`)}</div>
-      <p class="faint" style="font-size:12px;margin-top:8px">${t('More dots: more tools agree on the level.')}</p><//>
-    <${More} label="How these are worked out"><p>${t(LEVELS_HOW)}</p><//>
-    ${tg && tg.bot && html`<p class="faint tg-hint"><${Icon} name="bell" size=${13} />${' '}
-      ${t('A Telegram message when it nears support or reaches resistance: send {cmd} to @{bot}.', { cmd: `/watch ${sym} levels`, bot: tg.bot })}</p>`}
+    <p class="faint" style="font-size:12px;margin-top:10px">${t('For a buy at the last close ({price}). The agent logs these with your buy.', { price: fmt.price(c.close) })}</p>
+    <${More} label="Support & resistance levels"><${ZoneList} c=${c} atr=${atr} /><//>
+    <${More} label="How these are worked out"><p>${t(LEVELS_HOW)}</p><//>${hint}
   </div>`;
 }
 
@@ -348,17 +389,30 @@ function PredictionPanel({ p }) {
     <a class="btn sm block" style="margin-top:14px" href="#/predict">${t('How reliable is it?')}</a></div>`;
 }
 
-function PositionPanel({ p, hold }) {
+// Your stop and target, where each comes from, and the next resistance past the target. The stop rises to each new
+// support under the price (egx_agent/engine.py); the target stays where it was set when you bought.
+function PositionPanel({ p, hold, c, atr }) {
+  const pct = v => html` <span class="faint" style="font-weight:500">${fmt.pct(v / p.last - 1, 1)}</span>`;
+  const next = p.stop != null && c ? nextTarget(p, c, atr) : null;
+  const sw = p.stop != null ? stopWhy(p, c, atr) : '';
+  const tw = targetWhy(p, c, atr);
   return html`<div class="card">
     <div class="card-title">${t('Your position')}<span class="right"><${StatusChip} status=${p.status} /></span></div>
     <div class="stat-list">
       <span class="k">${t('Shares')}</span><span class="v">${fmt.int(p.shares)}</span>
       <span class="k">${t('Average price')}</span><span class="v">${fmt.price(p.avg_price)}</span>
       <span class="k">${t('P&L after fees')}</span><span class=${cls('v', tone(p.pnl))}>${fmt.egp(p.pnl)} (${fmt.pct(p.pnl_pct)})</span>
-      <span class="k">${t('Stop now')}</span><span class="v down">${fmt.price(p.stop)}</span>
-      <span class="k">${t('Target')}</span><span class="v up">${fmt.price(p.target)}</span>
+      <span class="k"><${Term} k="stop">${t('Stop now')}<//></span><span class="v down">${fmt.price(p.stop)}${p.stop != null && pct(p.stop)}</span>
+      <span class="k"><${Term} k="target">${t('Target')}<//></span><span class="v up">${fmt.price(p.target)}${pct(p.target)}</span>
+      ${next && html`<span class="k">${t('Next target')}</span><span class="v up">${fmt.price(next)}${pct(next)}</span>`}
       <span class="k">${t('First buy')}</span><span class="v">${fmt.date(p.first_buy)}</span>
     </div>
+    ${(sw || tw) && html`<ul class="level-why">
+      ${sw && html`<li><b class="down">${t('Stop')}</b> ${sw}</li>`}
+      ${tw && html`<li><b class="up">${t('Target')}</b> ${tw}</li>`}
+      ${next && html`<li><b class="up">${t('Next target')}</b> ${t('the next resistance above your target, if the price gets through it')}</li>`}
+    </ul>`}
+    <p class="faint" style="font-size:12px;margin-top:8px">${t('Each evening the stop rises to just under the newest support below the price, and never goes down. The target stays where it was set.')}</p>
     <p class="muted" style="font-size:13px;margin:12px 0">${tn(p.reason)}</p>
     <${DayBar} day=${p.day} max=${hold.max} review=${hold.review} />
     <a class="btn sm block" style="margin-top:12px" href="#/portfolio">${t('Manage in My Portfolio')}</a>

@@ -5,8 +5,8 @@
 //
 // A "book" is one person's data, shaped like the Mac's database tables:
 //   { trades: [...], fills: [...], dividends: [...], adjustments: [...], next_id: 1 }
-// Bars are { date: 'YYYY-MM-DD', open, high, low, close, atr14, ema50, div } (missing numbers are NaN; div is the
-// cash dividend going ex that day, 0 on other days).
+// Bars are { date: 'YYYY-MM-DD', open, high, low, close, atr14, ema50, div, sup } (missing numbers are NaN; div is
+// the cash dividend going ex that day, 0 on other days; sup the chart's stop under support that day, levels.py).
 
 // ------------------------------------------------------------------ small helpers
 export const f2 = v => Number(v).toFixed(2);
@@ -117,6 +117,7 @@ export function updateAfterClose(p, bar, cfg) {
     p.stop = Math.max(p.stop, p.entry_price);
     if (trail > p.stop) p.stop = trail;                    // a NaN trail (no ATR yet) is ignored, as in Python
   }
+  if (cfg.stop_follows_support && bar.sup > p.stop) p.stop = bar.sup;   // just under the nearest support; NaN: none
   if (c < bar.ema50) p.exit_next_open = 'Trend break (closed below 50-day average)';
   else if (p.days_held >= cfg.max_hold_days) p.exit_next_open = `Max hold reached (${cfg.max_hold_days} trading days)`;
 }
@@ -354,13 +355,16 @@ export function openPosition(book, account, symbol) {
 
 // Stop and target for an entry/average price (portfolio._levels): the stop you typed, else the chart's support when
 // it's between stop_min_pct and stop_max_pct below, else the ATR rule; the chart's target when it pays at least the
-// risk, else target_r × the risk.
+// risk, else target_r × the risk. chart: { stop, target } on the buy date, stop NaN when no support was in reach.
+// Also where each came from (stop_src: yours / chart / formula, target_src: chart / formula), for the stock page.
 function levels(price, atr, cfg, stop, chart = null) {
   const gap = chart ? 1 - chart.stop / price : NaN;
-  const s = stop ? +stop
-    : chart && gap >= cfg.stop_min_pct / 100 && gap <= cfg.stop_max_pct / 100 ? chart.stop : initialStop(price, atr, cfg);
+  const fromChart = !stop && !!chart && gap >= cfg.stop_min_pct / 100 && gap <= cfg.stop_max_pct / 100;
+  const s = stop ? +stop : fromChart ? chart.stop : initialStop(price, atr, cfg);
   const risk = price - s;
-  return [s, chart && chart.target >= price + risk ? chart.target : price + cfg.target_r * risk];
+  const chartTarget = !!chart && chart.target >= price + risk;
+  return [s, chartTarget ? chart.target : price + cfg.target_r * risk,
+    { stop_src: stop ? 'yours' : fromChart ? 'chart' : 'formula', target_src: chartTarget ? 'chart' : 'formula' }];
 }
 
 // Log a buy. If you already hold this stock, the shares join that position at the average price.
@@ -369,20 +373,20 @@ export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector =
   const pos = openPosition(book, 'real', symbol);
   let id;
   if (!pos) {
-    const [s, target] = levels(price, atr, cfg, stop, chart);
+    const [s, target, src] = levels(price, atr, cfg, stop, chart);
     id = nextId(book);
     book.trades.push({ id, account: 'real', status: 'open', symbol, sector, signal_date: null, entry_date: date,
       entry_price: price, shares, initial_stop: s, stop: s, target, entry_limit: null, highest_close: price,
       days_held: 0, exit_next_open: null, last_bar_date: null, exit_date: null, exit_price: null, exit_reason: null,
-      fees: fee, notes });
+      fees: fee, notes, ...src });
   } else {
     id = pos.id;
     const total = pos.shares + shares;
     const avg = (pos.entry_price * pos.shares + price * shares) / total;
-    const [s, target] = levels(avg, atr, cfg, stop, chart);
+    const [s, target, src] = levels(avg, atr, cfg, stop, chart);
     Object.assign(pos, { entry_date: pos.entry_date < date ? pos.entry_date : date, entry_price: avg, shares: total,
       initial_stop: s, stop: s, target, highest_close: avg, fees: (pos.fees || 0) + fee,
-      notes: [pos.notes, notes].filter(Boolean).join('; ') });
+      notes: [pos.notes, notes].filter(Boolean).join('; '), ...src });
   }
   addFill(book, id, symbol, date, 'buy', shares, price, fee, notes);
   return id;

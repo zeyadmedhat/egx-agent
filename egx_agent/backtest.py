@@ -43,9 +43,16 @@ def prepare(price_data: dict[str, pd.DataFrame], index_df: pd.DataFrame, stocks:
         for s, f in ind.items():
             f["div"] = dividends.per_share(conn, s, f["close"])
     sf = {s: strategy.signal_frame(ind[s], cfg) for s in ind}
-    # Stop and target from the chart (levels.py) on every day the stock could be bought: a setup, or a model pick
-    sf = {s: levels.apply(ind[s], f, cfg, (f["any_setup"] | (f["eligible"] & f["trend_ok"])).to_numpy())
-          for s, f in sf.items()}
+    # Stop and target from the chart (levels.py) on every day the stock could be bought: a setup, or a model pick.
+    # With stop_follows_support, also the support under the close on every day a position could still be held (it
+    # closed above its 50-day average), which an open position's stop rises to (engine.update_after_close).
+    for s, f in sf.items():
+        buyable = (f["any_setup"] | (f["eligible"] & f["trend_ok"])).to_numpy()
+        held = (ind[s]["close"] >= ind[s]["ema50"]).to_numpy() if levels.follows_support(cfg) else False
+        lv = levels.frame(ind[s], cfg, buyable | held) if cfg.get("levels_mode", "atr") == "chart" else None
+        sf[s] = levels.apply(ind[s], f, cfg, buyable, lv)
+        if levels.follows_support(cfg):
+            ind[s]["sup"] = lv["sup"].to_numpy()
     dates = index_ind.index
     eligible = _panel({s: f["eligible"].astype(float) for s, f in sf.items()}, dates, 0.0).astype(bool)
     setup = _panel({s: f["any_setup"].astype(float) for s, f in sf.items()}, dates, 0.0).astype(bool)
@@ -75,6 +82,7 @@ def run(prep: Prepared, cfg: dict, start: str | pd.Timestamp, end: str | pd.Time
     priority = prep.score if order is None else order
     cash = capital
     positions: dict[str, engine.Position] = {}
+    scores: dict[str, float] = {}             # each open position's signal score (record.odds_from_trades)
     paid: dict[str, float] = {}               # dividends each open position has been paid
     pending: list[dict] = []
     last_close: dict[str, float] = {}
@@ -91,7 +99,7 @@ def run(prep: Prepared, cfg: dict, start: str | pd.Timestamp, end: str | pd.Time
             "symbol": sym, "sector": pos.sector, "entry_date": pos.entry_date, "entry_price": pos.entry_price,
             "exit_date": str(d.date()), "exit_price": price, "shares": pos.shares, "days_held": pos.days_held,
             "pnl": proceeds + got - cost, "return_pct": (proceeds + got) / cost - 1, "reason": reason,
-            "dividends": got,
+            "dividends": got, "score": scores.pop(sym, None),
         })
 
     for i, d in enumerate(dates):
@@ -118,6 +126,7 @@ def run(prep: Prepared, cfg: dict, start: str | pd.Timestamp, end: str | pd.Time
                 continue
             cash -= pos.entry_price * pos.shares * (1 + fee)
             positions[pos.symbol] = pos
+            scores[pos.symbol] = order_.get("score")
             filled_today.add(pos.symbol)
             res = engine.process_bar(pos, bar, cfg)
             if res:
@@ -155,6 +164,7 @@ def run(prep: Prepared, cfg: dict, start: str | pd.Timestamp, end: str | pd.Time
                 "symbol": s, "sector": prep.sectors.get(s, "Other"), "close": float(ind_row["close"]),
                 "stop": float(sf_row["stop"]), "target": float(sf_row["target"]),
                 "entry_limit": float(sf_row["entry_high"]), "avg_value": float(ind_row["value_avg20"]),
+                "score": float(prep.score.at[d, s]),
             })
         held = [{"symbol": s, "sector": p.sector, "entry_price": p.entry_price, "stop": p.stop, "shares": p.shares}
                 for s, p in positions.items()]

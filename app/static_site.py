@@ -28,7 +28,7 @@ from pathlib import Path
 import yaml
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from egx_agent import breadth, config, db, scan
+from egx_agent import breadth, config, db, record, scan
 from egx_agent.data import dividends, prices, shariah
 
 from . import views
@@ -41,7 +41,8 @@ MIN_PASSWORD = 10
 MAC_ONLY_KEYS = ("paper_capital", "auto_paper")     # settings for the Mac's paper account
 SITE_DEFAULTS = {"shariah_filter": "kashif"}         # friends start with Kashif-compliant stocks only
 WORKFLOW = "site.yml"       # the GitHub job that scans and publishes the site (.github/workflows/)
-STOCK_COLS = views.SERIES_COLS + ("atr14",)   # the exit rules in the browser need the ATR too
+# the exit rules in the browser need the ATR and the stop under support too, and a logged buy the chart's target
+STOCK_COLS = views.SERIES_COLS + ("atr14", "sup", "ptgt")
 
 
 # ------------------------------------------------------------------ encryption
@@ -135,6 +136,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "scan_url": scan_url, "cautions": views.cautions_map(d),
         # each stock's next cash dividend: a holder lowers the stop by it before the ex-date (views.exdiv_item)
         "dividends_coming": dividends.coming(conn, scan_date or datetime.now().date().isoformat()),
+        # every BUY published so far and how it went, and what the rules' past signals did by score (record.py)
+        "record": views.signal_record(d), "odds": record.public_odds(record.stored_odds(conn)),
     }
     out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
                               "screener": views.screener(d), "history": views.history_data(d),

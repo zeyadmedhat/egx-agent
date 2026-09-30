@@ -41,7 +41,8 @@ async function barsFor(c, symbols) {
     const divs = s.divs || {};            // cash dividend per share by ex-date
     for (let i = 0; i < s.time.length; i++) {
       bars.push({ date: s.time[i], open: E.num(s.open[i]), high: E.num(s.high[i]), low: E.num(s.low[i]),
-        close: E.num(s.close[i]), atr14: E.num(s.atr14[i]), ema50: E.num(s.ema50[i]), div: divs[s.time[i]] || 0 });
+        close: E.num(s.close[i]), atr14: E.num(s.atr14[i]), ema50: E.num(s.ema50[i]), div: divs[s.time[i]] || 0,
+        sup: E.num((s.sup || [])[i]), ptgt: E.num((s.ptgt || [])[i]) });   // the chart's stop and target that day
     }
     c.bars[sym] = bars;
   }));
@@ -118,7 +119,7 @@ async function openPositions(c, symbol = null) {
       pnl_pct: worth / r.entry_price - 1,
       pnl: (worth - r.entry_price) * r.shares - fees - worth * r.shares * fee + div,
       stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target,
-      day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
+      stop_src: r.stop_src || null, target_src: r.target_src || null, day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
       notes: r.notes || '', fills, adjust: ev || null, n_buys: fills.filter(f => f.side === 'buy').length || 1,
     };
   });
@@ -227,6 +228,7 @@ async function today(c) {
     model: Object.keys(preds.by_symbol).length ? { base: preds.base, count: preds.count, date: preds.date } : null,
     cfg: Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
       'shariah_filter'].map(k => [k, cfg[k]])),
+    record: core.record || null, odds: core.odds || null,
   };
 }
 
@@ -445,9 +447,9 @@ async function buy(c, body) {
     fail(400, "There's no price history for this stock, so the automatic stop can't be calculated. Enter a stop-loss.");
   }
   const had = !!E.openPosition(c.book, 'real', sym);
-  // The chart's stop and target from the stock's page: they're for the last close, so only for a recent buy.
-  const page = c.cfg.levels_mode === 'chart' ? await load(`stock/${sym}`).catch(() => null) : null;
-  const chart = page && page.chart && page.stats && date >= E.addDays(page.stats.last_bar, -7) ? page.chart : null;
+  // The chart's stop (under support) and target on the buy date, or the last session before it.
+  const day = bars.filter(b => b.date <= date).at(-1);
+  const chart = c.cfg.levels_mode === 'chart' && day && Number.isFinite(day.ptgt) ? { stop: day.sup, target: day.ptgt } : null;
   E.addRealBuy(c.book, c.cfg, sym, date, price, shares, atr, info(c, sym).sector || '', stop || null,
     String(body.notes || '').trim().slice(0, 500), chart);
   saveBook(c.book);

@@ -12,7 +12,7 @@ const input = JSON.parse(await new Promise(resolve => {
   process.stdin.on('end', () => resolve(s));
 }));
 
-const bars = list => list.map(b => ({ ...b, atr14: E.num(b.atr14), ema50: E.num(b.ema50) }));
+const bars = list => list.map(b => ({ ...b, atr14: E.num(b.atr14), ema50: E.num(b.ema50), sup: E.num(b.sup) }));
 const emptyBook = () => ({ next_id: 1, trades: [], fills: [], dividends: [], adjustments: [] });
 
 const OPS = {

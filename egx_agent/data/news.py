@@ -387,7 +387,9 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
     conn.commit()
     res["failed"] = sorted(set(res["failed"]))
     res["tried"] = sorted(set(res["tried"]))
-    db.set_meta(conn, "news_updated", datetime.now().isoformat(timespec="seconds"))
+    # When the news last changed: a run that found nothing new leaves the site as it was (static_site's stamp)
+    if res["new"] or res["actions"] or not db.get_meta(conn, "news_updated"):
+        db.set_meta(conn, "news_updated", datetime.now().isoformat(timespec="seconds"))
     return res
 
 

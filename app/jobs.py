@@ -12,7 +12,7 @@ from typing import Callable
 
 import pandas as pd
 
-from egx_agent import backtest, config, corporate, db, predict, scan
+from egx_agent import backtest, config, corporate, db, predict, record, scan
 from egx_agent.data import macro, news, prices, shariah, universe
 
 from . import accounts, alerts, health, views
@@ -118,9 +118,19 @@ def scan_job(update_data: bool, site: "accounts.Site | None" = None):
         market = scan.run_scan(conn, cfg, progress=say, update_data=update_data, accounts=people)
         market["telegram"] = send_alerts(site, conn, cfg)
         market["model"] = retrain_if_due(conn, cfg, say)
+        market["odds"] = refresh_odds(conn, cfg)
         market["alarms"] = check_health(site, conn, cfg, market)
         return market
     return fn
+
+
+def refresh_odds(conn, cfg: dict) -> str:
+    """What the rules' past signals did by score, for the BUY cards: a 10-year replay once a week (record.py)."""
+    try:
+        return "updated" if record.refresh_odds(conn, cfg) else ""
+    except Exception as exc:  # the signals still work without it
+        traceback.print_exc()
+        return f"failed: {exc}"
 
 
 def owner_sender(site: "accounts.Site | None", cfg: dict) -> health.Send | None:

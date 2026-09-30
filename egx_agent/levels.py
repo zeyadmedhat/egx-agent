@@ -190,13 +190,14 @@ def plan_at(ind: pd.DataFrame, cfg: dict, day=None) -> dict | None:
     return chart_plan(arrays(ind.tail(LOOKBACK)), cfg)
 
 
-FRAME_COLS = ("stop", "target", "near_support", "near_resist", "support_strength")
+FRAME_COLS = ("stop", "target", "sup", "near_support", "near_resist", "support_strength")
 
 
 def frame(ind: pd.DataFrame, cfg: dict, rows: np.ndarray | None = None) -> pd.DataFrame:
     """chart_plan on each given row (a boolean mask; default every row), each from the bars up to that row only:
-    the stop, the target, how far the nearest support is under the close and the nearest resistance above it (as
-    fractions of the close) and that support's strength. NaN on other rows and where the chart gives no plan."""
+    the stop, the target, `sup` (the stop when it sits under a support, NaN when it's the ATR rule's), how far the
+    nearest support is under the close and the nearest resistance above it (as fractions of the close) and that
+    support's strength. NaN on other rows and where the chart gives no plan."""
     n = len(ind)
     out = {k: np.full(n, np.nan) for k in FRAME_COLS}
     if rows is None:
@@ -208,6 +209,8 @@ def frame(ind: pd.DataFrame, cfg: dict, rows: np.ndarray | None = None) -> pd.Da
         if p:
             c = p["close"]
             out["stop"][i], out["target"][i] = p["stop"], p["target"]
+            if p["method"] != "atr":
+                out["sup"][i] = p["stop"]
             if p["supports"]:
                 out["near_support"][i] = 1 - p["supports"][0]["price"] / c
                 out["support_strength"][i] = p["supports"][0]["strength"]
@@ -216,16 +219,40 @@ def frame(ind: pd.DataFrame, cfg: dict, rows: np.ndarray | None = None) -> pd.Da
     return pd.DataFrame(out, index=ind.index)
 
 
-def apply(ind: pd.DataFrame, sf: pd.DataFrame, cfg: dict, rows: np.ndarray | None = None) -> pd.DataFrame:
+def follows_support(cfg: dict) -> bool:
+    return cfg.get("levels_mode", "atr") == "chart" and bool(cfg.get("stop_follows_support"))
+
+
+def with_support(ind: pd.DataFrame, cfg: dict, since=None) -> pd.DataFrame:
+    """ind with a `sup` column (frame's) on the rows from `since` on, for the exit rules: an open position's stop
+    rises to it each evening (engine.update_after_close). Rows already worked out are kept. Unchanged when the setting
+    is off."""
+    if not follows_support(cfg) or len(ind) < 60 or not set(COLS) <= set(ind.columns):
+        return ind      # too short for chart levels (chart_plan) or not an indicator frame
+    rows = ind.index >= pd.Timestamp(since) if since is not None else np.ones(len(ind), dtype=bool)
+    if "sup" in ind:
+        rows &= ind["sup"].isna().to_numpy()
+    if not rows.any():
+        return ind
+    out = ind.copy()
+    sup = frame(ind, cfg, rows)["sup"]
+    out["sup"] = out["sup"].where(~rows, sup) if "sup" in out else sup
+    return out
+
+
+def apply(ind: pd.DataFrame, sf: pd.DataFrame, cfg: dict, rows: np.ndarray | None = None,
+          lv: pd.DataFrame | None = None) -> pd.DataFrame:
     """Replace the ATR stop/target in a signal frame with the chart's on the given rows (a boolean mask; default the
-    last row). Does nothing unless cfg['levels_mode'] is 'chart'."""
+    last row). lv: frame() already worked out on those rows (or more). Does nothing unless cfg['levels_mode'] is
+    'chart'."""
     if cfg.get("levels_mode", "atr") != "chart" or not len(ind):
         return sf
     if rows is None:
         rows = np.zeros(len(ind), dtype=bool)
         rows[-1] = True
-    lv = frame(ind, cfg, rows)
-    ok = lv["stop"].notna().to_numpy()
+    if lv is None:
+        lv = frame(ind, cfg, rows)
+    ok = lv["stop"].notna().to_numpy() & rows
     sf = sf.copy()
     sf["stop"] = np.where(ok, lv["stop"], sf["stop"])
     sf["target"] = np.where(ok, lv["target"], sf["target"])

@@ -34,7 +34,7 @@ from pathlib import Path
 
 import requests
 
-from egx_agent import config, db, predict, scan
+from egx_agent import config, db, predict, record, scan
 from egx_agent.data import dividends, news, prices
 
 from . import alerts, backup, health, jobs, static_site, views
@@ -204,6 +204,14 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         if report["model"].startswith(("trained", "retrain", "failed")):
             health.note(conn, ["Prediction model training"] if "failed" in report["model"] else [],
                         ["Prediction model training"])
+
+        # 2b. what the rules' past signals did, by score (a 10-year replay, weekly): the odds on each BUY card
+        try:
+            if record.refresh_odds(conn, cfg):
+                report["odds"] = "past signals replayed (weekly)"
+        except Exception as exc:  # the site still works without them
+            traceback.print_exc()
+            report["odds"] = f"failed ({type(exc).__name__})"
 
         # 3. Telegram: the friends who pressed Start (or /stop) since the last run
         telegram = subs = None

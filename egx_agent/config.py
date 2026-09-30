@@ -61,6 +61,11 @@ DEFAULTS: dict = {
     "stop_min_pct": 4.0,
     "stop_max_pct": 12.0,
     "target_r": 2.0,
+    # Each evening an open position's stop rises to just under the nearest solid support below the close (never
+    # down). Walk-forward 2016–2026 with the model's picks: 31.8% a year against 22.3%, worst drop −25.2% against
+    # −22.7%; the rules alone 20.4% against 13.4% (engine.py). Also tried: skipping BUYs with no support within
+    # stop_max_pct (28.1%, drop −14.8%, but worse in 2016–21) and stops up to 20% under support (18.0%): not used.
+    "stop_follows_support": True,
     "review_day": 10,                # ~2 weeks
     "max_hold_days": 20,             # ~1 month (hard time stop)
     # Automation

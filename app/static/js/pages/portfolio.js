@@ -450,7 +450,7 @@ function BuyForm({ data, query }) {
         ? html`Joins your ${held.symbol} position: ${fmt.int(held.shares)} → <b>${fmt.int(held.shares + shares)}</b> shares at a new average of
             <b>${fmt.price((held.avg_price * held.shares + cost) / (held.shares + shares))}</b>. Stop and target are recalculated from the average${stop ? ' (using your stop)' : ''}.`
         : stop ? html`New position with your stop at <b>${fmt.price(stop)}</b>.`
-          : 'New position. The stop is set automatically: 2× the daily range below your price, kept between 4% and 12%.'}</span></div>`;
+          : 'New position. The stop is set automatically just under the nearest support on the chart that day (4–12% below your price), or 2× the daily range when there is none; each evening it rises to the newest support.'}</span></div>`;
   }
 
   const submit = async e => {

@@ -10,7 +10,7 @@ from datetime import date, datetime
 import numpy as np
 import pandas as pd
 
-from egx_agent import breadth, config, corporate, db, levels, portfolio, predict, risk, scan, strategy
+from egx_agent import breadth, config, corporate, db, levels, portfolio, predict, record, risk, scan, strategy
 from egx_agent.data import dividends, news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
@@ -378,7 +378,13 @@ def today(d: Data) -> dict:
         "model": {k: preds[k] for k in ("base", "count", "date")} if preds["by_symbol"] else None,
         "cfg": {k: cfg[k] for k in ("max_hold_days", "review_day", "riskoff_block_buys", "auto_paper", "buy_score",
                                     "shariah_filter")},
+        "record": signal_record(d), "odds": record.public_odds(record.stored_odds(d.conn)),
     })
+
+
+def signal_record(d: Data) -> dict:
+    """Every BUY the agent published and how it went (egx_agent/record.py), the same for everyone."""
+    return d.cache.get(d.version, ("record",), lambda: record.signal_record(d.conn, d.cfg, d.indicators))
 
 
 def corporate_history(conn: sqlite3.Connection, sym: str, close: float) -> dict:
@@ -495,6 +501,13 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     out["fundamentals"] = dividends.company_numbers(d.conn, sym, d.table["sector"])
     out["news"] = news.stock_news(d.conn, sym, 30)
     out["cautions"] = cautions_map(d).get(sym, [])
+    if {"sup", "ptgt"} & set(cols):
+        # The site's browser needs the chart's levels on each recent day: `sup`, the stop under support (NaN when
+        # there's none), which an open position's stop rises to, and `ptgt`, the target, for a buy logged that day.
+        rows = np.zeros(len(ind), dtype=bool)
+        rows[-PLAN_DAYS:] = True
+        lv = levels.frame(ind, cfg, rows) if cfg.get("levels_mode") == "chart" else pd.DataFrame(index=ind.index)
+        ind = ind.assign(sup=lv.get("sup", np.nan), ptgt=lv.get("target", np.nan))
     shown = ind if tail is None else ind.tail(tail)
     out["series"] = {"time": [str(t.date()) for t in shown.index], **{c: column(shown[c]) for c in cols}}
     if "div" in shown:   # cash dividends by ex-date: the exit rules in the browser move the stop for them too
@@ -503,6 +516,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     return out
 
 
+PLAN_DAYS = 250               # the site gets the chart's levels for about a year of days (stock_public)
 INTRADAY_SHOWN = {"1h": 700, "4h": 400}     # bars per chart: about 5½ months of hours, 8 months of 4-hour bars
 
 

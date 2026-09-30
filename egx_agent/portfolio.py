@@ -5,7 +5,7 @@ import sqlite3
 
 import pandas as pd
 
-from . import corporate, db, engine
+from . import corporate, db, engine, levels
 from .indicators import add_indicators
 from .strategy import initial_stop
 
@@ -32,11 +32,13 @@ def trades_df(conn: sqlite3.Connection, account: str, statuses: tuple[str, ...] 
 def _levels(price: float, atr: float | None, cfg: dict, stop: float | None = None,
             chart: dict | None = None) -> tuple[float, float]:
     """Stop and target for an entry/average price. The stop is the one you typed, else the chart's support
-    (levels.chart_plan, when it's between stop_min_pct and stop_max_pct below the price), else the ATR rule. The
-    target is the chart's resistance when it pays at least the risk, else target_r × the risk."""
+    (levels.chart_plan on the buy date, when it's under a support and between stop_min_pct and stop_max_pct below the
+    price), else the ATR rule. The target is the chart's resistance when it pays at least the risk, else target_r ×
+    the risk."""
     if stop:
         stop = float(stop)
-    elif chart and cfg["stop_min_pct"] / 100 <= 1 - chart["stop"] / price <= cfg["stop_max_pct"] / 100:
+    elif (chart and chart.get("method") != "atr"
+          and cfg["stop_min_pct"] / 100 <= 1 - chart["stop"] / price <= cfg["stop_max_pct"] / 100):
         stop = float(chart["stop"])
     else:
         stop = float(initial_stop(price, atr, cfg))
@@ -219,7 +221,7 @@ def real_status(row: pd.Series, ind: pd.DataFrame | None, cfg: dict) -> dict:
         shares=int(row["shares"]), initial_stop=float(row["initial_stop"]), stop=float(row["initial_stop"]),
         target=float(row["target"]), highest_close=float(row["entry_price"]), sector=row.get("sector") or "",
     )
-    st = engine.replay_status(pos, ind, cfg)
+    st = engine.replay_status(pos, levels.with_support(ind, cfg, row["entry_date"]), cfg)
     st["last_close"] = float(ind["close"].iloc[-1])
     return st
 
@@ -322,6 +324,7 @@ def process_paper(conn: sqlite3.Connection, cfg: dict, ind: dict[str, pd.DataFra
         if frame is None:
             continue
         start = pd.Timestamp(r.last_bar_date) if r.last_bar_date else pd.Timestamp(r.entry_date) - pd.Timedelta(days=1)
+        frame = levels.with_support(frame, cfg, start)
         bars = frame.loc[(frame.index > start) & (frame.index <= upto)]
         pos = engine.Position(
             symbol=r.symbol, entry_date=r.entry_date, entry_price=r.entry_price, shares=int(r.shares),
