@@ -35,7 +35,7 @@ from pathlib import Path
 import requests
 
 from egx_agent import config, db, predict, record, scan
-from egx_agent.data import dividends, news, prices
+from egx_agent.data import dividends, macro, news, prices
 
 from . import alerts, backup, health, jobs, static_site, views
 
@@ -134,6 +134,12 @@ def catch_up(conn, cfg: dict) -> dict:
             out["company numbers"] = "downloaded"
         except Exception as exc:
             out["company numbers"] = f"not updated ({type(exc).__name__})"
+    if not conn.execute("SELECT 1 FROM macro WHERE series='gold' LIMIT 1").fetchone():   # your account in gold, zakat
+        try:
+            missed = macro.update(conn)
+            out["gold price"] = "not updated" if "gold" in missed else "downloaded"
+        except Exception as exc:
+            out["gold price"] = f"not updated ({type(exc).__name__})"
     return out
 
 
