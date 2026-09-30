@@ -722,6 +722,7 @@ export const AR = {
   "Save settings": "احفظ الإعدادات",
   "Alerts on your phone (Telegram)": "التنبيهات على هاتفك (تيليجرام)",
   "Connect Telegram": "اربط تيليجرام",
+  "Your portfolio in Telegram": "محفظتك في تيليجرام",
   "Run a scan now (for the person who runs the site)": "شغّل فحصًا الآن (لمن يدير الموقع)",
   "Save token": "احفظ الرمز",
   "The bot": "البوت",

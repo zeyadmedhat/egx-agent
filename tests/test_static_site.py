@@ -363,7 +363,7 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     # The link is only inside the encrypted data; nothing about who connected is published or logged.
     key = static_site.derive_key(PASSWORD, static_site.salt_for("me/egx"))
     core = static_site.unseal((site / "data" / "core.bin").read_bytes(), key)
-    assert core["telegram"] == {"bot": "TestEGXBot", "link": f"https://t.me/TestEGXBot?start={code}"}
+    assert core["telegram"] == {"bot": "TestEGXBot", "link": f"https://t.me/TestEGXBot?start={code}", "worker": None}
     assert core["final"] is True
     # The owner's Run scan button opens the scan on GitHub; the site holds no GitHub key for it.
     assert core["scan_url"] == "https://github.com/me/egx/actions/workflows/site.yml"
@@ -650,3 +650,10 @@ def test_nothing_hides_the_translator():
             continue
         bad = [m.group(0) for m in clash.finditer(src)]
         assert not bad, f"{f.name}: {bad}"
+
+
+def test_the_page_may_send_only_to_the_bots_worker():
+    assert "connect-src 'self';" in static_site.index_html()
+    page = static_site.index_html("https://egx-bot.x.workers.dev/")
+    assert "connect-src 'self' https://egx-bot.x.workers.dev;" in page
+    assert "connect-src 'self';" in static_site.index_html("http://evil.example")      # https only

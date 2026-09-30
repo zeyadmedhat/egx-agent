@@ -60,3 +60,58 @@ assert.equal(await handle(st, u("hello")), null)
 assert.match(await handle(st, u("/unwatch")), /or all/)
 assert.match(await handle(st, u("all")), /Removed all your alerts \(1\)/)
 console.log("menu ok")
+
+// Your own portfolio
+import { portfolioText, watchlistText } from "./bot.js"
+const book = { date: "2026-09-28", start: 100000, cash: 20000, closed: { count: 2, win_rate: 0.5, total: 1500 },
+  watchlist: ["COMI", "ZZZZ"],
+  positions: [{ symbol: "COMI", shares: 100, avg: 120, last: 127, stop: 115.8, target: 151.56, status: "HOLD", reason: "" },
+              { symbol: "ABUK", shares: 10, avg: 55, last: 51, stop: 51, target: 60, status: "EXIT", reason: "Closed under the stop" }] }
+const pt = portfolioText({ ...book, sent: "2026-09-29" }, st.info)
+assert.match(pt, /Your portfolio<\/b>: 33,301 EGP \(-66.7% since the start\)/)      // 20000 + 100×128.01 + 10×50
+assert.match(pt, /COMI<\/b> 100 × 120.00 → 128.01 \(\+6.7%, \+801 EGP\)\n   HOLD · stop 115.80/)
+assert.match(pt, /ABUK<\/b> 10 × 55.00 → 50.00 \(-9.1%, -50 EGP\) ⚠️ at or under your stop\n   EXIT .*\n   Closed under the stop/)
+assert.match(pt, /Closed trades: 2, 50.0% won, \+1,500 EGP/)
+assert.match(watchlistText(book, st.info), /COMI<\/b> 128.01 \(-0.4%\) · 13.4% chance in 10 days\n<b>ZZZZ<\/b>/)
+console.log("portfolio ok")
+
+// The whole link, on a stand-in for Cloudflare's storage and Telegram
+import { Bot } from "./bot.js"
+const kv = new Map(), sentMsgs = []
+const storage = { get: async k => structuredClone(kv.get(k)), put: async (k, v) => { kv.set(k, structuredClone(v)) },
+  delete: async ks => { for (const k of [].concat(ks)) kv.delete(k) } }
+globalThis.fetch = async (url, init) => {
+  const body = JSON.parse(init.body)
+  if (url.endsWith("/sendMessage")) sentMsgs.push(body.text)
+  return new Response(JSON.stringify({ ok: true, result: url.endsWith("/getWebhookInfo") ? { url: "" } : true }))
+}
+const env = { BOT_TOKEN: "123:test", SYNC_KEY: "k".repeat(48) }
+const bot = new Bot({ storage }, env)
+const W = "https://w.example"
+const post = (path, body, headers = {}) => bot.fetch(new Request(W + path, { method: "POST", body: JSON.stringify(body),
+  headers: { "content-type": "application/json", ...headers } }))
+const hook = createHash("sha256").update("hook:" + env.SYNC_KEY).digest("hex").slice(0, 32)
+let uid = 10
+const tg = text => post("/telegram", { update_id: ++uid, message: { chat: { id: 9, type: "private" }, text } },
+                        { "X-Telegram-Bot-Api-Secret-Token": hook })
+assert.equal((await post("/state", { ...st, seen: 0 })).status, 403)                        // no key
+assert.equal((await post("/state", { ...st, seen: 0 }, { Authorization: `Bearer ${env.SYNC_KEY}` })).status, 200)
+await tg("/portfolio")
+assert.match(sentMsgs.at(-1), /isn't linked yet/)
+await tg("/link")
+const code = /<code>([A-Z0-9]{8})<\/code>/.exec(sentMsgs.at(-1))[1]
+assert.equal((await post("/pair", { code: "WRONG123" })).status, 400)
+const { token } = await (await post("/pair", { code })).json()
+assert.match(sentMsgs.at(-1), /portfolio is linked/)
+assert.equal((await post("/pair", { code })).status, 400)                                  // works once
+assert.equal((await post("/book", { token: "x".repeat(48), book })).status, 401)
+assert.equal((await post("/book", { token, book })).status, 200)
+await tg("/portfolio")
+assert.match(sentMsgs.at(-1), /COMI<\/b> 100 × 120.00/)
+await tg("/watchlist")
+assert.match(sentMsgs.at(-1), /Your watchlist/)
+await tg("/unlink")
+assert.equal((await post("/book", { token, book })).status, 401)                           // the browser's link is gone
+await tg("/portfolio")
+assert.match(sentMsgs.at(-1), /isn't linked yet/)
+console.log("link ok")

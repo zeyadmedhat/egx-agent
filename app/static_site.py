@@ -150,17 +150,23 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
 
 
 # ------------------------------------------------------------------ the page itself
-def _csp(page: str) -> str:
+def _csp(page: str, connect: str = "") -> str:
     hashes = " ".join(f"'sha256-{base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()}'"
                       for s in re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", page, flags=re.S) if s.strip())
     return ("default-src 'self'; script-src 'self' " + hashes + "; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; "
-            "frame-src https://s.tradingview.com https://www.tradingview-widget.com; "
+            f"img-src 'self' data:; connect-src 'self'{' ' + connect if connect else ''}; font-src 'self'; "
+            "object-src 'none'; base-uri 'self'; frame-src https://s.tradingview.com https://www.tradingview-widget.com; "
             "form-action 'self'")
 
 
-def index_html() -> str:
-    """The Mac's index.html with relative paths (the site lives under /<repository>/), marked as the static site."""
+def _origin(url: str | None) -> str:
+    m = re.match(r"^https://[A-Za-z0-9.-]+", url or "")
+    return m.group(0) if m else ""
+
+
+def index_html(worker: str | None = None) -> str:
+    """The Mac's index.html with relative paths (the site lives under /<repository>/), marked as the static site.
+    `worker`: the Telegram bot's Worker, the one other address the page may send to (your portfolio, if you link it)."""
     page = (STATIC / "index.html").read_text(encoding="utf-8")
     page = page.replace('"/static/', '"./static/').replace('<html lang="en" data-theme="dark">',
                                                            '<html lang="en" data-theme="dark" data-mode="static">')
@@ -170,7 +176,7 @@ def index_html() -> str:
              '  <meta name="apple-mobile-web-app-title" content="EGX Agent">\n'
              '  <link rel="manifest" href="manifest.webmanifest">\n')
     page = page.replace('  <title>', extra + '  <title>', 1)
-    csp = f'  <meta http-equiv="Content-Security-Policy" content="{_csp(page)}">\n'
+    csp = f'  <meta http-equiv="Content-Security-Policy" content="{_csp(page, _origin(worker))}">\n'
     return page.replace('  <meta charset="utf-8">\n', '  <meta charset="utf-8">\n' + csp, 1)
 
 
@@ -189,7 +195,7 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(STATIC, out / "static", ignore=shutil.ignore_patterns("index.html", ".DS_Store"))
-    (out / "index.html").write_text(index_html(), encoding="utf-8")
+    (out / "index.html").write_text(index_html((telegram or {}).get("worker")), encoding="utf-8")
     (out / "manifest.webmanifest").write_text(json.dumps(MANIFEST), encoding="utf-8")
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")

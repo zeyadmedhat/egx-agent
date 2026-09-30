@@ -201,8 +201,9 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         if token:
             code = static_site.telegram_code(password, site_id)
             bot = _bot(conn, token)
-            telegram = {"bot": bot, "link": f"https://t.me/{bot}?start={code}"} if bot else None
             worker = (os.environ.get("WORKER_URL", "").strip(), os.environ.get("WORKER_KEY", "").strip())
+            telegram = {"bot": bot, "link": f"https://t.me/{bot}?start={code}",
+                        "worker": worker[0] if all(worker) else None} if bot else None
             try:
                 if all(worker):      # the Worker has the messages (and has answered them already)
                     try:

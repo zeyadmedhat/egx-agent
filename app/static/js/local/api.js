@@ -575,7 +575,72 @@ export const ME = {
   user: { id: 0, username: 'you', display_name: 'You', is_admin: false, accepted_terms: true },
 };
 
-export async function localApi(path, { method = 'GET', body } = {}) {
+// ------------------------------------------------------------------ your portfolio in Telegram (worker/bot.js)
+// Once linked (a code from the bot's /link, typed in Settings), this browser sends the bot a copy of your portfolio
+// after every change and once a day when the site opens. The link is kept only in this browser.
+const BOT_LINK = 'egx-bot-link';
+
+export function botLink() {
+  try { return JSON.parse(localStorage.getItem(BOT_LINK) || 'null'); } catch { return null; }
+}
+
+async function botPost(url, path, body) {
+  const res = await fetch(url.replace(/\/$/, '') + path, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(out.error || `The bot didn't answer (${res.status}).`), { status: res.status });
+  return out;
+}
+
+async function sendBook(c) {
+  const link = botLink();
+  if (!link) return;
+  const pv = await portfolioView(c);
+  const book = { date: c.core.scan_date, start: pv.summary.start, cash: pv.summary.cash, closed: pv.closed_stats,
+    watchlist: c.book.watchlist || [],
+    positions: pv.positions.map(p => ({ symbol: p.symbol, shares: p.shares, avg: p.avg_price, last: p.last, stop: p.stop,
+      target: p.target, status: p.status, reason: p.reason || '' })) };
+  try {
+    await botPost(link.url, '/book', { token: link.token, book });
+    try { localStorage.setItem(BOT_LINK, JSON.stringify({ ...link, sent: c.core.scan_date })); } catch { /* */ }
+  } catch (err) {
+    if (err.status === 401) try { localStorage.removeItem(BOT_LINK); } catch { /* unlinked in Telegram */ }
+  }
+}
+
+export async function linkBot(code) {
+  const c = await context();
+  const url = c.core.telegram && c.core.telegram.worker;
+  if (!url) throw new Error("The site's bot can't answer about portfolios yet.");
+  const { token } = await botPost(url, '/pair', { code });
+  localStorage.setItem(BOT_LINK, JSON.stringify({ url, token }));
+  await sendBook(c);
+}
+
+export async function unlinkBot() {
+  const link = botLink();
+  try { localStorage.removeItem(BOT_LINK); } catch { /* */ }
+  if (link) await botPost(link.url, '/unpair', { token: link.token }).catch(() => null);
+}
+
+let syncing = null, again = false;
+
+// In the background, so the page doesn't wait: after a change (force), or when the site has a newer close.
+function syncBot(force) {
+  const link = botLink();
+  if (!link) return;
+  if (syncing) { again = again || force; return; }
+  syncing = context().then(c => (force || c.core.scan_date !== link.sent ? sendBook(c) : null)).catch(() => null)
+    .finally(() => { syncing = null; if (again) { again = false; syncBot(true); } });
+}
+
+export async function localApi(path, opts = {}) {
+  const out = await route(path, opts);
+  syncBot((opts.method || 'GET') !== 'GET');
+  return out;
+}
+
+async function route(path, { method = 'GET', body } = {}) {
   const [route] = path.split('?');
   const [a, b, x] = route.split('/').filter(Boolean);
   if (method === 'GET' && a === 'me') return ME;

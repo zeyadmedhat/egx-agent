@@ -29,7 +29,11 @@ const HELP = "<b>Alerts for the stocks you follow</b>, checked after each close:
   "<b>Ask about the website's data</b>, any time:\n" +
   "/stock COMI (or just COMI): price, today's signal, chances, support and resistance\n" +
   "/top: the 10 best chances to reach the target in 10 days (/top 20: in 20 days)\n" +
-  "/buys: today's BUY signals"
+  "/buys: today's BUY signals\n\n" +
+  "<b>Your own portfolio</b> (from the website):\n" +
+  "/portfolio: your positions, profit and what the exit rules say\n" +
+  "/watchlist: the stocks you starred\n" +
+  "/link: connect them (once) · /unlink: disconnect"
 
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 const px = v => v.toLocaleString("en-US", { minimumFractionDigits: Math.abs(v) < 10 ? 3 : 2,
@@ -177,8 +181,56 @@ export async function handle(state, update) {
   return text.startsWith("/") ? watch(state, cid, text) : null
 }
 
+// ------------------------------------------------------------------ your own portfolio, sent by your browser
+// The website keeps each person's portfolio in their browser only. /link gives a code; typed on the website
+// (Settings), it lets that browser send this bot a copy of the portfolio whenever it changes (POST /book).
+const LINK_RE = /^\/link(?:@\w+)?\s*$/i
+const UNLINK_RE = /^\/unlink(?:@\w+)?\s*$/i
+const PORTFOLIO_RE = /^\/(?:portfolio|p)(?:@\w+)?\s*$/i
+const WATCHLIST_RE = /^\/(?:watchlist|wl)(?:@\w+)?\s*$/i
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+const LINK_MINUTES = 15
+const egp = v => Math.round(v).toLocaleString("en-US")
+const notLinked = "Your portfolio isn't linked yet. Send /link, then type the code on the website (Settings)."
+
+export function portfolioText(book, info) {
+  const stocks = (info && info.stocks) || {}
+  let worth = book.cash
+  const lines = book.positions.map(p => {
+    const now = stocks[p.symbol], last = now && now.d >= (book.date || "") ? now.c : p.last
+    worth += last * p.shares
+    const move = last / p.avg - 1
+    const flag = p.stop != null && last <= p.stop ? " ⚠️ at or under your stop"
+      : p.target != null && last >= p.target ? " 🎯 at your target" : ""
+    return `<b>${esc(p.symbol)}</b> ${p.shares.toLocaleString("en-US")} × ${px(p.avg)} → ${px(last)} ` +
+      `(${pct(move, true)}, ${move >= 0 ? "+" : "-"}${egp(Math.abs((last - p.avg) * p.shares))} EGP)${flag}\n` +
+      `   ${esc(p.status || "")}${p.stop != null ? ` · stop ${px(p.stop)}` : ""}${p.target != null ? ` · target ${px(p.target)}` : ""}` +
+      (p.status && p.status !== "HOLD" && p.reason ? `\n   ${esc(p.reason)}` : "")
+  })
+  const head = [`<b>Your portfolio</b>: ${egp(worth)} EGP` + (book.start ? ` (${pct(worth / book.start - 1, true)} since the start)` : ""),
+    `Cash ${egp(book.cash)} EGP · ${book.positions.length} open position${book.positions.length === 1 ? "" : "s"}`]
+  if (book.closed && book.closed.count) head.push(`Closed trades: ${book.closed.count}, ${pct(book.closed.win_rate)} won, ` +
+    `${book.closed.total >= 0 ? "+" : "-"}${egp(Math.abs(book.closed.total))} EGP`)
+  return head.join("\n") + (lines.length ? "\n\n" + lines.join("\n") : "") +
+    `\n\nSent by your browser on ${day(book.sent)}; prices from the ${day(info && info.scan)} close. ` +
+    "Open the website to update the exit rules."
+}
+
+export function watchlistText(book, info) {
+  const stocks = (info && info.stocks) || {}
+  if (!book.watchlist || !book.watchlist.length) return "Your watchlist is empty. Star stocks (☆) on the website."
+  return "<b>Your watchlist</b>\n" + book.watchlist.map(sym => {
+    const s = stocks[sym]
+    if (!s) return `<b>${esc(sym)}</b>`
+    return `<b>${esc(sym)}</b> ${px(s.c)}${s.ch != null ? ` (${pct(s.ch, true)})` : ""}` +
+      (s.a === "BUY" ? " · 🟢 BUY" : "") + (s.p10 != null ? ` · ${pct(s.p10)} chance in 10 days` : "")
+  }).join("\n") + "\n\n/stock SYMBOL for more."
+}
+
 const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...CORS } })
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS",
+               "Access-Control-Allow-Headers": "content-type" }
 
 async function telegram(env, method, params) {
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
@@ -200,12 +252,20 @@ export class Bot {
       if (!base || update.update_id <= base.seen || log.some(u => u.update_id === update.update_id)) return json({})
       const state = structuredClone(base)
       for (const u of log) await handle(state, u)          // what's happened since the website's last run
-      const reply = await handle(state, update)
+      const reply = (await this.personal(state, update)) ?? await handle(state, update)
       await store.put("log", log.concat(update))
       if (reply) await telegram(env, "sendMessage", { chat_id: update.message.chat.id, text: reply,
                                                       parse_mode: "HTML", disable_web_page_preview: true })
         .catch(() => null)                                   // only a courtesy: the run still applies the command
       return json({})
+    }
+    if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
+    if (url.pathname === "/pair" && req.method === "POST") return this.pair(await req.json().catch(() => ({})))
+    if (url.pathname === "/book" && req.method === "POST") return this.book(await req.text())
+    if (url.pathname === "/unpair" && req.method === "POST") {
+      const cid = await this.owner((await req.json().catch(() => ({}))).token)
+      if (cid) await this.forget(cid)
+      return json({ ok: true })
     }
     if (req.headers.get("Authorization") !== `Bearer ${env.SYNC_KEY}`) return new Response("", { status: 403 })
     if (url.pathname === "/updates") return json({ updates: (await store.get("log")) || [] })
@@ -221,6 +281,66 @@ export class Bot {
       return json({ ok: true })
     }
     return new Response("", { status: 404 })
+  }
+
+  // /link, /unlink, /portfolio and /watchlist: a reply, or null for everything else.
+  async personal(state, update) {
+    const msg = update.message || {}, chat = msg.chat || {}, text = (msg.text || "").trim(), cid = String(chat.id)
+    if (chat.type !== "private" || !(cid in state.subs)) return null
+    const store = this.ctx.storage
+    if (LINK_RE.test(text)) {
+      const bytes = crypto.getRandomValues(new Uint8Array(8))
+      const code = [...bytes].map(b => CODE_CHARS[b % CODE_CHARS.length]).join("")
+      await store.put("pair:" + code, { cid, until: Date.now() + LINK_MINUTES * 60000 })
+      return `Your code: <code>${code}</code>\nOn the website: Settings → <b>Your portfolio in Telegram</b> → type it and ` +
+        `press Link. It works once, for ${LINK_MINUTES} minutes.\nThe website then sends me your portfolio whenever it ` +
+        "changes, so /portfolio and /watchlist answer here. /unlink to stop."
+    }
+    if (UNLINK_RE.test(text)) {
+      await this.forget(cid)
+      return "Unlinked: I've deleted the copy of your portfolio. The website keeps it, as before."
+    }
+    if (PORTFOLIO_RE.test(text) || WATCHLIST_RE.test(text)) {
+      const book = await store.get("book:" + cid)
+      if (!book) return notLinked
+      return PORTFOLIO_RE.test(text) ? portfolioText(book, state.info) : watchlistText(book, state.info)
+    }
+    if (STOP_RE.test(text)) await this.forget(cid)       // /stop deletes the copy too; the usual reply follows
+    return null
+  }
+
+  async owner(token) {
+    return typeof token === "string" && token.length >= 32 ? this.ctx.storage.get("tok:" + await sha(token)) : undefined
+  }
+
+  async forget(cid) {
+    const store = this.ctx.storage, toks = (await store.get("links:" + cid)) || []
+    await store.delete(["book:" + cid, "links:" + cid, ...toks.map(t => "tok:" + t)])
+  }
+
+  async pair(body) {
+    const store = this.ctx.storage, code = String(body.code || "").trim().toUpperCase()
+    const p = /^[A-Z0-9]{8}$/.test(code) ? await store.get("pair:" + code) : null
+    if (!p || p.until < Date.now()) return json({ error: "That code isn't right or has expired. Send /link to the bot for a new one." }, 400)
+    await store.delete("pair:" + code)
+    const token = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, "0")).join("")
+    const hash = await sha(token), toks = (await store.get("links:" + p.cid)) || []
+    await store.put("tok:" + hash, p.cid)
+    await store.put("links:" + p.cid, [...toks, hash].slice(-5))   // up to 5 browsers
+    await telegram(this.env, "sendMessage", { chat_id: p.cid, parse_mode: "HTML",
+      text: "✅ <b>Your portfolio is linked.</b> Send /portfolio or /watchlist any time." }).catch(() => null)
+    return json({ token })
+  }
+
+  async book(raw) {
+    if (raw.length > 200000) return json({ error: "Too big" }, 413)
+    let body
+    try { body = JSON.parse(raw) } catch { return json({ error: "Bad request" }, 400) }
+    const cid = await this.owner(body.token), b = body.book
+    if (!cid) return json({ error: "Not linked" }, 401)
+    if (!b || !Array.isArray(b.positions) || typeof b.cash !== "number") return json({ error: "Bad request" }, 400)
+    await this.ctx.storage.put("book:" + cid, { ...b, sent: new Date().toISOString().slice(0, 10) })
+    return json({ ok: true })
   }
 }
 
