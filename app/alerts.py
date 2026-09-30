@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import html
 import json
+import math
 import re
 import secrets
 import sqlite3
@@ -303,7 +304,7 @@ HELP = ("<b>Alerts for the stocks you follow</b>, checked after each close:\n"
         "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n"
         "/watch COMI levels: when COMI closes near a strong support (a place to buy) or reaches resistance "
         "(a place to take profit)\n"
-        "/unwatch COMI: stop COMI's alerts\n"
+        "/unwatch COMI: stop COMI's alerts (/unwatch all: every alert)\n"
         "/list: your alerts\n"
         "/weekly off: no Thursday summary (/weekly on to have it again)\n"
         "/stop: stop all messages\n"
@@ -345,7 +346,10 @@ def watch_command(conn: sqlite3.Connection, chat_id: str, text: str) -> str | No
     m = UNWATCH_RE.match(text)
     if m:
         sym = m.group(1).upper()
-        n = forget_alerts(conn, chat_id, sym)
+        n = forget_alerts(conn, chat_id, None if sym == "ALL" else sym)
+        if sym == "ALL":
+            conn.commit()
+            return f"Removed all your alerts ({n})." if n else "You have no alerts."
         conn.commit()
         return f"Removed {n} alert{'s' if n != 1 else ''} for {_e(sym)}." if n else f"You have no alert for {_e(sym)}."
     m = WATCH_RE.match(text)
@@ -517,7 +521,43 @@ def worker_call(url: str, key: str, path: str, body: dict | None = None) -> dict
         raise TelegramError(f"The Telegram Worker didn't answer ({type(exc).__name__}).") from None
 
 
-def worker_state(conn: sqlite3.Connection, code: str) -> dict:
+def _r(v, digits=3):
+    return None if v is None or not math.isfinite(v) else round(float(v), digits)
+
+
+def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
+    """What the bot answers /stock, /top and /buys from: each stock's last close, today's signal, the prediction
+    model's chances and the chart's stop, target and nearest support and resistance. Short keys: it's sent every run."""
+    d = views.Data(conn, cfg, views.Cache())
+    scan_date, df = views.current_scan(conn)
+    sig = {r["symbol"]: r for r in views.records(df)}
+    pred = predict.latest(conn)
+    pred = {} if pred.empty else views.clean(pred.to_dict("index"))
+    names = dict(conn.execute("SELECT symbol, name_ar FROM stocks").fetchall())
+    stocks = {}
+    for sym, last in d.last_two().items():
+        s = {"n": names.get(sym) or "", "c": last["close"], "d": last["date"],
+             "ch": _r(last["close"] / last["prev"] - 1, 4) if last["prev"] else None}
+        if sym in sig:
+            r = sig[sym]
+            s.update(a=r["action"], e=_r(r.get("entry_high")), s=_r(r.get("stop")), t=_r(r.get("target")))
+        p = pred.get(sym) or {}
+        for hz in (10, 20):
+            if p.get(f"p{hz}") is not None:
+                s.update({f"p{hz}": _r(p[f"p{hz}"]), f"r{hz}": p.get(f"rank{hz}"), f"x{hz}": _r(p.get(f"exp{hz}"), 4)})
+        try:
+            plan = levels.plan_at(d.indicators(sym), cfg)
+        except Exception:
+            plan = None
+        if plan:
+            s.update(cs=_r(plan["stop"]), ct=_r(plan["target"]),
+                     sup=_r(plan["supports"][0]["price"]) if plan["supports"] else None,
+                     res=_r(plan["resistances"][0]["price"]) if plan["resistances"] else None)
+        stocks[sym] = s
+    return {"scan": scan_date, "pred": db.get_meta(conn, "prediction_date"), "stocks": stocks}
+
+
+def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None) -> dict:
     """What the Worker needs to answer on its own: who's connected, their alerts, and each stock's last close."""
     alerts: dict = {}
     for a in conn.execute("SELECT chat_id, symbol, kind, price FROM watch_alerts"):
@@ -526,7 +566,8 @@ def worker_state(conn: sqlite3.Connection, code: str) -> dict:
         "SELECT s.symbol, (SELECT close FROM prices p WHERE p.symbol = s.symbol ORDER BY date DESC LIMIT 1) AS close "
         "FROM stocks s")}
     return {"fp": _fingerprint(code), "seen": int(db.get_meta(conn, "site_update_seen") or 0), "stocks": stocks,
-            "subs": {c: {"weekly": s.get("weekly", True)} for c, s in _subscribers(conn).items()}, "alerts": alerts}
+            "subs": {c: {"weekly": s.get("weekly", True)} for c, s in _subscribers(conn).items()}, "alerts": alerts,
+            "info": bot_info(conn, cfg or config.DEFAULTS)}
 
 
 def send_to_subscribers(conn: sqlite3.Connection, token: str, text: str, data_date: str) -> dict:

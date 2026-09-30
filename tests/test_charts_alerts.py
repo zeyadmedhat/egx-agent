@@ -133,3 +133,7 @@ def test_the_worker_hands_over_messages_it_already_answered(tmp_path, monkeypatc
     st = alerts.worker_state(conn, "secretcode1")
     assert st["seen"] == 2 and st["subs"] == {"5": {"weekly": True}} and abs(st["stocks"]["VVV"] - 12) < 1e-9
     assert st["alerts"] == {"5": [{"symbol": "VVV", "kind": "above", "price": 20.0}]}
+    assert st["info"]["stocks"]["VVV"]["c"] == st["stocks"]["VVV"] and "p10" not in st["info"]["stocks"]["VVV"]
+    alerts.watch_command(conn, "5", "/watch vvv")
+    assert "Removed all your alerts (2)" in alerts.watch_command(conn, "5", "/unwatch all")
+    assert alerts.worker_state(conn, "secretcode1")["alerts"] == {}

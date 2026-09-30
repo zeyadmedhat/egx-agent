@@ -26,3 +26,23 @@ assert.equal(await say("/list", 8, "group"), null)
 assert.match(await say("/stop"), /Stopped/)
 assert.deepEqual(state.subs, {})
 console.log("worker ok")
+
+// Asking about the website's data
+const st = { fp, seen: 0, stocks: { COMI: 128 }, subs: { 9: { weekly: true } }, alerts: { 9: [{ symbol: "COMI", kind: "buy" }] } }
+const ask = text => handle(st, { update_id: 2, message: { chat: { id: 9, type: "private" }, text } })
+assert.match(await ask("/top"), /hasn't reached me/)
+st.info = { scan: "2026-09-29", pred: "2026-09-29", stocks: {
+  COMI: { n: "CIB", c: 128.01, d: "2026-09-29", ch: -0.0038, p10: 0.134, r10: 2, p20: 0.25, r20: 1, x20: 0.021,
+          cs: 115.8, ct: 151.56, sup: 127.11, res: 129.73 },
+  ABUK: { n: "Abu Qir", c: 50, d: "2026-09-29", ch: 0.01, a: "BUY", e: 50.5, s: 47, t: 56, p10: 0.4, r10: 1 } } }
+assert.match(await ask("comi"), /<b>COMI<\/b> CIB\nClose 128.01 \(-0.4%\) on 29 Sep\nNo signal today.\nChance to reach the target: 13.4% in 10 days \(rank 2\) · 25.0% in 20 days \(rank 1, expected \+2.1%\)\nChart: support 127.11 · resistance 129.73/)
+assert.match(await ask("/stock abuk"), /BUY<\/b> up to 50.50 · stop 47.00 · target 56.00/)
+assert.match(await ask("/s XXXX"), /don't know XXXX/)
+assert.equal(await ask("hello there"), null)
+assert.match(await ask("/top"), /1\. <b>ABUK<\/b> 40.0%.*\n2\. <b>COMI<\/b>/)
+assert.match(await ask("/top 20"), /in 20 days.*\n1\. <b>COMI<\/b> 25.0% · expected \+2.1%/)
+assert.match(await ask("/buys"), /ABUK<\/b> up to 50.50/)
+assert.match(await ask("/help"), /\/top/)
+assert.match(await ask("/unwatch all"), /Removed all your alerts \(1\)/)
+assert.deepEqual(st.alerts[9], [])
+console.log("asking ok")

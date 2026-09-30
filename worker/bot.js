@@ -10,6 +10,9 @@ const LIST_RE = /^\/(?:list|alerts)(?:@\w+)?\s*$/i
 const WEEKLY_RE = /^\/weekly(?:@\w+)?\s+(on|off)\s*$/i
 const START_RE = /^\/start\s+([A-Za-z0-9_-]{8,64})\s*$/
 const STOP_RE = /^\/stop(@\w+)?\s*$/
+const STOCK_RE = /^(?:\/(?:stock|s)(?:@\w+)?\s+)?([A-Za-z0-9]{2,12})\s*$/i
+const TOP_RE = /^\/top(?:@\w+)?(?:\s+(10|20))?\s*$/i
+const BUYS_RE = /^\/(?:buys|signals)(?:@\w+)?\s*$/i
 const MAX_ALERTS = 20
 const WELCOME = "✅ <b>Connected.</b> After each EGX close you'll get the day's signals here. Your share counts are on " +
   "the website.\nSend /help for alerts on the stocks you follow, or /stop to stop."
@@ -19,10 +22,14 @@ const HELP = "<b>Alerts for the stocks you follow</b>, checked after each close:
   "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n" +
   "/watch COMI levels: when COMI closes near a strong support (a place to buy) or reaches resistance " +
   "(a place to take profit)\n" +
-  "/unwatch COMI: stop COMI's alerts\n" +
+  "/unwatch COMI: stop COMI's alerts (/unwatch all: every alert)\n" +
   "/list: your alerts\n" +
   "/weekly off: no Thursday summary (/weekly on to have it again)\n" +
-  "/stop: stop all messages"
+  "/stop: stop all messages\n\n" +
+  "<b>Ask about the website's data</b>, any time:\n" +
+  "/stock COMI (or just COMI): price, today's signal, chances, support and resistance\n" +
+  "/top: the 10 best chances to reach the target in 10 days (/top 20: in 20 days)\n" +
+  "/buys: today's BUY signals"
 
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 const px = v => v.toLocaleString("en-US", { minimumFractionDigits: Math.abs(v) < 10 ? 3 : 2,
@@ -31,6 +38,57 @@ const px = v => v.toLocaleString("en-US", { minimumFractionDigits: Math.abs(v) <
 async function sha(text) {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
   return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("")
+}
+
+const pct = (v, sign = false) => (sign && v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%"
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+const day = d => d ? `${+d.slice(8, 10)} ${MONTHS[+d.slice(5, 7) - 1]}` : "–"
+const noData = "The website's data hasn't reached me yet. Try again after its next run."
+
+function stockCard(info, sym) {
+  const s = info.stocks[sym]
+  const lines = [`<b>${esc(sym)}</b> ${esc(s.n)}`,
+    `Close ${px(s.c)}${s.ch != null ? ` (${pct(s.ch, true)})` : ""} on ${day(s.d)}`]
+  if (s.a === "BUY") lines.push(`🟢 <b>BUY</b> up to ${px(s.e)} · stop ${px(s.s)} · target ${px(s.t)}`)
+  else if (s.a) lines.push(`Signal: ${esc(s.a)}${s.e ? ` (entry up to ${px(s.e)} · stop ${px(s.s)} · target ${px(s.t)})` : ""}`)
+  else lines.push("No signal today.")
+  const ch = [10, 20].filter(hz => s["p" + hz] != null).map(hz =>
+    `${pct(s["p" + hz])} in ${hz} days (rank ${s["r" + hz]}${s["x" + hz] != null ? `, expected ${pct(s["x" + hz], true)}` : ""})`)
+  if (ch.length) lines.push("Chance to reach the target: " + ch.join(" · "))
+  if (s.cs != null) lines.push(`Chart: support ${s.sup != null ? px(s.sup) : "–"} · resistance ${s.res != null ? px(s.res) : "–"}` +
+    ` · stop ${px(s.cs)} · target ${px(s.ct)}`)
+  lines.push(`/watch ${esc(sym)} levels: an alert when it nears support or resistance`)
+  return lines.join("\n")
+}
+
+function top(info, hz) {
+  const rows = Object.entries(info.stocks).filter(([, s]) => s["r" + hz] != null)
+    .sort((a, b) => a[1]["r" + hz] - b[1]["r" + hz]).slice(0, 10)
+  if (!rows.length) return "No predictions yet."
+  return `<b>Best chances to reach the target in ${hz} days</b> (${day(info.pred)})\n` + rows.map(([sym, s], i) =>
+    `${i + 1}. <b>${esc(sym)}</b> ${pct(s["p" + hz])}` + (s["x" + hz] != null ? ` · expected ${pct(s["x" + hz], true)}` : "") +
+    ` · ${px(s.c)}`).join("\n") + "\n\nNot advice: chances from the website's model. /stock SYMBOL for more."
+}
+
+function buys(info) {
+  const rows = Object.entries(info.stocks).filter(([, s]) => s.a === "BUY")
+  if (!rows.length) return `No BUY signals at the ${day(info.scan)} close.`
+  return `<b>BUY signals at the ${day(info.scan)} close</b>\n` + rows.map(([sym, s]) =>
+    `🟢 <b>${esc(sym)}</b> up to ${px(s.e)} · stop ${px(s.s)} · target ${px(s.t)}`).join("\n") +
+    "\n\nYour share counts are on the website."
+}
+
+function ask(state, text) {
+  const info = state.info
+  let m = TOP_RE.exec(text)
+  if (m) return info ? top(info, +(m[1] || 10)) : noData
+  if (BUYS_RE.test(text)) return info ? buys(info) : noData
+  m = STOCK_RE.exec(text)
+  if (!m || /^\/(help|start)/i.test(text)) return undefined
+  if (!info) return text.startsWith("/") ? noData : undefined
+  const sym = m[1].toUpperCase()
+  if (info.stocks[sym]) return stockCard(info, sym)
+  return text.startsWith("/") ? `I don't know ${esc(sym)}. Use the stock's EGX symbol, like COMI.` : undefined
 }
 
 function alertText(a) {
@@ -48,8 +106,9 @@ function watch(state, cid, text) {
   }
   let m = UNWATCH_RE.exec(text)
   if (m) {
-    const sym = m[1].toUpperCase(), n = mine.filter(a => a.symbol === sym).length
-    state.alerts[cid] = mine.filter(a => a.symbol !== sym)
+    const sym = m[1].toUpperCase(), n = mine.filter(a => sym === "ALL" || a.symbol === sym).length
+    state.alerts[cid] = mine.filter(a => sym !== "ALL" && a.symbol !== sym)
+    if (sym === "ALL") return n ? `Removed all your alerts (${n}).` : "You have no alerts."
     return n ? `Removed ${n} alert${n !== 1 ? "s" : ""} for ${esc(sym)}.` : `You have no alert for ${esc(sym)}.`
   }
   m = WATCH_RE.exec(text)
@@ -99,6 +158,8 @@ export async function handle(state, update) {
     return state.subs[cid].weekly ? "OK: you'll get the week's summary after Thursday's close."
       : "OK: no weekly summary. Send /weekly on to have it again."
   }
+  const answer = ask(state, text)
+  if (answer !== undefined) return answer
   return text.startsWith("/") ? watch(state, cid, text) : null
 }
 

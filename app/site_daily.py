@@ -245,7 +245,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             report["telegram"] = "not set up"
         if subs is not None and all(worker):      # after the alerts that fired: the Worker's copy of who's watching what
             try:
-                alerts.worker_call(*worker, "/state", alerts.worker_state(conn, code))
+                alerts.worker_call(*worker, "/state", alerts.worker_state(conn, code, cfg))
                 report.setdefault("worker", "up to date")
             except alerts.TelegramError as exc:
                 report["worker"] = str(exc)
