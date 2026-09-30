@@ -123,8 +123,13 @@ def find_chat_by_code(conn: sqlite3.Connection, token: str, code: str) -> dict |
 
 
 def send(token: str, chat_id: str, text: str, buttons: list | None = None) -> None:
-    extra = {"reply_markup": {"inline_keyboard": buttons}} if buttons else {}
-    call(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True, **extra)
+    params = dict(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+    try:
+        call(token, "sendMessage", **params, **({"reply_markup": {"inline_keyboard": buttons}} if buttons else {}))
+    except TelegramError as exc:
+        if not buttons or exc.status != 400:
+            raise
+        call(token, "sendMessage", **params)     # Telegram refused the buttons: the message matters more
 
 
 # ------------------------------------------------------------------ the message

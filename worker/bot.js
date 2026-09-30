@@ -659,9 +659,10 @@ export class Bot {
   }
 
   async send(chatId, out) {
-    await telegram(this.env, "sendMessage", { chat_id: chatId, text: out.text, parse_mode: "HTML",
-      link_preview_options: { is_disabled: true }, ...(out.kb ? { reply_markup: { inline_keyboard: out.kb } } : {}) })
+    const msg = { chat_id: chatId, text: out.text, parse_mode: "HTML", link_preview_options: { is_disabled: true } }
+    const r = await telegram(this.env, "sendMessage", out.kb ? { ...msg, reply_markup: { inline_keyboard: out.kb } } : msg)
       .catch(() => null)                                   // only a courtesy: the run still applies the command
+    if (out.kb && r && r.ok === false) await telegram(this.env, "sendMessage", msg).catch(() => null)   // without buttons
   }
 
   // "/start <site code><browser's link>" (the website's Connect Telegram button) links that browser. Any other
