@@ -117,6 +117,7 @@ export class Bot {
 
   async fetch(req) {
     const url = new URL(req.url), store = this.ctx.storage, env = this.env
+    if (!env.SYNC_KEY || !env.BOT_TOKEN) return new Response("Not set up yet", { status: 503 })
     const hook = (await sha("hook:" + env.SYNC_KEY)).slice(0, 32)
     if (url.pathname === "/telegram") {
       if (req.headers.get("X-Telegram-Bot-Api-Secret-Token") !== hook) return new Response("", { status: 403 })
