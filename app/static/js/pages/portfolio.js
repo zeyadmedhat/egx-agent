@@ -5,88 +5,68 @@ import {
   html, useApi, useState, useEffect, useStore, api, toast, refreshAll, fmt, tone, cls, go, todayISO, STATIC,
 } from '../lib.js';
 import {
-  Icon, StatusChip, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, DayBar, Field,
-  StockPicker, Confirm, Callout, Seg, Empty, LiveQuotes, LIVE_NOTE, Fold, More,
+  Icon, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, Field,
+  StockPicker, Confirm, Callout, Seg, Empty, Fold, useQuotes, livePosition, PositionCard,
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { LineChart } from '../charts.js';
 import { equityCurve, correlations, sectorMix, stopRisk, journal, inMoney, checkup } from '../insights.js';
 
-const TABS = [{ value: 'positions', label: 'Positions' }, { value: 'health', label: 'Health' },
-  { value: 'journal', label: 'Journal' }];
+const TABS = [{ value: 'positions', label: 'My stocks' }, { value: 'health', label: 'Checkup' },
+  { value: 'journal', label: 'Past trades' }];
 
 export function PortfolioPage({ route }) {
   const { data, error } = useApi('/portfolio');
   const [openId, setOpenId] = useState(route.query.open ? Number(route.query.open) : null);
   useEffect(() => { if (route.query.open) setOpenId(Number(route.query.open)); }, [route.query.open]);
+  const q = useQuotes(data ? data.positions.map(p => p.symbol) : []);
   if (!data) return html`<${PageLoading} error=${error} />`;
   const s = data.summary;
+  const list = data.positions.map(p => livePosition(p, q, data.fee_pct));
+  const live = list.some(p => p.live);
+  const openPnl = list.reduce((a, p) => a + p.pnl, 0);
+  const equity = s.equity + list.reduce((a, p) => a + (p.price - p.last) * p.shares, 0);
   const scrollToBuy = () => document.getElementById('buy-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  const posColumns = [
-    { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info}
-        sub=${r.n_buys > 1 ? `${r.n_buys} buys combined` : r.info.name_ar} />` },
-    { key: 'status', label: 'Status', sortValue: r => ['ADJUST', 'EXIT', 'REVIEW', 'TIGHTEN STOP', 'HOLD'].indexOf(r.status),
-      render: r => html`<${StatusChip} status=${r.status} />` },
-    { key: 'reason', label: 'What to do', sortable: false, render: r => html`<span class="muted" style="font-size:12.5px">${tn(r.reason)}</span>` },
-    { key: 'shares', label: 'Shares', align: 'r', fmt: v => fmt.int(v) },
-    { key: 'avg_price', label: 'Avg price', align: 'r', fmt: v => fmt.price(v) },
-    { key: 'last', label: 'Last', align: 'r', fmt: v => fmt.price(v) },
-    { key: 'pnl', label: 'P&L after fees', align: 'r', render: r => html`<div class=${tone(r.pnl)}><b>${fmt.signed(r.pnl)}</b>
-        <div class="sub" style="color:inherit;opacity:.85">${fmt.pct(r.pnl_pct)}</div></div>` },
-    { key: 'stop', label: 'Stop now', align: 'r', fmt: v => html`<span class="down">${fmt.price(v)}</span>` },
-    { key: 'target', label: 'Target', align: 'r', fmt: v => html`<span class="up">${fmt.price(v)}</span>` },
-    { key: 'day', label: 'Held', width: '140px', render: r => html`<${DayBar} day=${r.day} max=${data.max_hold_days} review=${data.review_day} />` },
-    { key: 'open', label: '', sortable: false, render: r => html`<span class="faint"><${Icon} name=${openId === r.id ? 'down' : 'chevron'} size=${16} /></span>` },
-  ];
   const closedColumns = [
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} sub=${false} />` },
-    { key: 'entry_date', label: 'First buy', fmt: v => fmt.date(v) },
-    { key: 'entry_price', label: 'Avg cost', align: 'r', fmt: v => fmt.price(v) },
+    { key: 'entry_date', label: 'Bought', fmt: v => fmt.date(v) },
     { key: 'exit_date', label: 'Sold', fmt: v => fmt.date(v) },
-    { key: 'exit_price', label: 'Sell price', align: 'r', fmt: v => fmt.price(v) },
-    { key: 'shares', label: 'Shares', align: 'r', fmt: v => fmt.int(v) },
     { key: 'return_pct', label: 'Return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v)}</span>` },
-    { key: 'pnl', label: 'P&L (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
-    { key: 'exit_reason', label: 'Reason', render: r => html`<span class="muted">${r.exit_reason || '–'}</span>` },
+    { key: 'pnl', label: 'Profit / loss (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'exit_reason', label: 'Why sold', render: r => html`<span class="muted">${r.exit_reason || '–'}</span>` },
   ];
   const cs = data.closed_stats;
   const tab = TABS.some(x => x.value === route.query.tab) ? route.query.tab : 'positions';
   const pickTab = v => go(v === 'positions' ? '#/portfolio' : `#/portfolio?tab=${v}`);
   return html`
-    <${PageHead} title="My Portfolio"
-      sub="Log the trades you place with your broker. After each close the agent checks every position against the exit rules.">
+    <${PageHead} title="My Portfolio" sub="The trades you placed with your broker, checked against the exit rules after each close.">
       <button class="btn primary" onClick=${scrollToBuy}><${Icon} name="plus" />${t('Log a buy')}</button><//>
     ${data.nothing_saved && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>Nothing is saved in this
       browser yet.</b> Your portfolio is kept only in the browser where you entered it, and links opened from Telegram
       or another app can open a different browser. Open the site there, or bring your portfolio here with${' '}
       <a href="#/settings">Settings → Restore from a backup</a>.<//></div>`}
     <div class="kpis">
-      <${Kpi} label="Account value" value=${fmt.short(s.equity)}
-        sub=${`${fmt.pct(s.return_pct)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
-        subClass=${s.cash < 0 ? 'warn' : tone(s.return_pct)} />
-      <${Kpi} label="Open P&L" value=${fmt.signed(s.unrealized)} valueClass=${tone(s.unrealized)} sub="EGP, before selling fees" />
-      <${Kpi} label="Realized P&L" value=${fmt.signed(s.realized)} valueClass=${tone(s.realized)}
-        sub=${s.dividends ? `EGP, after fees · incl. ${fmt.int(s.dividends)} dividends` : 'EGP, after fees'} />
+      <${Kpi} label="Account value" value=${fmt.short(equity)}
+        sub=${`${fmt.pct(equity / s.start - 1)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
+        subClass=${s.cash < 0 ? 'warn' : tone(equity / s.start - 1)} />
+      <${Kpi} label="Open profit / loss" value=${fmt.signed(openPnl)} valueClass=${tone(openPnl)}
+        sub=${live ? 'EGP after fees, live (~15 min late)' : 'EGP after fees, at the last close'} />
+      <${Kpi} label="Closed profit / loss" value=${fmt.signed(s.realized)} valueClass=${tone(s.realized)}
+        sub=${s.dividends ? `EGP after fees · incl. ${fmt.int(s.dividends)} dividends` : 'EGP after fees'} />
       <${Kpi} label="Loss if all stops hit" value=${fmt.short(s.open_risk)}
-        sub=${s.equity ? `from your buy prices: ${fmt.pct(s.open_risk / s.equity, 1, false)} of your account` : ''} />
+        sub=${s.equity ? `${fmt.pct(s.open_risk / s.equity, 1, false)} of your account` : ''} />
     </div>
-    <p class="faint" style="font-size:12.5px;margin-top:10px">Starting capital ${fmt.egp(s.start)}${' '}
-      (<a href="#/settings">change it in Settings</a>). P&L includes ${data.fee_pct}% fees per side.</p>
     <div style="margin-top:16px"><${Seg} options=${TABS} value=${tab} onChange=${pickTab} /></div>
     ${tab === 'health' ? html`<${HealthTab} data=${data} />` : tab === 'journal' ? html`<${JournalTab} data=${data} />` : html`
     <section class="section">
       <${SectionHead} title="Open positions" count=${data.positions.length}
-        hint="Click a position to sell some or all of it, see its transactions or delete it." />
-      <div class="card flush"><${DataTable} columns=${posColumns} rows=${data.positions} rowKey=${r => r.id}
-        expandedKey=${openId} onRowClick=${r => setOpenId(id => (id === r.id ? null : r.id))}
-        renderExpanded=${r => html`<${PositionDetail} p=${r} data=${data} onDone=${() => setOpenId(null)} />`}
-        empty="No open positions. After you buy at your broker, log it below." /></div>
-      <${More} label="What the statuses mean"><p>EXIT: sell at the next open · REVIEW: 2 weeks without progress,
-        consider exiting · TIGHTEN STOP: move your stop order up · HOLD: nothing to do · UPDATE SHARES: the company
-        gave bonus shares or split its shares, so enter your new share count</p><//>
-      ${data.positions.length > 0 && html`<${Fold} title="Live prices" hint="TradingView, about 15 minutes late">
-        <div class="live-list"><${LiveQuotes} symbols=${data.positions.map(p => p.symbol)} title="Your stocks now" /></div>
-        <p class="faint note">${t(LIVE_NOTE)}</p><//>`}
+        hint=${data.positions.length ? 'Sell or edit opens the sale form and the position\'s history.' : ''} />
+      ${list.length ? html`<div class="pos-grid">${list.map(p => html`<${PositionCard} p=${p} key=${p.id}
+          hold=${{ max: data.max_hold_days, review: data.review_day }} open=${openId === p.id}
+          onOpen=${() => setOpenId(id => (id === p.id ? null : p.id))}>
+          ${openId === p.id && html`<${PositionDetail} p=${p} data=${data} onDone=${() => setOpenId(null)} />`}<//>`)}</div>`
+        : html`<div class="card"><${Empty} icon="briefcase" title="No open positions"
+          text="After you buy at your broker, log it below." /></div>`}
     </section>
 
     <section class="section" id="buy-form" style="scroll-margin-top:80px">
@@ -99,9 +79,11 @@ export function PortfolioPage({ route }) {
 
     <section class="section">
       <${SectionHead} title="Closed trades" count=${cs.count}
-        hint=${cs.count ? `Win rate ${fmt.pct(cs.win_rate, 0, false)} · total ${fmt.signed(cs.total)} EGP` : ''} />
+        hint=${cs.count ? `Won ${fmt.pct(cs.win_rate, 0, false)} · total ${fmt.signed(cs.total)} EGP` : ''} />
       <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
         empty="Nothing closed yet." /></div>
+      <p class="faint" style="font-size:12.5px;margin-top:10px">${t('Starting capital {v}', { v: fmt.egp(s.start) })}${' '}
+        (<a href="#/settings">${t('change it in Settings')}</a>). ${t('Profit and loss include {fee}% fees each way.', { fee: data.fee_pct })}</p>
     </section>`}`;
 }
 
@@ -226,8 +208,8 @@ function JournalTab({ data }) {
     { key: 'label', label: first, render: g => html`<b>${first === 'Month' ? month(g.label) : g.label}</b>` },
     { key: 'n', label: 'Trades', align: 'r' },
     { key: 'win_rate', label: 'Won', align: 'r', fmt: v => fmt.pct(v, 0, false) },
-    { key: 'avg_return', label: 'Avg return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>` },
-    { key: 'pnl', label: 'P&L (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'avg_return', label: 'Average return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>` },
+    { key: 'pnl', label: 'Profit / loss (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
   ];
   const tradeCols = [
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} sub=${false} />` },
@@ -235,7 +217,7 @@ function JournalTab({ data }) {
     { key: 'exit_date', label: 'Sold', fmt: v => fmt.date(v) },
     { key: 'days', label: 'Days', align: 'r' },
     { key: 'return_pct', label: 'Return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>` },
-    { key: 'pnl', label: 'P&L', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'pnl', label: 'Profit / loss', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
     { key: 'real_return', label: 'After inflation', align: 'r', title: "The return minus Egypt's inflation over the days you held it",
       render: r => (r.inflation == null ? html`<span class="faint">–</span>` : html`<span class=${tone(r.real_return)}>${fmt.pct(r.real_return, 1)}</span>`) },
     { key: 'source', label: 'From', render: r => html`<span class="muted">${r.source}</span>` },
@@ -249,7 +231,7 @@ function JournalTab({ data }) {
           sub=${`avg win ${fmt.pct(j.avg_win, 1)} · avg loss ${fmt.pct(j.avg_loss, 1)}`} />
         <${Kpi} label="Profit factor" value=${j.profit_factor == null ? 'no losses' : fmt.num(j.profit_factor, 2)}
           valueClass=${j.profit_factor == null || j.profit_factor >= 1 ? 'up' : 'down'} sub="money won ÷ money lost (above 1 = profitable)" />
-        <${Kpi} label="Total P&L" value=${fmt.signed(j.pnl)} valueClass=${tone(j.pnl)}
+        <${Kpi} label="Total profit / loss" value=${fmt.signed(j.pnl)} valueClass=${tone(j.pnl)}
           sub=${`EGP after fees and dividends · ${fmt.signed(j.per_trade)} a trade`} />
         ${j.has_inflation && html`<${Kpi} label="After inflation" value=${fmt.signed(j.real_pnl)} valueClass=${tone(j.real_pnl)}
           sub=${`inflation took ${fmt.int(j.pnl - j.real_pnl)} EGP while your money was in`} />`}
@@ -271,7 +253,7 @@ function JournalTab({ data }) {
 
 function PositionDetail({ p, data, onDone }) {
   const fee = data.fee_pct / 100;
-  const [form, setForm] = useState({ date: todayISO(), shares: String(p.shares), price: String(p.last), reason: data.sell_reasons[0] });
+  const [form, setForm] = useState({ date: todayISO(), shares: String(p.shares), price: String(p.price ?? p.last), reason: data.sell_reasons[0] });
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showDividend, setShowDividend] = useState(false);
@@ -337,7 +319,7 @@ function PositionDetail({ p, data, onDone }) {
       <div class="form-foot">
         <span class="preview">${valid
           ? html`${qty === p.shares ? 'Closes the position' : `${fmt.int(p.shares - qty)} shares stay open at ${fmt.price(p.avg_price)}`}
-              · P&L after fees <b class=${tone(pnl)}>${fmt.signed(pnl)} EGP</b>`
+              · profit/loss after fees <b class=${tone(pnl)}>${fmt.signed(pnl)} EGP</b>`
           : 'Enter the shares and price you sold at.'}</span>
         <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="sell" />${t('Record sale')}</button>
       </div>
@@ -438,7 +420,7 @@ function DividendForm({ p, onClose }) {
       <${Field} label="Note (optional)"><input class="input" value=${form.note} onInput=${set('note')} maxlength="200" /><//>
     </div>
     <div class="row">
-      <span style="flex:1">${amount > 0 ? html`${fmt.num(amount / p.shares, 3)} EGP per share on your ${fmt.int(p.shares)} shares. It adds to this position's P&L.` : ''}</span>
+      <span style="flex:1">${amount > 0 ? html`${fmt.num(amount / p.shares, 3)} EGP per share on your ${fmt.int(p.shares)} shares. It adds to this position's profit / loss.` : ''}</span>
       <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
       <button class="btn primary sm" type="submit" disabled=${busy || amount <= 0}><${Icon} name="check" />${t('Save dividend')}</button>
     </div>
@@ -623,7 +605,7 @@ function ImportPanel({ data }) {
       <input type="file" accept="image/*" hidden disabled=${busy} onChange=${pickFile} /></label>
     ${rows && (rows.length ? html`
       <div class="table-wrap" style="margin-top:12px"><table class="table import-table">
-        <thead><tr><th></th><th>${t('Stock')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Avg price')}</th><th></th></tr></thead>
+        <thead><tr><th></th><th>${t('Stock')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Average price')}</th><th></th></tr></thead>
         <tbody>${rows.map(r => html`<tr key=${r.id}>
           <td><input type="checkbox" checked=${r.on} disabled=${!ok(r)} onChange=${edit(r.id, 'on')}
             aria-label=${t('Add {sym}', { sym: r.symbol || r.name })} /></td>

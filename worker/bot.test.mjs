@@ -290,3 +290,16 @@ for (let i = 0; i < 18; i++) await post2("/read", { token: nonce2, image: png })
 assert.equal((await post2("/read", { token: nonce2, image: png })).status, 200)             // the 20th
 assert.equal((await post2("/read", { token: nonce2, image: png })).status, 429)
 console.log("why, morning, screenshots ok")
+
+{ // /quotes: the website's live prices, from TradingView's screener (Kashif codes ↔ TradingView's)
+  const { quotes } = await import("./bot.js")
+  let asked = null
+  const get = async (u, o) => {
+    asked = JSON.parse(o.body)
+    return { ok: true, json: async () => ({ data: [{ s: "EGX:AIH", d: [0.75, 1.5] }, { s: "EGX:COMI", d: [127.7, -0.4] }] }) }
+  }
+  const res = await quotes(new URL("https://w/quotes?s=comi,AIHC,bad!"), get)
+  assert.deepEqual(asked.symbols.tickers, ["EGX:AIH", "EGX:COMI"])
+  assert.deepEqual(await res.json(), { AIHC: { price: 0.75, change: 0.015 }, COMI: { price: 127.7, change: -0.004 } })
+  console.log("quotes ok")
+}

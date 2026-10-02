@@ -344,3 +344,26 @@ def sanity_flags(df: pd.DataFrame, index_last: pd.Timestamp | None = None) -> li
     if index_last is not None and df.index[-1] < index_last - timedelta(days=10):
         flags.append(f"stale data (last bar {df.index[-1].date()})")
     return flags
+
+
+SCREENER = "https://scanner.tradingview.com/egypt/scan"
+
+
+def live_quotes(symbols: list[str], aliases: dict[str, str] | None = None) -> dict[str, dict]:
+    """The latest price of a few stocks from TradingView's screener, about 15 minutes late during the session (the
+    same as its own price boxes): {symbol: {price, change}}, change against the last close. Stocks it doesn't know
+    are left out."""
+    import requests
+
+    names = {**TV_ALIASES, **{k.upper(): v.upper() for k, v in (aliases or {}).items()}}
+    tv = {f"EGX:{names.get(s, s)}": s for s in symbols}
+    if not tv:
+        return {}
+    r = requests.post(SCREENER, json={"symbols": {"tickers": list(tv)}, "columns": ["close", "change"]}, timeout=10)
+    r.raise_for_status()
+    out = {}
+    for row in r.json().get("data") or []:
+        price, change = (row.get("d") or [None, None])[:2]
+        if row.get("s") in tv and price and price > 0:
+            out[tv[row["s"]]] = {"price": float(price), "change": None if change is None else float(change) / 100}
+    return out

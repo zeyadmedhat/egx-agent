@@ -70,7 +70,7 @@ export function MarketPage() {
       <div class="card flush"><${DataTable} columns=${columns} rows=${b.sectors} rowKey=${r => r.sector}
         sort=${{ key: 'r21', dir: 'desc' }} /></div>
     </section>
-    <${Fold} title="Breadth vs EGX30" hint="1 year. When most stocks are above their averages, breakouts have more support." flush>
+    <${Fold} title="Stocks in uptrend vs EGX30" hint="1 year. When most stocks are above their averages, breakouts have more support." flush>
       <${BreadthChart} h=${b.history} /><//>
     <${Fold} title="Short- and long-term trend" hint="How many stocks are above their 20- and 200-day averages.">
       <div class="kpis">
@@ -81,7 +81,7 @@ export function MarketPage() {
 
 const PERIODS = [{ value: 'chg1', label: 'Last session' }, { value: 'ret5', label: '1 week' }, { value: 'ret21', label: '1 month' }];
 
-// The liquid stocks that moved most, and the stocks at a 1-year high or low at the last close.
+// The actively traded stocks that moved most, and the stocks at a 1-year high or low at the last close.
 function Movers({ data }) {
   const [period, setPeriod] = useState('ret5');
   const stocks = useStore(s => s.stocks) || [];
@@ -95,7 +95,7 @@ function Movers({ data }) {
   return html`
     <section class="section">
       <${SectionHead} title="Biggest movers"
-        hint="Among liquid stocks (enough daily trading for the BUY rules). A stock that jumped more than 30% in one day is left out: that's a split or bonus shares the prices don't reflect yet.">
+        hint="Among actively traded stocks (enough daily trading for the BUY rules). A stock that jumped more than 30% in one day is left out: that's a split or bonus shares the prices don't reflect yet.">
         <${Seg} options=${PERIODS} value=${period} onChange=${setPeriod} /><//>
       <div class="grid grid-2">
         <div class="card"><div class="card-title up">${t('Rose most')}</div>${list(m.up)}</div>

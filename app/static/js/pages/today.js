@@ -1,10 +1,10 @@
 // Today, in two tabs. Summary: the day in a few sentences, the orders for the next session, your positions and the
 // market. Signals: the BUY signals and the stocks close to one.
-import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, remember, STATIC } from '../lib.js';
+import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, STATIC } from '../lib.js';
 import {
-  Icon, Badges, IndexPills, StatusChip, ScoreRing, DayBar, Empty, Callout, PageHead, SectionHead, PageLoading, DataTable,
-  StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, LiveQuotes, LIVE_NOTE, StockAvatar, Change, Term,
-  SessionBadge, More, ScoreBar, ShariahNote, CompanyLine, Rating, Reason,
+  Icon, Badges, IndexPills, ScoreRing, Empty, Callout, PageHead, SectionHead, PageLoading, DataTable,
+  StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, StockAvatar, Change, Term,
+  SessionBadge, More, ScoreBar, ShariahNote, CompanyLine, Rating, Reason, useQuotes, livePosition, PositionCard,
 } from '../ui.js';
 import { t, tp, isAr, tn } from '../i18n.js';
 import { Sparkline } from '../charts.js';
@@ -39,8 +39,7 @@ export function TodayPage() {
     <section class="section">
       <${SectionHead} title="Market" />
       <${MarketCard} m=${m} spark=${data.spark} blocked=${blocked} b=${data.breadth} />
-    </section>
-    <${LiveNow} positions=${data.positions} buys=${data.buys} />`;
+    </section>`;
 }
 
 export function SignalsPage() {
@@ -56,7 +55,7 @@ export function SignalsPage() {
       ${data.buys.length
         ? html`<div class="signal-grid">${data.buys.map(s => html`<${SignalCard} s=${s} model=${data.model} odds=${data.odds} key=${s.symbol} />`)}</div>`
         : html`<div class="card"><${Empty} icon="shield" title="No BUY signals for the next session" text=${blocked
-          ? "The market is in risk-off mode (EGX30 is below its 50-day average), so the agent isn't making new BUY calls. Sitting in cash is a valid decision. The list below shows what is close to a BUY once the market recovers."
+          ? "The market is weak (EGX30 is below its 50-day average), so the agent isn't making new BUY calls. Sitting in cash is a valid decision. The list below shows what is close to a BUY once the market recovers."
           : 'No stock met all the entry rules at the last close. Sitting in cash is a valid decision. The list below shows what is close to a BUY.'} /></div>`}
     </section>
     <section class="section">
@@ -86,7 +85,7 @@ function Brief({ data, blocked, alerts }) {
     lines.push(t('{up} stocks rose and {down} fell; {above} are above their 50-day average.',
       { up: b.advancers, down: b.decliners, above: fmt.pct(b.above50, 0, false) }));
   }
-  if (m.risk_off) lines.push(t(blocked ? 'Risk-off market: no new BUYs until EGX30 recovers.' : 'Risk-off market: only very strong BUYs, and fewer of them.'));
+  if (m.risk_off) lines.push(t(blocked ? 'Weak market: no new BUYs until EGX30 recovers.' : 'Weak market: only very strong BUYs, and fewer of them.'));
   const syms = data.buys.map(x => x.symbol).join(isAr() ? '، ' : ', ');
   if (!data.buys.length) { if (!blocked) lines.push(t('No BUY signals for the next session.')); } else {
     lines.push(t(data.buys.length === 1 ? '1 BUY signal: {list}.' : '{n} BUY signals: {list}.', { n: data.buys.length, list: syms }));
@@ -109,31 +108,18 @@ function Brief({ data, blocked, alerts }) {
   </div>`;
 }
 
-// EGX30, your stocks and the BUY signals at TradingView's live prices (about 15 minutes late). Closed until you open it.
-function LiveNow({ positions, buys }) {
-  const [open, setOpen] = useState(() => remember('live-open') === '1');
-  const flip = e => { const on = e.currentTarget.open; setOpen(on); remember('live-open', on ? '1' : '0'); };
-  const symbols = ['EGX30', ...positions.map(p => p.symbol), ...buys.map(s => s.symbol)];
-  return html`<details class="fold card" open=${open} onToggle=${flip}>
-    <summary><${Icon} name="chevron" size=${16} /><b>${t('Live prices')}</b><span class="hint">${t('TradingView, about 15 minutes late')}</span></summary>
-    ${open && html`<div class="live-list"><${LiveQuotes} symbols=${symbols}
-      title=${t(positions.length ? 'EGX30, your stocks and the BUYs' : 'EGX30 and the BUYs')} /></div>
-      <p class="faint note">${t(LIVE_NOTE)}</p>`}
-  </details>`;
-}
-
 function MarketCard({ m, spark, blocked, b }) {
   const gap = m.egx30_close / m.egx30_ema50 - 1;
   const text = blocked
     ? t('EGX30 is below its 50-day average, so the agent makes no new BUY calls until it recovers. Focus on managing your open positions.')
     : m.risk_off
-      ? t('Risk-off: only very strong signals (score ≥ {n}) and at most half the usual number of positions.', { n: fmt.int(m.buy_threshold) })
+      ? t('Weak market: only very strong signals (score ≥ {n}) and at most half the usual number of positions.', { n: fmt.int(m.buy_threshold) })
       : t('EGX30 is above its 50-day average, so new BUY signals are allowed.');
   return html`<div class="card market">
     <div class="market-main">
       <div class="row" style="justify-content:space-between"><span class="eyebrow">${t('EGX30 index')}</span>
         ${m.risk_off
-          ? html`<span class="chip riskoff"><span class="dot"></span><${Term} k="riskoff">${t('Risk-off')}<//></span>`
+          ? html`<span class="chip riskoff"><span class="dot"></span><${Term} k="riskoff">${t('Weak market')}<//></span>`
           : html`<span class="chip riskon"><span class="dot"></span>${t('Market OK')}</span>`}</div>
       <div class="market-price">${fmt.int(m.egx30_close)}<${Change} value=${m.egx30_change} pill /></div>
       <div class="market-meta"><${Term} k="ema50">${t('50-day average')}<//> ${fmt.int(m.egx30_ema50)} ·${' '}
@@ -149,26 +135,25 @@ function MarketCard({ m, spark, blocked, b }) {
       <${Sparkline} spark=${spark} />
     </div>
     <div class="market-stats">
-      ${b && html`<a href="#/market"><${Term} k="breadth">${t('Breadth')}<//>${' '}<b class=${b.tone === 'ok' ? 'up' : b.tone === 'bad' ? 'down' : 'warn'}>${fmt.pct(b.above50, 0, false)}</b> ${t('above 50-day avg')}
+      ${b && html`<a href="#/market"><${Term} k="breadth">${t('Stocks in uptrend')}<//>${' '}<b class=${b.tone === 'ok' ? 'up' : b.tone === 'bad' ? 'down' : 'warn'}>${fmt.pct(b.above50, 0, false)}</b>
         <${Icon} name="chevron" size=${13} /></a>`}
       <span>${t('Data')}: <b>${fmt.date(m.date)}</b> ${t('close')}</span><span>${t('Last run')} <b>${fmt.datetime(m.finished)}</b></span>
     </div>
   </div>`;
 }
 
+// Your positions as cards: what to do, the price and profit/loss (live during the session), stop to target.
 function Positions({ positions, cfg, alerts }) {
+  const q = useQuotes(positions.map(p => p.symbol));
+  const list = positions.map(p => livePosition(p, q, cfg.fee_pct_per_side || 0));
+  const total = list.reduce((s, p) => s + p.pnl, 0);
   return html`<section class="section">
     <${SectionHead} title="Your open positions" count=${positions.length}
-      hint=${alerts ? t(alerts === 1 ? '{n} needs your attention' : '{n} need your attention', { n: alerts }) : 'Nothing to do: all on hold'}>
+      hint=${html`${t(alerts ? (alerts === 1 ? '{n} needs your attention' : '{n} need your attention') : 'Nothing to do: all on hold', { n: alerts })}
+${' '}· ${t('Total')} <b class=${tone(total)}>${fmt.signed(total)} ${t('EGP')}</b>`}>
       <a class="btn sm" href="#/portfolio">${t('Manage')} <${Icon} name="chevron" size=${14} /></a><//>
-    <div class="card flush alerts">${positions.map(p => html`<div class="alert-row" key=${p.id}>
-      <div class="stock-cell"><${StockAvatar} symbol=${p.symbol} size=${34} /><div><a class="sym-big" style="font-size:15px" href=${stockHref(p.symbol)}>${p.symbol}</a>
-        <div class="faint" style="font-size:12px;white-space:nowrap">${fmt.int(p.shares)} ${t('sh')} · <span class=${tone(p.pnl_pct)}>${fmt.pct(p.pnl_pct)}</span></div></div></div>
-      <div><${StatusChip} status=${p.status} /></div>
-      <div class="reason" dir="auto">${tn(p.reason)}${p.cautions && p.cautions.length > 0 && html`<div style="margin-top:4px">
-        <${Cautions} items=${p.cautions} compact /></div>`}</div>
-      <${DayBar} day=${p.day} max=${cfg.max_hold_days} review=${cfg.review_day} />
-    </div>`)}</div></section>`;
+    <div class="pos-grid">${list.map(p => html`<${PositionCard} p=${p} key=${p.id}
+      hold=${{ max: cfg.max_hold_days, review: cfg.review_day }} />`)}</div></section>`;
 }
 
 // ------------------------------------------------------------------ orders for the next session
@@ -322,7 +307,7 @@ function SignalCard({ s, model, odds }) {
       <div class="who">
         <div class="sym-line"><${StockAvatar} symbol=${s.symbol} size=${34} /><a class="sym-big" href=${stockHref(s.symbol)}>${s.symbol}</a>
           ${s.source === 'model'
-            ? html`<span class="model-pick" title="One of the prediction model's top picks today that also passes the liquidity and uptrend checks. Same stop, target and sizing as any BUY."><${Icon} name="target" size=${12} />${t('Model pick')}</span>`
+            ? html`<span class="model-pick" title="One of the prediction model's top picks today that also passes the trading and uptrend checks. Same stop, target and sizing as any BUY."><${Icon} name="target" size=${12} />${t('Model pick')}</span>`
             : s.setup && html`<span class="tag">${t(s.setup)}</span>`}</div>
         <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}<span class="faint"> · ${tn(i.sector)}</span></div>
       </div>
@@ -372,7 +357,7 @@ function NearList({ rows, model }) {
   const columns = [
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
     { key: 'rating', label: 'Rating', align: 'r', sortValue: r => (r.pred && r.pred.rating != null ? r.pred.rating : -1),
-      title: "The model's rank among the day's liquid stocks, 1–100, from the chart and the company's results",
+      title: "The model's rank among the day's actively traded stocks, 1–100, from the chart and the company's results",
       render: r => html`<${Rating} v=${r.pred && r.pred.rating} />` },
     { key: 'why', label: 'Why', sortable: false, title: 'What lifted (▲) and lowered (▼) its rating most',
       render: r => html`<${Reason} items=${r.pred && r.pred.why10} stacked />` },

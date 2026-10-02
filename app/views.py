@@ -379,7 +379,7 @@ def today(d: Data) -> dict:
                   "last_scan": json.loads(paper_scan) if paper_scan else None},
         "model": {k: preds[k] for k in ("base", "count", "date")} if preds["by_symbol"] else None,
         "cfg": {k: cfg[k] for k in ("max_hold_days", "review_day", "riskoff_block_buys", "auto_paper", "buy_score",
-                                    "shariah_filter")},
+                                    "shariah_filter", "fee_pct_per_side")},
         "record": signal_record(d), "odds": record.public_odds(record.stored_odds(d.conn)),
     })
 

@@ -1037,3 +1037,37 @@ ul.checkup li span { color: var(--text-2); font-size: 13px; }
 .import-table td { vertical-align: top; }
 .input.sm { height: 30px; padding: 0 8px; font-size: 13px; }
 .btn.disabled { opacity: .6; pointer-events: none; }
+
+/* ------------------------------------------------------------------ position cards (ui.js PositionCard) */
+.pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 14px; }
+.pos-card { display: flex; flex-direction: column; gap: 12px; margin: 0 !important; }
+.pos-card.act { border-color: var(--warn); }
+.pos-head { display: flex; align-items: center; gap: 10px; }
+.pos-who { flex: 1; min-width: 0; }
+.pos-who .sym-big { font-size: 17px; }
+.pos-sub { font-size: 12.5px; }
+.pos-nums { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pos-nums .k { font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.pos-nums .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.pos-nums .s { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pos-nums .r { text-align: end; }
+.pos-nums .r .k { justify-content: flex-end; }
+.pos-day { font-size: 13px; font-weight: 600; }
+.planbar .track { position: relative; height: 8px; border-radius: 99px; background: linear-gradient(90deg, var(--down-soft), var(--up-soft)); }
+[dir="rtl"] .planbar .track { background: linear-gradient(270deg, var(--down-soft), var(--up-soft)); }
+.planbar .fill { position: absolute; top: 0; bottom: 0; inset-inline-start: 0; border-radius: 99px; background: var(--accent); opacity: .3; }
+.planbar .mark { position: absolute; top: 50%; transform: translateY(-50%); }
+.planbar .mark.buy { width: 2px; height: 14px; margin-inline-start: -1px; background: var(--text-3); }
+.planbar .mark.now { width: 14px; height: 14px; margin-inline-start: -7px; border-radius: 50%; background: var(--accent); border: 2px solid var(--panel); }
+.planbar-labels { display: flex; justify-content: space-between; gap: 6px 10px; flex-wrap: wrap; font-size: 12px; font-variant-numeric: tabular-nums; margin-top: -4px; }
+.pos-urgent { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r-sm); font-size: 13px; font-weight: 600; }
+.pos-urgent.exit { background: var(--down-soft); color: var(--down); }
+.pos-urgent.hold { background: var(--up-soft); color: var(--up); }
+.pos-reason { font-size: 13px; color: var(--text-2); margin: 0; }
+.pos-foot { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.pos-foot .days { flex: 1; min-width: 0; }
+.pos-card.open { grid-column: 1 / -1; }
+
+/* the stock page's summary: the verdict, then the model's rating and its reason (stock.js Verdict) */
+.verdict-rating { display: flex; gap: 12px; align-items: flex-start; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; }
+.live-now { display: flex; gap: 6px; align-items: center; justify-content: flex-end; font-size: 13px; margin-top: 4px; }

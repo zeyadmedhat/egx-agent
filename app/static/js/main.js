@@ -60,7 +60,7 @@ const SECTIONS = [
     tabs: [['market', 'Overview'], ['heatmap', 'Heatmap'], ['predict', 'Predictions'], ['dividends', 'Dividends & results']] },
   { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist']] },
   { id: 'portfolio', label: 'Portfolio', icon: 'briefcase',
-    tabs: [['portfolio', 'My portfolio'], ['paper', 'Paper'], ['calc', 'Calculator'], ['backtest', 'Backtest']] },
+    tabs: [['portfolio', 'My portfolio'], ['paper', 'Practice'], ['calc', 'Calculator'], ['backtest', 'Rules test']] },
 ].map(s => ({ ...s, tabs: s.tabs.filter(([id]) => id in PAGES) }));
 const sectionOf = page => SECTIONS.find(s => s.tabs.some(([id]) => id === page));
 const pageTitle = page => {
@@ -106,7 +106,7 @@ function IndexChip() {
   const m = useStore(s => s.status && s.status.market);
   if (!m || m.egx30_close == null) return null;
   return html`<a class="index-chip" href="#/market" title=${t('Data: {date} close', { date: fmt.date(m.date) })}>
-    <span class=${cls('dot', m.risk_off ? 'warn' : 'up')} title=${t(m.risk_off ? 'Risk-off' : 'Market OK')}></span>
+    <span class=${cls('dot', m.risk_off ? 'warn' : 'up')} title=${t(m.risk_off ? 'Weak market' : 'Market OK')}></span>
     <span class="faint">EGX30</span><b class="num">${fmt.int(m.egx30_close)}</b><${Change} value=${m.egx30_change} /></a>`;
 }
 

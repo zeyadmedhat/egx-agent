@@ -680,6 +680,30 @@ export async function webAppUser(initData, botToken, now = Date.now()) {
 }
 
 // ------------------------------------------------------------------ the Worker
+// Live prices for the website's positions: TradingView's screener, about 15 minutes late (the same as its own price
+// boxes). GET /quotes?s=COMI,ETEL → {COMI: {price, change}}, change against the last close. Kept a minute; 40 at most.
+const TV_ALIASES = { AIHC: "AIH", ANFI: "TYCN", FCMD: "EGS3I0S1C019", NAPR: "EGS370O1C013" }   // app/static/js/ui.js
+const QUOTES = new Map()
+export async function quotes(url, get = fetch) {
+  const syms = [...new Set((url.searchParams.get("s") || "").toUpperCase().split(","))]
+    .filter(s => /^[A-Z0-9]{1,12}$/.test(s)).slice(0, 40).sort()
+  const key = syms.join(","), hit = QUOTES.get(key)
+  if (!syms.length) return json({})
+  if (hit && Date.now() - hit.at < 60000) return json(hit.out)
+  const tv = Object.fromEntries(syms.map(s => [`EGX:${TV_ALIASES[s] || s}`, s]))
+  const r = await get("https://scanner.tradingview.com/egypt/scan", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ symbols: { tickers: Object.keys(tv) }, columns: ["close", "change"] }) }).catch(() => null)
+  if (!r || !r.ok) return json({}, 502)
+  const out = {}
+  for (const row of ((await r.json().catch(() => ({}))).data || [])) {
+    const [price, change] = row.d || []
+    if (tv[row.s] && price > 0) out[tv[row.s]] = { price, change: change == null ? null : change / 100 }
+  }
+  if (QUOTES.size > 200) QUOTES.clear()
+  QUOTES.set(key, { at: Date.now(), out })
+  return json(out)
+}
+
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...CORS } })
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -987,6 +1011,8 @@ export class Bot {
 
 export default {
   fetch(req, env) {
+    const url = new URL(req.url)
+    if (url.pathname === "/quotes" && req.method === "GET") return quotes(url)
     return env.BOT.get(env.BOT.idFromName("bot")).fetch(req)
   },
   // Every 10 minutes (wrangler.toml): only the morning (the reminder at 9:30 Cairo, UTC+2 or +3) and the evening

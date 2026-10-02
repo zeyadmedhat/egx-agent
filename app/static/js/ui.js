@@ -1,7 +1,7 @@
 // Shared building blocks: icons, Shariah badges, KPI tiles, tables, forms, the stock picker, dialogs.
 import {
   html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
-  stockHref, watchForData, toggleWatch, STATIC,
+  stockHref, watchForData, toggleWatch, STATIC, api,
 } from './lib.js';
 import { t, term, tn, tw } from './i18n.js';
 
@@ -96,7 +96,8 @@ const STATUS = {
   ADJUST: 'adjust', EXIT: 'exit', REVIEW: 'review', 'TIGHTEN STOP': 'tighten', HOLD: 'hold', 'NO DATA': 'nodata',
   BUY: 'buy', WATCH: 'watch',
 };
-const STATUS_LABEL = { ADJUST: 'UPDATE SHARES' };
+const STATUS_LABEL = { ADJUST: 'UPDATE SHARES', EXIT: 'SELL', 'TIGHTEN STOP': 'RAISE STOP', REVIEW: 'CONSIDER SELLING',
+  WATCH: 'NEAR A BUY' };
 export function StatusChip({ status }) {
   return html`<span class=${`chip ${STATUS[status] || 'nodata'}`}><span class="dot"></span>${t(STATUS_LABEL[status] || status)}</span>`;
 }
@@ -126,13 +127,13 @@ export function ScoreRing({ score }) {
   </div>`;
 }
 
-// The rating (views.rating): where the model's 2-week chance puts a stock among the day's liquid stocks, 1–100.
+// The rating (views.rating): where the model's 2-week chance puts a stock among the day's actively traded stocks, 1–100.
 // 91+ is its top 10%, the group its tests are about.
 export function Rating({ v, big }) {
   if (v == null) return html`<span class="faint" title=${t('No rating: the model rates only stocks with enough daily trading.')}>–</span>`;
   const band = v >= 91 ? 'top' : v >= 71 ? 'good' : v >= 51 ? 'mid' : 'low';
   return html`<span class=${cls('rating', band, big && 'big')}
-    title=${t('Rating {v}/100: where the model puts it among the liquid stocks today (100 = its first).', { v })}>${v}</span>`;
+    title=${t('Rating {v}/100: where the model puts it among the actively traded stocks today (100 = its first).', { v })}>${v}</span>`;
 }
 
 // A company's latest results in brief (views.company_brief): profit and sales growth over a year, or that it lost
@@ -164,6 +165,82 @@ export function DayBar({ day, max, review }) {
   const pct = Math.min(100, (day / max) * 100);
   const tn = day >= max ? 'down' : day >= review ? 'warn' : '';
   return html`<div class="days"><span>${t('Day {day} of {max}', { day, max })}</span><div class=${cls('bar', tn)}><span style=${`width:${pct}%`}></span></div></div>`;
+}
+
+// ------------------------------------------------------------------ your positions, with live prices
+// Live prices for a few stocks (/quotes: TradingView's screener, about 15 minutes late): {symbol: {price, change}},
+// asked again every minute while the session is open. {} until they come, or when they can't be had.
+export function useQuotes(symbols) {
+  const key = [...new Set(symbols)].sort().join(',');
+  const [q, setQ] = useState({});
+  useEffect(() => {
+    if (!key) return undefined;
+    let on = true;
+    const get = () => api(`/quotes?s=${encodeURIComponent(key)}`).then(r => { if (on && r) setQ(r); }).catch(() => null);
+    get();
+    const id = setInterval(() => { if (!document.hidden && sessionState().state === 'open') get(); }, 60000);
+    return () => { on = false; clearInterval(id); };
+  }, [key]);
+  return q;
+}
+
+// A position at the live price when there is one: price, P&L after fees (the selling fee on the new value) and
+// whether it has already crossed its stop or target. p: views.open_positions / local/api.js openPositions.
+export function livePosition(p, q, feePct) {
+  const quote = q && q[p.symbol];
+  if (!quote || p.adjust) return { ...p, price: p.last, live: false, day_change: null };
+  const price = quote.price;
+  const pnl = p.pnl + (price - p.last) * p.shares * (1 - feePct / 100);
+  return { ...p, price, live: true, day_change: quote.change, pnl, pnl_pct: price / p.avg_price - 1,
+    hit_stop: p.stop != null && price <= p.stop, hit_target: price >= p.target };
+}
+
+// What the agent says to do, in two or three words (the exit rules' status, egx_agent/portfolio.py).
+const DO = { HOLD: 'Hold', EXIT: 'Sell at the open', REVIEW: 'Consider selling', 'TIGHTEN STOP': 'Raise your stop',
+  ADJUST: 'Update your shares', 'NO DATA': 'No price yet' };
+
+// Where the price sits between your stop and your target, with your buy price marked.
+function PlanBar({ p }) {
+  if (p.stop == null || !(p.target > p.stop)) return null;
+  const at = v => `${Math.max(0, Math.min(100, ((v - p.stop) / (p.target - p.stop)) * 100))}%`;
+  return html`<div class="planbar" aria-hidden="true">
+      <div class="track"><span class="fill" style=${`width:${at(p.price)}`}></span>
+        <span class="mark buy" style=${`inset-inline-start:${at(p.avg_price)}`} title=${t('Your buy price')}></span>
+        <span class="mark now" style=${`inset-inline-start:${at(p.price)}`}></span></div></div>
+    <div class="planbar-labels">
+      <span><span class="down">${t('Stop')} ${fmt.price(p.stop)}</span> <span class="faint">${fmt.pct(p.stop / p.price - 1, 1)}</span></span>
+      <span><span class="up">${t('Target')} ${fmt.price(p.target)}</span> <span class="faint">${fmt.pct(p.target / p.price - 1, 1)}</span></span>
+    </div>`;
+}
+
+// One open position: what to do, the price and P&L (live during the session), stop to target, days held.
+export function PositionCard({ p, hold, children, onOpen, open }) {
+  const urgent = p.hit_stop ? { tone: 'exit', text: 'At or under your stop now: sell' }
+    : p.hit_target ? { tone: 'hold', text: 'At your target now: take the profit' } : null;
+  return html`<article class=${cls('card pos-card', p.status !== 'HOLD' && 'act', open && 'open')}>
+    <div class="pos-head">
+      <${StockAvatar} symbol=${p.symbol} size=${36} />
+      <div class="pos-who"><a class="sym-big" href=${stockHref(p.symbol)}>${p.symbol}</a>
+        <div class="faint pos-sub">${t('{n} shares · bought at {price}', { n: fmt.int(p.shares), price: fmt.price(p.avg_price) })}</div></div>
+      <span class=${`chip ${STATUS[p.status] || 'nodata'}`}><span class="dot"></span>${t(DO[p.status] || p.status)}</span>
+    </div>
+    <div class="pos-nums">
+      <div><div class="k">${t('Price')}${p.live ? html` <span class="live-dot" title=${t('Live, about 15 minutes late')}></span>` : ''}</div>
+        <div class="v">${fmt.price(p.price)}${p.day_change != null ? html` <span class=${cls('pos-day', tone(p.day_change))}>${fmt.pct(p.day_change, 1)}</span>` : ''}</div>
+        <div class="faint s">${p.live ? t('live, ~15 min late') : t('last close')}</div></div>
+      <div class="r"><div class="k">${t('Profit / loss')}</div>
+        <div class=${cls('v', tone(p.pnl))}>${fmt.pct(p.pnl_pct, 1)}</div>
+        <div class=${cls('s', tone(p.pnl))}>${fmt.signed(p.pnl)} ${t('EGP')}</div></div>
+    </div>
+    <${PlanBar} p=${p} />
+    ${urgent && html`<div class=${cls('pos-urgent', urgent.tone)}><${Icon} name="alert" size=${14} />${t(urgent.text)}</div>`}
+    ${p.status !== 'HOLD' && html`<p class="pos-reason" dir="auto">${tn(p.reason)}</p>`}
+    ${p.cautions && p.cautions.length > 0 && html`<div style="margin-bottom:8px"><${Cautions} items=${p.cautions} compact /></div>`}
+    <div class="pos-foot"><${DayBar} day=${p.day} max=${hold.max} review=${hold.review} />
+      ${onOpen && html`<button class="btn sm ghost" onClick=${onOpen} aria-expanded=${!!open}>${t(open ? 'Close' : 'Sell or edit')}
+        <${Icon} name=${open ? 'down' : 'chevron'} size=${14} /></button>`}</div>
+    ${children}
+  </article>`;
 }
 
 export function Empty({ icon = 'info', title, text, action }) {
@@ -309,7 +386,7 @@ export function Chance({ p, base, top }) {
   }
   const ratio = base ? p / base : 1;
   return html`<span class=${cls('chance', ratio >= 1.3 ? 'up' : ratio <= 0.8 ? 'low' : '')}
-    title=${base ? `The average liquid stock: ${fmt.pct(base, 0, false)}` : ''}>${fmt.pct(p, 0, false)}</span>`;
+    title=${base ? `The average actively traded stock: ${fmt.pct(base, 0, false)}` : ''}>${fmt.pct(p, 0, false)}</span>`;
 }
 
 // Why the prediction model scored a stock as it did: the measures that pushed its score up (green) and down (red),
@@ -673,4 +750,4 @@ export function LiveQuotes({ symbols, title = 'Live' }) {
     title="Live prices from TradingView" />`;
 }
 
-export const LIVE_NOTE = 'Live prices from TradingView, about 15 minutes late. The signals, stops and your P&L still use the last close.';
+export const LIVE_NOTE = 'Live prices from TradingView, about 15 minutes late. The signals, stops and your profit / loss still use the last close.';

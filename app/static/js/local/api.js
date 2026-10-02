@@ -228,7 +228,7 @@ async function today(c) {
     spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today, paper: null,
     model: Object.keys(preds.by_symbol).length ? { base: preds.base, count: preds.count, date: preds.date } : null,
     cfg: Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
-      'shariah_filter'].map(k => [k, cfg[k]])),
+      'shariah_filter', 'fee_pct_per_side'].map(k => [k, cfg[k]])),
     record: core.record || null, odds: core.odds || null,
   };
 }
@@ -705,6 +705,16 @@ function syncBot(force) {
   }).catch(() => null).finally(() => { syncing = null; if (again) { again = false; syncBot(true); } });
 }
 
+// Live prices for your positions: the site's bot asks TradingView's screener (worker/bot.js /quotes), about 15 minutes
+// late. {} when the site has no bot or it can't be reached: the page then shows the last close.
+async function quotes(c, path) {
+  const url = c.core.telegram && c.core.telegram.worker;
+  const s = new URLSearchParams(path.split('?')[1] || '').get('s');
+  if (!url || !s) return {};
+  const res = await fetch(`${url.replace(/\/$/, '')}/quotes?s=${encodeURIComponent(s)}`).catch(() => null);
+  return res && res.ok ? res.json().catch(() => ({})) : {};
+}
+
 export async function localApi(path, opts = {}) {
   const out = await route(path, opts);
   syncBot((opts.method || 'GET') !== 'GET');
@@ -733,6 +743,7 @@ async function route(path, { method = 'GET', body } = {}) {
       case 'watchlist': return { symbols: c.book.watchlist || [] };
       case 'market': return load('market');
       case 'predict': return predictView(c);
+      case 'quotes': return quotes(c, path);
       case 'settings': return settingsView(c);
       case 'alerts': return { telegram: { connected: false, token_set: false, can_set_bot: false }, static: true };
       default: break;

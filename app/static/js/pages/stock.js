@@ -1,8 +1,8 @@
 // Stock: TradingView-style chart with your levels, why it does or doesn't qualify, your position, Shariah details.
 import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO } from '../lib.js';
 import {
-  Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, Chance, WatchStar,
-  Cautions, NewsList, Why, LiveChart, LiveQuote, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating,
+  Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, WatchStar,
+  Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard,
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
@@ -39,10 +39,13 @@ export function StockPage({ route }) {
   const [ibars, setIbars] = useState({ '4h': 130, '1h': 110 });
   const hourly = useApi(view === 'agent' && frame !== '1d' ? `/stock/${encodeURIComponent(sym)}/intraday` : null);
 
+  const quotes = useQuotes(data && data.has_data ? [data.symbol] : []);
+  const quote = quotes[sym];
   if (!data) return html`<${PageLoading} error=${error} />`;
 
   const info = data.info || {};
   const st = data.stats;
+  const pe = data.fundamentals && data.fundamentals.values && data.fundamentals.values.pe;
   return html`
     <div class="card stock-head">
       <div class="who">
@@ -56,7 +59,9 @@ export function StockPage({ route }) {
       </div>
       ${st && html`<div class="price"><div class="big">${fmt.price(st.close)}</div>
         <div class="chg"><${Change} value=${st.change} pill /> <span class="faint" style="font-weight:500">${t('on the day')}</span></div>
-        <div class="faint" style="font-size:12px">${t('Last bar {date}', { date: fmt.date(st.last_bar) })}</div>
+        <div class="faint" style="font-size:12px">${t('Close of {date}', { date: fmt.date(st.last_bar) })}</div>
+        ${quote && Math.abs(quote.price - st.close) > 1e-9 && html`<div class="live-now"><span class="live-dot"></span>
+          ${t('Live')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /> <span class="faint">${t('~15 min late')}</span></div>`}
         ${data.corporate && data.corporate.results && data.corporate.results.next && html`<div class="next-results">
           <${Term} k="results">${t('Next results')}<//>: <b>${t('expected around {date}', { date: fmt.date(data.corporate.results.next) })}</b></div>`}</div>`}
     </div>
@@ -64,13 +69,13 @@ export function StockPage({ route }) {
     ${!data.has_data ? html`<div style="margin-top:14px"><${Callout} tone="warn"><b>${t('No price data.')}</b> ${data.message}<//></div>`
       : html`
       <${Verdict} data=${data} />
-      <${RatingCard} p=${data.prediction} />
       <div class="kpis" style="margin-top:14px">
-        <${Kpi} compact label="Traded per day (20d avg)" value=${`${fmt.short(st.value_avg20)} EGP`} />
-        <${Kpi} compact label=${html`<${Term} k="rsi">RSI (14)<//>`} value=${fmt.num(st.rsi14, 0)} sub=${st.rsi14 > 70 ? 'overbought' : st.rsi14 < 30 ? 'oversold' : 'neutral'} />
-        <${Kpi} compact label="3-month return" value=${fmt.pct(st.ret63, 0)} valueClass=${tone(st.ret63)}
+        <${Kpi} compact label="3-month change" value=${fmt.pct(st.ret63, 0)} valueClass=${tone(st.ret63)}
           sub=${st.index_ret63 != null ? `EGX30 ${fmt.pct(st.index_ret63, 0)}` : ''} />
-        <${Kpi} compact label="1-year range" value=${`${fmt.price(st.low52)} – ${fmt.price(st.high52)}`} />
+        <${Kpi} compact label="1-year low – high" value=${`${fmt.price(st.low52)} – ${fmt.price(st.high52)}`} />
+        <${Kpi} compact label="Traded a day" value=${`${fmt.short(st.value_avg20)} ${t('EGP')}`} sub="last 20 sessions" />
+        ${pe != null && html`<${Kpi} compact label="Price / earnings (P/E)" value=${pe > 0 ? `${fmt.num(pe, 1)}×` : t('loss-making')}
+          sub=${pe > 0 && data.fundamentals.sector_median && data.fundamentals.sector_median.pe ? `${t('sector')} ${fmt.num(data.fundamentals.sector_median.pe, 1)}×` : ''} />`}
       </div>
       <div class="stock-layout">
         <div class="stack" style="min-width:0">
@@ -95,20 +100,18 @@ export function StockPage({ route }) {
         </div>
         ${data.news && html`<div class="card stock-news"><div class="card-title"><${Icon} name="news" size=${15} />${t('News')}
             <span class="right faint">Mubasher, Reuters, Zawya</span></div>
-          <${NewsList} items=${data.news} sources=${SOURCES} limit=${8}
+          <${NewsList} items=${data.news} sources=${SOURCES} limit=${5}
             empty="No headlines for this stock yet. The agent reads a few stocks' news pages each run, so it can take a couple of days to reach every stock." />
           <${More} label="About these headlines"><p>${t('Headlines link to the publisher. The green/red dot is a rough guess from keywords, not a reading of the article.')}</p><//></div>`}
         </div>
         <aside class="stack">
-          <div class="card live-card"><div class="card-title"><span class="live-dot"></span>${t('Live price')}
-            <span class="right faint">${t('TradingView, ~15 min late')}</span></div><${LiveQuote} symbol=${data.symbol} /></div>
-          <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
-          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} />`}
+          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes} />`}
+          ${data.signal && html`<${SignalPanel} data=${data} />`}
           ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} />`}
-          <${SignalPanel} data=${data} />
-          ${data.prediction && html`<${PredictionPanel} p=${data.prediction} />`}
+          <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
+          ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
           ${data.fundamentals && html`<${CompanyPanel} f=${data.fundamentals} />`}
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
@@ -166,25 +169,36 @@ export function verdictFor(data) {
 
 const VERDICT_ICON = { buy: 'checkCircle', hold: 'briefcase', sell: 'sell', wait: 'history', avoid: 'xCircle' };
 
+// The page in one card: what to do (verdictFor) and the model's rating with its reason in one line.
 function Verdict({ data }) {
   const v = verdictFor(data);
+  const p = data.prediction;
+  const b = p && p.rating != null && (p.bands || []).find(x => p.rating >= x.from && p.rating <= x.to);
   return html`<div class=${cls('card verdict', v.kind)}>
     <div class="verdict-head"><span class="verdict-chip"><${Icon} name=${VERDICT_ICON[v.kind]} size=${15} />${t(v.label)}</span>
       <span class="verdict-line">${v.line}</span></div>
     ${v.notes.length > 0 && html`<ul class="verdict-notes">${v.notes.map(n => html`<li>${n}</li>`)}</ul>`}
+    <div class="verdict-rating">
+      <${Rating} v=${p ? p.rating : null} />
+      ${p && p.rating != null
+        ? html`<div><b>${t('Rating {v}/100', { v: p.rating })}</b>${b && b.hit != null ? html`<span class="faint"> · ${t('stocks rated like it reached the target first {hit} of the time (the average stock {base})', {
+            hit: fmt.pct(b.hit, 0, false), base: fmt.pct(p.base && p.base[10], 0, false) })}</span>` : ''}
+            ${p.why10 && p.why10.length > 0 && html`<div style="margin-top:4px"><${Reason} items=${p.why10} /></div>`}</div>`
+        : html`<span class="muted">${t('No rating: the model rates only stocks with enough daily trading.')}</span>`}
+    </div>
     <p class="faint verdict-foot">${t('A summary of the cards below, not advice.')}</p>
   </div>`;
 }
 
+function Checklist({ list }) {
+  const passed = list.filter(c => c.ok).length;
+  return html`<${Fold} title="Why it isn't a BUY yet" hint=${t('{k} of {n} checks met', { k: passed, n: list.length })}>
+    <ul class="checklist" dir="ltr">${list.map(c => html`<li>
+      <span class=${c.ok ? 'ok' : 'no'}><${Icon} name=${c.ok ? 'checkCircle' : 'xCircle'} /></span><span>${c.text}</span></li>`)}</ul><//>`;
+}
+
 function SignalPanel({ data }) {
   const s = data.signal;
-  if (!s) {
-    const passed = (data.checklist || []).filter(c => c.ok).length;
-    return html`<div class="card"><div class="card-title">${t('Entry checklist')}<span class="right faint">${t('{k}/{n} met', { k: passed, n: (data.checklist || []).length })}</span></div>
-      <p class="muted" style="font-size:13px;margin-bottom:12px">${t('No signal for this stock at the last scan. A BUY needs all of these:')}</p>
-      <ul class="checklist" dir="ltr">${(data.checklist || []).map(c => html`<li>
-        <span class=${c.ok ? 'ok' : 'no'}><${Icon} name=${c.ok ? 'checkCircle' : 'xCircle'} /></span><span>${c.text}</span></li>`)}</ul></div>`;
-  }
   const buy = s.action === 'BUY';
   return html`<div class="card">
     <div class="card-title"><${StatusChip} status=${s.action} /> <${Term} k="score">${t('Score')}<//> ${fmt.num(s.score, 0)}${s.setup ? ` · ${t(s.setup)}` : ''}</div>
@@ -268,11 +282,9 @@ function LevelsPanel({ c, pos, atr, sym, tg }) {
   const hint = tg && tg.bot && html`<p class="faint tg-hint"><${Icon} name="bell" size=${13} />${' '}
     ${t('A Telegram message when it nears support or reaches resistance: send {cmd} to @{bot}.', { cmd: `/watch ${sym} levels`, bot: tg.bot })}</p>`;
   if (pos) {
-    return html`<div class="card levels-card">
-      <div class="card-title"><${Icon} name="target" size=${15} />${t('Support & resistance levels')}
-        <span class="right faint">${t('from the chart')}</span></div>
+    return html`<${Fold} title="Support & resistance levels" hint=${t('from the chart')}>
       <${ZoneList} c=${c} pos=${pos} atr=${atr} />
-      <${More} label="How these are worked out"><p>${t(LEVELS_HOW)}</p><//>${hint}</div>`;
+      <${More} label="How these are worked out"><p>${t(LEVELS_HOW)}</p><//>${hint}<//>`;
   }
   return html`<div class="card levels-card">
     <div class="card-title"><${Icon} name="target" size=${15} />${t('Stop-loss & target')}
@@ -371,72 +383,21 @@ const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower
   + 'equity: yearly profit on the owners\' money. Debt / equity: borrowing against the owners\' money; over 1 is a lot for '
   + 'most companies except banks. The agent\'s signals don\'t use these: they are here to know the company.';
 
-// One number for the stock, 1–100: the model's rank among the day's liquid stocks, what stocks rated like it did in
-// its tests, and what pushed it up or down (views.rating, predict.explain).
-function RatingCard({ p }) {
-  if (!p || p.rating == null) {
-    return html`<div class="card rating-card"><${Rating} v=${null} big /><p class="muted" style="font-size:13px">
-      ${t('No rating: the model rates only stocks with enough daily trading.')}</p></div>`;
-  }
-  const b = (p.bands || []).find(x => p.rating >= x.from && p.rating <= x.to);
-  const base = p.base && p.base[10];
-  return html`<div class="card rating-card"><${Rating} v=${p.rating} big />
-    <div class="rating-body">
-      <div class="rating-title">${t('Rating {v}/100', { v: p.rating })}</div>
-      <p class="muted">${t('Where the prediction model puts it among the {n} liquid stocks it rates today (100 = its first).', { n: fmt.int(p.count) })}
-        ${' '}${t("It weighs the chart and the company's results together: its price, volume and trend, and its profit, sales, growth, debt and dividend as they were known each day.")}
-        ${b && b.hit != null ? ' ' + t('In its tests, stocks rated {lo}–{hi} reached the target before the stop {hit} of the time (the average stock {base}), {ret} a trade after fees.', {
-          lo: b.from, hi: b.to, hit: fmt.pct(b.hit, 0, false), base: fmt.pct(base, 0, false), ret: fmt.pct(b.ret, 1) }) : ''}</p>
-      ${p.why10 && p.why10.length > 0 && html`<${Why} items=${p.why10} />`}
-      <a class="linkish" style="font-size:12.5px" href="#/predict">${t('How reliable is it?')}</a>
-    </div></div>`;
-}
-
-function PredictionPanel({ p }) {
-  return html`<div class="card"><div class="card-title"><${Icon} name="target" size=${15} />${t('Prediction model')}
-    <span class="right faint">${fmt.date(p.date)} close</span></div>
-    <p class="muted" style="font-size:13px;margin-bottom:12px">Chance that buying at the next open with the usual stop and
-      target reaches the target first.</p>
-    <div class="stat-list">
-      <span class="k">${t('Within 2 weeks')}</span><span class="v"><${Chance} p=${p.p10} base=${p.base[10]} top=${p.top10} />
-        <span class="faint" style="font-weight:500"> #${fmt.int(p.rank10)} of ${fmt.int(p.count)}</span></span>
-      <span class="k">${t('Within 1 month')}</span><span class="v"><${Chance} p=${p.p20} base=${p.base[20]} top=${p.top20} />
-        <span class="faint" style="font-weight:500"> #${fmt.int(p.rank20)} of ${fmt.int(p.count)}</span></span>
-      <span class="k">${t('Average stock')}</span><span class="v">${fmt.pct(p.base[10], 0, false)} / ${fmt.pct(p.base[20], 0, false)}</span>
-    </div>
-    ${p.top_n && html`<p class="faint" style="font-size:12px;margin-top:10px">It gives a chance only for its top${' '}
-      ${fmt.int(p.top_n)} stocks each day (its best 10%): its test results are about those.</p>`}
-    <a class="btn sm block" style="margin-top:14px" href="#/predict">${t('How reliable is it?')}</a></div>`;
-}
-
-// Your stop and target, where each comes from, and the next resistance past the target. The stop rises to each new
-// support under the price (egx_agent/engine.py); the target stays where it was set when you bought.
-function PositionPanel({ p, hold, c, atr }) {
-  const pct = v => html` <span class="faint" style="font-weight:500">${fmt.pct(v / p.last - 1, 1)}</span>`;
+// Your position: the same card as Today and My Portfolio (live price, P&L, stop to target), and where the stop and
+// target come from. The stop rises to each new support under the price (egx_agent/engine.py); the target stays.
+function PositionPanel({ p, hold, c, atr, quotes }) {
   const next = p.stop != null && c ? nextTarget(p, c, atr) : null;
   const sw = p.stop != null ? stopWhy(p, c, atr) : '';
   const tw = targetWhy(p, c, atr);
-  return html`<div class="card">
-    <div class="card-title">${t('Your position')}<span class="right"><${StatusChip} status=${p.status} /></span></div>
-    <div class="stat-list">
-      <span class="k">${t('Shares')}</span><span class="v">${fmt.int(p.shares)}</span>
-      <span class="k">${t('Average price')}</span><span class="v">${fmt.price(p.avg_price)}</span>
-      <span class="k">${t('P&L after fees')}</span><span class=${cls('v', tone(p.pnl))}>${fmt.egp(p.pnl)} (${fmt.pct(p.pnl_pct)})</span>
-      <span class="k"><${Term} k="stop">${t('Stop now')}<//></span><span class="v down">${fmt.price(p.stop)}${p.stop != null && pct(p.stop)}</span>
-      <span class="k"><${Term} k="target">${t('Target')}<//></span><span class="v up">${fmt.price(p.target)}${pct(p.target)}</span>
-      ${next && html`<span class="k">${t('Next target')}</span><span class="v up">${fmt.price(next)}${pct(next)}</span>`}
-      <span class="k">${t('First buy')}</span><span class="v">${fmt.date(p.first_buy)}</span>
-    </div>
-    ${(sw || tw) && html`<ul class="level-why">
+  return html`<${PositionCard} p=${livePosition(p, quotes, 0.25)} hold=${hold}>
+    ${(sw || tw || next) && html`<${More} label="Where the stop and target come from"><ul class="level-why">
       ${sw && html`<li><b class="down">${t('Stop')}</b> ${sw}</li>`}
       ${tw && html`<li><b class="up">${t('Target')}</b> ${tw}</li>`}
-      ${next && html`<li><b class="up">${t('Next target')}</b> ${t('the next resistance above your target, if the price gets through it')}</li>`}
-    </ul>`}
-    <p class="faint" style="font-size:12px;margin-top:8px">${t('Each evening the stop rises to just under the newest support below the price, and never goes down. The target stays where it was set.')}</p>
-    <p class="muted" style="font-size:13px;margin:12px 0">${tn(p.reason)}</p>
-    <${DayBar} day=${p.day} max=${hold.max} review=${hold.review} />
-    <a class="btn sm block" style="margin-top:12px" href="#/portfolio">${t('Manage in My Portfolio')}</a>
-  </div>`;
+      ${next && html`<li><b class="up">${t('Next target')}</b> ${fmt.price(next)}: ${t('the next resistance above your target, if the price gets through it')}</li>`}
+    </ul>
+    <p class="faint" style="font-size:12px;margin-top:8px">${t('Each evening the stop rises to just under the newest support below the price, and never goes down. The target stays where it was set.')}</p><//>`}
+    <a class="btn sm block" href="#/portfolio">${t('Sell or edit in My Portfolio')}</a>
+  <//>`;
 }
 
 function ShariahPanel({ info }) {

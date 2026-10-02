@@ -107,7 +107,7 @@ export function ScreenerPage() {
     <${Fold} title="More filters" hint=${more ? t('{n} on', { n: more }) : t('Rating, trend, RSI, volume, 1-year high, dividend, P/E')}>
       <div class="form-grid">${MORE.map(pick)}</div>
       <label class="check" style="margin-top:12px"><input type="checkbox" checked=${f.liquid} onChange=${set('liquid')} />
-        Only liquid stocks that traded recently (at least ${fmt.short(data.min_value)} EGP a day, like the BUY rules)</label><//>
+        Only actively traded stocks that traded recently (at least ${fmt.short(data.min_value)} EGP a day, like the BUY rules)</label><//>
     <div class="row" style="margin:16px 0 8px"><b>${t('{k} of {n} stocks', { k: fmt.int(rows.length), n: fmt.int(data.rows.length) })}</b></div>
     <div class="card flush"><${DataTable} key=${JSON.stringify(f.sort)} columns=${COLUMNS} rows=${rows} rowKey=${r => r.symbol}
       limit=${50} sort=${f.sort || BY_RATING} onRowClick=${r => go(stockHref(r.symbol))}
@@ -121,7 +121,7 @@ const above = (v, label) => html`<span class=${cls('trend-dot', v > 0 ? 'up' : v
 const COLUMNS = [
   { key: 'star', label: '', sortable: false, width: '34px', render: r => html`<${WatchStar} symbol=${r.symbol} />` },
   { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
-  { key: 'rating', label: 'Rating', align: 'r', title: "The model's rank among the day's liquid stocks, 1–100 (91+ is its top 10%)",
+  { key: 'rating', label: 'Rating', align: 'r', title: "The model's rank among the day's actively traded stocks, 1–100 (91+ is its top 10%)",
     render: r => html`<${Rating} v=${r.rating} />` },
   { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
   { key: 'chg1', label: 'Day', align: 'r', render: r => pctCell(r.chg1) },

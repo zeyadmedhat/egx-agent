@@ -452,6 +452,15 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
             pass
         return JSON(views.stock_intraday(d, symbol))
 
+    @app.get("/api/quotes")
+    def quotes(s: str = "", d: views.Data = Depends(get_data)):
+        """Live prices for the page's positions (prices.live_quotes, about 15 minutes late): {} when offline."""
+        syms = [x for x in dict.fromkeys(s.upper().split(",")) if re.fullmatch(r"[A-Z0-9]{1,12}", x)][:40]
+        try:
+            return JSON(prices.live_quotes(syms, d.cfg.get("symbol_aliases")))
+        except Exception:
+            return JSON({})
+
     @app.get("/api/watchlist")
     def watchlist(d: views.Data = Depends(get_data)):
         return JSON({"symbols": views.watchlist(d)})
