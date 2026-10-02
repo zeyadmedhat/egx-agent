@@ -78,14 +78,17 @@ def test_exit_rules_match(cfg):
     cases, expected = [], []
     for sym, frame in ind.items():
         for i in (70, 150, 230, 300, 315):
-            day, price = frame.index[i], float(frame.close.iloc[i])
-            stop = float(strategy.initial_stop(price, frame.atr14.iloc[i], cfg))
-            row = pd.Series({"symbol": sym, "entry_date": str(day.date()), "entry_price": price, "shares": 100,
-                             "initial_stop": stop, "stop": stop, "target": price + 2 * (price - stop), "sector": "A"})
-            expected.append(portfolio.real_status(row, frame, cfg))
-            cases.append({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(frame), "cfg": cfg}})
+            for be in (0.0, 5.0):                              # the stop's floor after +1R: the entry, or entry +5%
+                c = {**cfg, "breakeven_pct": be}
+                day, price = frame.index[i], float(frame.close.iloc[i])
+                stop = float(strategy.initial_stop(price, frame.atr14.iloc[i], c))
+                row = pd.Series({"symbol": sym, "entry_date": str(day.date()), "entry_price": price, "shares": 100,
+                                 "initial_stop": stop, "stop": stop, "target": price + 2 * (price - stop), "sector": "A"})
+                expected.append(portfolio.real_status(row, frame, c))
+                cases.append({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(frame), "cfg": c}})
     got = run_js(*cases)
     assert len({e["status"] for e in expected}) >= 2          # the cases cover more than one outcome
+    assert any(a["stop"] != b["stop"] for a, b in zip(expected[::2], expected[1::2]))    # and the floor matters
     for py, js in zip(expected, got):
         assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "prev_stop", "last_close"))
 
@@ -667,3 +670,13 @@ def test_each_code_version_is_published_under_its_own_address(tmp_path):
     ver = static_site.code_version()
     page = static_site.index_html(None, ver)
     assert f'"./static/{ver}/js/main.js"' in page and f'"./static/{ver}/vendor/preact.module.js"' in page
+
+
+def test_every_reason_the_model_gives_has_arabic():
+    """i18n.js WHY_AR translates the model's reasons (predict.WHY_TEXT) by their label: a new one needs Arabic too."""
+    import re
+    from egx_agent import predict
+    src = (ROOT / "app" / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+    body = src[src.index("export const WHY_AR = {"):src.index("const WHY_LABELS")]
+    labels = {a or b for a, b in re.findall(r"""(?:'([^']+)'|"([^"]+)"): '""", body)}
+    assert {label for label, _ in predict.WHY_TEXT.values()} <= labels

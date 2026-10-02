@@ -79,6 +79,52 @@ export function tn(text) {
   return NOTES.reduce((out, [re, ar]) => out.replace(re, ar), s);
 }
 
+// The prediction model's reasons (egx_agent/predict.py WHY_TEXT), written "label value", e.g. "3-month change +24%":
+// tw() gives them in Arabic by their label. tests/test_static_site.py checks every label is here.
+export const WHY_AR = {
+  'Last session': 'آخر جلسة', '1-week change': 'تغير أسبوع', '2-week change': 'تغير أسبوعين',
+  '1-month change': 'تغير شهر', '3-month change': 'تغير 3 أشهر', '6-month change': 'تغير 6 أشهر',
+  '1-year change': 'تغير سنة', 'vs its 20-day average': 'مقارنة بمتوسط 20 يومًا',
+  'vs its 50-day average': 'مقارنة بمتوسط 50 يومًا', 'vs its 200-day average': 'مقارنة بمتوسط 200 يوم',
+  "20-day average's slope": 'ميل متوسط 20 يومًا', "50-day average's slope": 'ميل متوسط 50 يومًا',
+  'RSI': 'RSI', 'RSI change this week': 'تغير RSI هذا الأسبوع', 'MACD momentum': 'زخم MACD',
+  'Trend strength (ADX)': 'قوة الاتجاه (ADX)', 'Daily range': 'المدى اليومي', 'Stop distance': 'بعد الوقف',
+  'Jumpiness vs usual': 'التذبذب مقارنة بالمعتاد', 'vs its 20-day high': 'مقارنة بأعلى سعر في 20 يومًا',
+  'vs its 1-year high': 'مقارنة بأعلى سعر في سنة', 'above its 1-year low': 'فوق أدنى سعر في سنة',
+  "Closed at this point of the day's range": 'موضع الإغلاق في مدى اليوم', 'Opening gap': 'فجوة الافتتاح',
+  'Volume vs usual': 'حجم التداول مقارنة بالمعتاد', "This week's volume vs usual": 'حجم تداول الأسبوع مقارنة بالمعتاد',
+  'Up-day vs down-day volume': 'حجم أيام الصعود مقابل أيام الهبوط',
+  'Days without trades (last month)': 'أيام بلا تداول (الشهر الماضي)', 'Breakout setup': 'نمط اختراق',
+  'Pullback setup': 'نمط ارتداد', 'MACD cross': 'تقاطع MACD', 'Uptrend check': 'فحص الاتجاه الصاعد',
+  "Rules' score": 'درجة القواعد', '1-month change vs other stocks': 'تغير شهر مقارنة بالأسهم الأخرى',
+  '3-month change vs other stocks': 'تغير 3 أشهر مقارنة بالأسهم الأخرى',
+  'Money traded vs other stocks': 'قيمة التداول مقارنة بالأسهم الأخرى',
+  'Daily range vs other stocks': 'المدى اليومي مقارنة بالأسهم الأخرى', '1-month change vs its sector': 'تغير شهر مقارنة بقطاعه',
+  'Its sector in uptrends': 'أسهم قطاعه في اتجاه صاعد', 'Next ex-dividend date': 'تاريخ الاستحقاق القادم',
+  'Last ex-dividend': 'آخر تاريخ استحقاق', 'Last dividend announced': 'آخر توزيع معلن',
+  'Dividends in 3 years': 'توزيعات في 3 سنوات', 'Bonus shares coming': 'أسهم مجانية قادمة',
+  'Bonus shares announced': 'إعلان أسهم مجانية', 'Rights issue coming': 'حق اكتتاب قادم',
+  'Share buyback announced': 'إعلان شراء أسهم خزينة', 'Profit for its price (earnings yield)': 'الربح مقارنة بالسعر (عائد الأرباح)',
+  'Sales for its price': 'المبيعات مقارنة بالسعر', 'Free cash for its price': 'النقد الحر مقارنة بالسعر',
+  'Dividend yield': 'عائد التوزيعات', 'Profit growth in a year': 'نمو الربح في سنة',
+  'Sales growth in a year': 'نمو المبيعات في سنة', "Last quarter's profit vs a year before": 'ربح آخر ربع مقارنة بالعام السابق',
+  'Profit margin': 'هامش الربح', 'Return on assets': 'العائد على الأصول', 'Debt for its assets': 'الدين مقارنة بالأصول',
+  'Profitable over the last year': 'رابحة في آخر سنة',
+  'Cheapness for its profit vs other stocks': 'رخص السعر مقابل الربح مقارنة بالأسهم الأخرى',
+  'Profit growth vs other stocks': 'نمو الربح مقارنة بالأسهم الأخرى',
+  'Return on assets vs other stocks': 'العائد على الأصول مقارنة بالأسهم الأخرى',
+};
+const WHY_LABELS = Object.keys(WHY_AR).sort((a, b) => b.length - a.length);   // longest first: "RSI change…" before "RSI"
+const WHY_REST = [[/^: top (\d+)%$/, ': أعلى $1%'], [/^: bottom (\d+)%$/, ': أدنى $1%'], [/^: yes$/, ': نعم'],
+  [/^: no$/, ': لا'], [/^: none$/, ': لا يوجد'], [/^: in (\d+) days$/, ': بعد $1 يوم'], [/^: (\d+) days ago$/, ': منذ $1 يوم']];
+
+export function tw(text) {
+  if (!isAr() || !text) return text;
+  const label = WHY_LABELS.find(l => text === l || text.startsWith(l + ' ') || text.startsWith(l + ':'));
+  if (!label) return text;
+  return WHY_AR[label] + WHY_REST.reduce((out, [re, ar]) => out.replace(re, ar), text.slice(label.length));
+}
+
 // ------------------------------------------------------------------ market terms, explained in two lines
 export const GLOSSARY = {
   score: {
@@ -1011,7 +1057,7 @@ export const AR = {
   "Ended": "انتهت",
   "Average per trade, after fees": "متوسط الصفقة بعد الرسوم",
   "No BUY signals published yet. Each one is added here and followed until it ends.": "لم تُنشر إشارات شراء بعد. تُضاف كل إشارة هنا وتُتابَع حتى تنتهي.",
-  "The last {n} signals did clearly worse than the tests: {win} won against {test}, and they lost on average. Consider smaller positions until they recover.": "آخر {n} إشارة كانت أسوأ بوضوح من الاختبارات: ربحت {win} مقابل {test}، وخسرت في المتوسط. فكّر في مراكز أصغر حتى تتحسن.",
+  "The last {n} signals did clearly worse than the tests: {win} won against {test}. Consider smaller positions until they recover.": "آخر {n} إشارة كانت أسوأ بوضوح من الاختبارات: ربحت {win} مقابل {test}. فكّر في مراكز أصغر حتى تتحسن.",
   "In line with the tests: {win} won against {test}.": "متوافقة مع الاختبارات: ربحت {win} مقابل {test}.",
   "{closed} of the {need} ended signals needed to judge it. Until then, go by the test below, not these numbers.": "{closed} من {need} إشارة منتهية لازمة للحكم. حتى ذلك الحين، اعتمد على الاختبار بالأسفل لا على هذه الأرقام.",
   "The same rules on {from} – {to}: {n} trades, {win} won, {avg} a trade on average, {cagr} a year, worst drop {dd}.": "نفس القواعد من {from} إلى {to}: {n} صفقة، ربحت {win}، بمتوسط {avg} للصفقة، و{cagr} سنويًا، وأسوأ هبوط {dd}.",
@@ -1032,6 +1078,8 @@ export const AR = {
   "Where the prediction model puts it among the {n} liquid stocks it rates today (100 = its first).": "ترتيب نموذج التوقع له بين {n} سهمًا سائلًا يقيّمها اليوم (100 = الأول).",
   "In its tests, stocks rated {lo}–{hi} reached the target before the stop {hit} of the time (the average stock {base}), {ret} a trade after fees.": "في اختباراته، الأسهم المقيّمة {lo}–{hi} وصلت إلى الهدف قبل الوقف في {hit} من المرات (متوسط الأسهم {base})، و{ret} للصفقة بعد الرسوم.",
   "Rating": "التقييم",
+  "Why": "السبب",
+  "What lifted (▲) and lowered (▼) its rating most": "أكثر ما رفع (▲) وخفّض (▼) تقييمه",
   "The model's rank among the day's liquid stocks, 1–100 (91+ is its top 10%)": "ترتيب النموذج للسهم بين الأسهم السائلة اليوم، من 1 إلى 100 (91 فأكثر = أفضل 10%)",
   "P/E": "مكرر الربحية",
   "Price over a year of profit per share (TradingView)": "السعر مقسومًا على ربح السهم في سنة (TradingView)",

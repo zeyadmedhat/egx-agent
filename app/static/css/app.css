@@ -944,6 +944,15 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .sig-company { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; margin-top: 8px; }
 .company-line { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .company-line.compact { font-size: 12.5px; white-space: nowrap; }
+.sig-reason { flex-basis: 100%; }
+.rating-why { font-size: 12.5px; color: var(--text-2); }
+.rating-why .up > span, .rating-why .down > span { font-size: 10px; }
+.rating-why > .up, .rating-why > .down { white-space: nowrap; }
+.rating-why .up > span { color: var(--up); }
+.rating-why .down > span { color: var(--down); }
+.rating-why.stacked { display: block; min-width: 200px; }
+.rating-why.stacked > span { display: block; }
+.rating-why.stacked > .faint { display: none; }
 
 /* Short main text, fine print one tap away. */
 .more { margin-top: 6px; }

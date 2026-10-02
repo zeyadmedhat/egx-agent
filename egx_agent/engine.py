@@ -98,12 +98,14 @@ def update_after_close(pos: Position, bar: pd.Series, cfg: dict) -> None:
     bar has one (`sup`, levels.with_support), and never goes down. Walk-forward 2016–2026 (the model's test years):
     the BUY rules made 20.4% a year against 13.4% with the stop fixed until the price gains 1× the risk (worst drop
     −18.7% against −20.3%); with the model's picks, as the site runs, 31.8% against 22.3% (worst drop −25.2% against
-    −22.7%). Better in both halves. A plain daily 2×ATR trail made 16.4% (rules), so most of it is the supports."""
+    −22.7%). Better in both halves. A plain daily 2×ATR trail made 16.4% (rules), so most of it is the supports.
+
+    Once the trade has gained 1× its risk, the stop goes no lower than the entry plus breakeven_pct (config.py)."""
     c = float(bar["close"])
     pos.highest_close = max(pos.highest_close, c)
     if pos.highest_close >= pos.entry_price + pos.r:
         trail = pos.highest_close - cfg["atr_stop_mult"] * float(bar["atr14"])
-        pos.stop = max(pos.stop, pos.entry_price, trail)
+        pos.stop = max(pos.stop, pos.entry_price * (1 + cfg.get("breakeven_pct", 0.0) / 100), trail)
     sup = bar.get("sup", float("nan")) if cfg.get("stop_follows_support") else float("nan")
     if sup == sup and sup > pos.stop:     # sup == sup: not NaN
         pos.stop = float(sup)

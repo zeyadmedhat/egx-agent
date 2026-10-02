@@ -66,6 +66,11 @@ DEFAULTS: dict = {
     # −22.7%; the rules alone 20.4% against 13.4% (engine.py). Also tried: skipping BUYs with no support within
     # stop_max_pct (28.1%, drop −14.8%, but worse in 2016–21) and stops up to 20% under support (18.0%): not used.
     "stop_follows_support": True,
+    # Once a trade has gained 1× its risk, the stop goes no lower than the entry plus this % (enough to cover both
+    # fees): a trade that comes back ends a small win instead of a small loss. Walk-forward 2016–2026 with the model's
+    # picks (4 seeds): 48.0% of trades won against 44.9% with the stop at the entry (higher in every seed), the same
+    # 33.7% a year, worst drop −17.9% against −18.3%. +0.5% (fees only) changed nothing, +0.75–1% and +2% made less.
+    "breakeven_pct": 1.5,
     "review_day": 10,                # ~2 weeks
     "max_hold_days": 20,             # ~1 month (hard time stop)
     # Automation

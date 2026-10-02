@@ -221,6 +221,19 @@ def _held_news(d: views.Data, symbols: list[str], since: str, limit: int = 5) ->
             f"({_e(news.SOURCES.get(n['source'], n['source']))})" for n in rows[:limit]]
 
 
+def _cold_lines(d: views.Data, lang: str = "en") -> list[str]:
+    """On a day with BUYs: a warning when the BUYs' live record is clearly worse than the tests (record.health:
+    10 points or more fewer winners, after 30 ended)."""
+    h = views.signal_record(d)["health"]
+    if h["status"] != "cold":
+        return []
+    if lang == "ar":
+        return ["", f"⚠️ آخر {h['closed']} إشارة ربحت {h['win_rate']:.0%} مقابل {h['test_win_rate']:.0%} في الاختبارات. "
+                    "فكّر في مراكز أصغر حتى تتحسن."]
+    return ["", f"⚠️ The last {h['closed']} signals won {h['win_rate']:.0%} against {h['test_win_rate']:.0%} in the tests. "
+                "Consider smaller positions until they recover."]
+
+
 def build_message(d: views.Data) -> tuple[str, bool]:
     """The scan summary as Telegram HTML, and whether it asks you to do anything."""
     m = views.market_info(d.conn)
@@ -256,6 +269,8 @@ def build_message(d: views.Data) -> tuple[str, bool]:
                 body.append(f"      Model: {rank}{pr['p10']:.0%} chance of target before stop in 2 weeks "
                             f"(average stock {preds['base'][10]:.0%})" if pr.get("top10") else
                             f"      Model: {rank}not one of its top picks today")
+    if any(it["kind"] == "buy" for it in o["items"]):
+        body += _cold_lines(d)
     if not o["items"]:
         body.append("Nothing to do. " + ("No new buys while EGX30 is below its 50-day average." if o["blocked"]
                                          else "No BUY signals at this close."))
@@ -334,6 +349,8 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
                              else "not a model top pick")
         lines.append("      " + " · ".join(extra))
         lines += _caution_lines(warn.get(r["symbol"]), lang=lang)
+    if buys:
+        lines += _cold_lines(d, lang)
     near = sorted((r for r in rows if r["action"] != "BUY"), key=views.signal_order)
     if near:              # the site's "Close to a BUY" list: the first few by the same order
         names, more = [_e(r["symbol"]) for r in near[:3]], len(near) - 3

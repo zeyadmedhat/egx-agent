@@ -66,8 +66,9 @@ def test_health_compares_the_live_record_with_the_test():
     test = {"all": {"win_rate": 0.45, "avg": 0.025}}
     live = {"n": 30, "win_rate": 0.30, "avg": -0.01}
     assert record.health(live, test)["status"] == "cold"
-    assert record.health({**live, "avg": 0.004}, test)["status"] == "ok"      # fewer winners but still making money
-    assert record.health({**live, "n": 5}, test)["status"] == "early"
+    assert record.health({**live, "avg": 0.004}, test)["status"] == "cold"    # making money, but far fewer winners
+    assert record.health({**live, "win_rate": 0.36}, test)["status"] == "ok"  # under 10 points fewer
+    assert record.health({**live, "n": 29}, test)["status"] == "early"
 
 
 def test_odds_are_the_backtests_trades_by_score():
@@ -77,3 +78,13 @@ def test_odds_are_the_backtests_trades_by_score():
     low, mid, high = odds["bands"]
     assert (low["n"], mid["n"], high["n"]) == (2, 2, 1) and high["to"] == 100
     assert np.isclose(low["avg"], 0.025)
+
+
+def test_telegram_warns_when_the_record_runs_cold(monkeypatch):
+    from app import alerts, views
+    h = {"status": "cold", "closed": 34, "win_rate": 0.30, "test_win_rate": 0.45}
+    monkeypatch.setattr(views, "signal_record", lambda d: {"health": h})
+    assert "won 30% against 45% in the tests" in alerts._cold_lines(None)[1]
+    assert "ربحت 30% مقابل 45%" in alerts._cold_lines(None, "ar")[1]
+    h["status"] = "ok"
+    assert alerts._cold_lines(None) == []

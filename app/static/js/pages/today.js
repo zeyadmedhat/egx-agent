@@ -4,7 +4,7 @@ import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cl
 import {
   Icon, Badges, IndexPills, StatusChip, ScoreRing, DayBar, Empty, Callout, PageHead, SectionHead, PageLoading, DataTable,
   StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, LiveQuotes, LIVE_NOTE, StockAvatar, Change, Term,
-  SessionBadge, More, ScoreBar, ShariahNote, CompanyLine, Rating,
+  SessionBadge, More, ScoreBar, ShariahNote, CompanyLine, Rating, Reason,
 } from '../ui.js';
 import { t, tp, isAr, tn } from '../i18n.js';
 import { Sparkline } from '../charts.js';
@@ -291,7 +291,7 @@ function TrackRecord({ rec, odds }) {
             <span class="k">${t('Average per trade, after fees')}</span><span class=${cls('v', tone(s.avg))}>${fmt.pct(s.avg, 1)}</span>`}
         </div>`
         : html`<p class="muted" style="font-size:13px">${t('No BUY signals published yet. Each one is added here and followed until it ends.')}</p>`}
-      ${h.status === 'cold' && html`<div style="margin-top:12px"><${Callout} tone="warn">${t('The last {n} signals did clearly worse than the tests: {win} won against {test}, and they lost on average. Consider smaller positions until they recover.', {
+      ${h.status === 'cold' && html`<div style="margin-top:12px"><${Callout} tone="warn">${t('The last {n} signals did clearly worse than the tests: {win} won against {test}. Consider smaller positions until they recover.', {
         n: fmt.int(h.closed), win: fmt.pct(s.win_rate, 0, false), test: fmt.pct(h.test_win_rate, 0, false) })}<//></div>`}
       ${h.status === 'ok' && html`<p class="muted" style="font-size:13px;margin-top:10px">${t('In line with the tests: {win} won against {test}.', {
         win: fmt.pct(s.win_rate, 0, false), test: fmt.pct(h.test_win_rate, 0, false) })}</p>`}
@@ -331,7 +331,8 @@ function SignalCard({ s, model, odds }) {
     <div class="sig-tags"><${Badges} info=${i} compact /><${IndexPills} info=${i} /><${Cautions} items=${cautions} compact /></div>
     ${(s.co || (s.pred && s.pred.rating != null)) && html`<div class="sig-company">
       ${s.pred && s.pred.rating != null && html`<span class="faint">${t('Rating')}</span> <${Rating} v=${s.pred.rating} />`}
-      <${CompanyLine} co=${s.co} /></div>`}
+      <${CompanyLine} co=${s.co} />
+      ${s.pred && s.pred.why10 && html`<div class="sig-reason"><${Reason} items=${s.pred.why10} /></div>`}</div>`}
     <div class="levels">
       <${Level} label="Last close" value=${fmt.price(s.close)} />
       <${Level} label=${html`<${Term} k="buyupto">${t('Buy up to')}<//>`} value=${fmt.price(s.entry_high)} sub=${fmt.pct(s.entry_high / s.close - 1)} subCls="faint" />
@@ -373,6 +374,8 @@ function NearList({ rows, model }) {
     { key: 'rating', label: 'Rating', align: 'r', sortValue: r => (r.pred && r.pred.rating != null ? r.pred.rating : -1),
       title: "The model's rank among the day's liquid stocks, 1–100, from the chart and the company's results",
       render: r => html`<${Rating} v=${r.pred && r.pred.rating} />` },
+    { key: 'why', label: 'Why', sortable: false, title: 'What lifted (▲) and lowered (▼) its rating most',
+      render: r => html`<${Reason} items=${r.pred && r.pred.why10} stacked />` },
     { key: 'score', label: html`<${Term} k="score">${t('Score')}<//>`, width: '140px', render: r => html`<${ScoreBar} score=${r.score} />` },
     { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
     { key: 'trigger', label: html`<${Term} k="breakout">${t('Breakout above')}<//>`, align: 'r', fmt: v => html`<b>${fmt.price(v)}</b>` },
@@ -383,7 +386,7 @@ function NearList({ rows, model }) {
     { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
     { key: 'cautions', label: 'Good to know', sortable: false, render: r => html`<${Cautions} items=${r.cautions} compact />` },
   ];
-  if (!model) columns.splice(1, 1);        // no model trained yet: no rating to show
+  if (!model) columns.splice(1, 2);        // no model trained yet: no rating or reason to show
   // the rating first: in 10 years of tests the rules' score barely changed the odds, the model's rank did
   return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol}
     sort=${model ? { key: 'rating', dir: 'desc' } : { key: 'score', dir: 'desc' }}

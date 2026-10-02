@@ -114,7 +114,7 @@ export function updateAfterClose(p, bar, cfg) {
   const r = p.entry_price - p.initial_stop;
   if (p.highest_close >= p.entry_price + r) {
     const trail = p.highest_close - cfg.atr_stop_mult * bar.atr14;
-    p.stop = Math.max(p.stop, p.entry_price);
+    p.stop = Math.max(p.stop, p.entry_price * (1 + (cfg.breakeven_pct || 0) / 100));   // entry + breakeven_pct
     if (trail > p.stop) p.stop = trail;                    // a NaN trail (no ATR yet) is ignored, as in Python
   }
   if (cfg.stop_follows_support && bar.sup > p.stop) p.stop = bar.sup;   // just under the nearest support; NaN: none

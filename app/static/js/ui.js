@@ -3,7 +3,7 @@ import {
   html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
   stockHref, watchForData, toggleWatch, STATIC,
 } from './lib.js';
-import { t, term, tn } from './i18n.js';
+import { t, term, tn, tw } from './i18n.js';
 
 const tx = v => (typeof v === 'string' ? t(v) : v);   // plain text is translated; built pieces are left alone
 
@@ -318,7 +318,20 @@ export function Why({ items }) {
   if (!items || !items.length) return null;
   return html`<ul class="model-why" aria-label="Why the model scored it like this">${items.map(x => html`<li
     class=${x.up ? 'up' : 'down'} key=${x.f} title=${x.up ? 'Pushed its score up' : 'Pulled its score down'}>
-    <span aria-hidden="true">${x.up ? '▲' : '▼'}</span>${x.text}</li>`)}</ul>`;
+    <span aria-hidden="true">${x.up ? '▲' : '▼'}</span>${tw(x.text)}</li>`)}</ul>`;
+}
+
+// The rating's reason in one line, from the same list (Why): its strongest push up from the chart and from the
+// company's results (or its two strongest when one side has none), and its strongest pull down. stacked: one a line.
+const COMPANY_WHY = /^(f_|rank_(ey|growth|quality)$)/;
+export function Reason({ items, stacked }) {
+  if (!items || !items.length) return null;
+  const ups = items.filter(x => x.up);
+  const chart = ups.find(x => !COMPANY_WHY.test(x.f)), co = ups.find(x => COMPANY_WHY.test(x.f));
+  const pick = [...(chart && co ? ups.filter(x => x === chart || x === co) : ups.slice(0, 2)), ...items.filter(x => !x.up).slice(0, 1)];
+  return html`<span class=${cls('rating-why', stacked && 'stacked')} title=${t('What lifted (▲) and lowered (▼) its rating most')}>${pick.map((x, i) => html`${
+    i ? html`<span class="faint"> · </span>` : ''}<span class=${x.up ? 'up' : 'down'} key=${x.f}><span aria-hidden="true">${
+    x.up ? '▲' : '▼'}</span> ${tw(x.text)}</span>`)}</span>`;
 }
 
 // A star that adds the stock to your watchlist (or takes it off).

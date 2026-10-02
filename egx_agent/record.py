@@ -21,7 +21,8 @@ ODDS_KEY = "signal_odds"
 ODDS_YEARS = 10
 ODDS_MAX_AGE = timedelta(days=7)
 BANDS = ((70, 80), (80, 90), (90, 101))
-MIN_LIVE = 20                # closed signals before the live record is compared with the test
+MIN_LIVE = 30                # closed signals before the live record is compared with the test
+COLD_GAP = 0.10              # this many fewer winners than the test: the warning (site and Telegram)
 
 
 def replay(order: dict, ind: pd.DataFrame, cfg: dict) -> dict:
@@ -86,14 +87,14 @@ def signal_record(conn: sqlite3.Connection, cfg: dict, indicators: Callable[[str
 
 
 def health(summary: dict, odds: dict | None) -> dict:
-    """The live record against the test: early (under MIN_LIVE closed), ok, or cold (clearly worse: fewer winners
-    by 10 points or more and losing on average), when it's time to use smaller positions."""
+    """The live record against the test: early (under MIN_LIVE closed), ok, or cold (clearly worse: COLD_GAP or more
+    fewer winners), when it's time to use smaller positions. Winning often is what the BUYs are judged on."""
     test = (odds or {}).get("all")
     if summary["n"] < MIN_LIVE or not test or test.get("win_rate") is None:
         return {"status": "early", "need": MIN_LIVE, "closed": summary["n"]}
-    cold = summary["win_rate"] < test["win_rate"] - 0.10 and summary["avg"] < 0
-    return {"status": "cold" if cold else "ok", "closed": summary["n"], "test_win_rate": test["win_rate"],
-            "test_avg": test["avg"]}
+    cold = summary["win_rate"] < test["win_rate"] - COLD_GAP
+    return {"status": "cold" if cold else "ok", "closed": summary["n"], "win_rate": summary["win_rate"],
+            "test_win_rate": test["win_rate"], "test_avg": test["avg"]}
 
 
 # ------------------------------------------------------------------ what the backtest says signals like it did

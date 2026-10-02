@@ -40,7 +40,7 @@ The ⚙ button (**More** on a phone) holds Settings, Admin, the language and the
 | Section → tab | What it's for |
 |---|---|
 | **Today → Summary** | "Today in one minute" (the market, the signals and your positions in a few plain sentences), a badge saying whether the session is open and the numbers are final, the orders checklist for the next session, your open positions and what to do with each, the market with a 6-month EGX30 chart, and live prices (tap to open) |
-| **Today → Signals** | The BUY signals (each with its rating, the company's results in brief (profit and sales growth over a year, or that it lost money, and its P/E next to its sector's), **Log buy**, **Size it**, **Why this signal** and what BUYs with a score like it did in the 10-year test), the stocks close to a BUY (best rated first, with the same company line), and the **track record**: every BUY the agent published, followed with the same exit rules from the next open (fees included), set against the test, with a warning when the live results run clearly worse |
+| **Today → Signals** | The BUY signals (each with its rating and the model's reason in one line, the company's results in brief (profit and sales growth over a year, or that it lost money, and its P/E next to its sector's), **Log buy**, **Size it**, **Why this signal** and what BUYs with a score like it did in the 10-year test), the stocks close to a BUY (best rated first, with the same reason and company line), and the **track record**: every BUY the agent published, followed with the same exit rules from the next open (fees included), set against the test, with a warning when 10 points fewer of its signals win than in the test (after 30 ended; also in Telegram) |
 | **Today → News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month |
 | **Market → Overview** | Breadth: how many stocks are above their 50-day average, up/down counts, 1-year highs/lows, the biggest movers (day, week, month), a sector table and the market switch for the model's picks. The 1-year breadth chart and the 20-/200-day counts open on a tap. Context only: it doesn't change the BUY rules |
 | **Market → Heatmap** | The whole market in one picture: a tile for every stock that traded at the last close, grouped by sector, sized by the company's market value (or the money traded in it), green or red by its move over the last session, week or month. Tap a tile for the stock |
@@ -153,10 +153,13 @@ By default this is information only. To only get BUY signals for compliant stock
   chart levels vs 7.8% with the fixed rule, worst drop −20% vs −22%; with the model's own picks 24.4% vs 27.7%
   (the fixed rule's lead is all in the 2021–26 boom; 2016–21: 13.4% vs 9.2%), worst drop −22% vs −26%.
 - **Exits:** each evening the stop rises to just under the nearest solid support below the price (never down); it
-  also moves to breakeven after +1× risk, then trails 2× the daily range under the highest close. The target stays
+  also moves to the buy price plus 1.5% after +1× risk (enough to cover both fees, so a trade that comes back still
+  ends a small win), then trails 2× the daily range under the highest close. The target stays
   where it was set. Exit on a close below the 50-day average; **review at day 10 (2 weeks), hard exit at day 20
   (1 month)**. The rising stop, tested on 2016–2026 years the model never saw, with its picks: 31.8% a year against
   22.3% for the stop that waited for +1× risk (worst drop −25.2% against −22.7%); the rules alone 20.4% against 13.4%.
+  The +1.5% floor (Oct 2026, 4 seeds): 48.0% of trades won against 44.9% with the stop at the buy price, higher in
+  every seed, the same 33.7% a year, worst drop −17.9% against −18.3%.
   A logged buy takes the chart's stop and target for its buy date, however late you log it. Your stock page shows one
   stop and one target, each with where it comes from, and the next resistance above the target.
 
@@ -249,6 +252,15 @@ companies that lost money did *better* over two weeks: 32% reached the target ag
 bar (60 or 80 instead of 70), 2 or 5 model picks instead of 3, and adding the pullback and MACD setups did no better.
 Taking only the rule BUYs the model ranks in its top 30–40% helped the old model, but not the one with company
 results. So the company results change the BUYs through the model: its rank orders them and picks 3 more.
+
+**Judged on winning trades (Oct 2026).** From then on a change is kept only if more trades win *and* the yearly
+profit doesn't fall (4 seeds, 2016–2026). With today's rules 44.9% of trades win, 33.7% a year. The count of model
+picks (1–5), skipping rule BUYs the model ranks low, comparing a company's numbers with its own sector's, a closer
+target (1–1.25× the risk, also with the model retrained for it) and a shorter or longer hold all moved the winners by
+under a point or cost profit: the closer target won 48% but made 31% a year. Only the +1.5% floor under the stop
+passed (Exits above). Each BUY card and Close to a BUY row shows the model's reason in one line: what lifted its
+rating most from the chart and from the company's results, and what lowered it. The track record warns (on the site
+and in Telegram on days with BUYs) once 30 signals have ended and 10 points fewer of them won than in the test.
 
 **News.** Headlines from Mubasher (each stock's page, Arabic and English, and the latest Egypt news), Reuters and
 Zawya (through TradingView, tagged to the stock), Al Borsa News and Daily News Egypt. Only headlines, dates and links
