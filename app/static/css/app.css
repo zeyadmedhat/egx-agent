@@ -181,7 +181,7 @@ p { margin: 0; }
 .section-head .hint { flex: 1 1 260px; min-width: 0; }
 .section-head h2 { font-size: 16px; }
 .section-head .hint { color: var(--text-3); font-size: 13px; }
-.section-head .right { margin-inline-start: auto; display: flex; gap: 8px; align-items: center; }
+.section-head .right { margin-inline-start: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; max-width: 100%; }
 .pill-count {
   font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--panel-3); color: var(--text-2);
 }
@@ -292,7 +292,8 @@ select.input { appearance: none; -webkit-appearance: none; padding-inline-end: 3
 input[type="date"].input { padding-inline-end: 8px; }
 input[type="number"].input::-webkit-inner-spin-button { opacity: .4; }
 
-.seg { display: inline-flex; padding: 3px; border-radius: var(--r); background: var(--panel-2); border: 1px solid var(--border); gap: 2px; }
+.seg { display: inline-flex; padding: 3px; border-radius: var(--r); background: var(--panel-2); border: 1px solid var(--border); gap: 2px;
+  max-width: 100%; overflow-x: auto; scrollbar-width: none; }   /* a long one scrolls inside a phone's width */
 .seg button { white-space: nowrap;
   height: 28px; padding: 0 11px; border-radius: var(--r-sm); border: 0; background: transparent; color: var(--text-2);
   font-size: 13px; font-weight: 600; cursor: pointer;
@@ -1040,7 +1041,7 @@ ul.checkup li span { color: var(--text-2); font-size: 13px; }
 
 /* ------------------------------------------------------------------ position cards (ui.js PositionCard) */
 .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 14px; }
-.pos-card { display: flex; flex-direction: column; gap: 12px; margin: 0 !important; }
+.pos-card { display: flex; flex-direction: column; gap: 12px; margin: 0 !important; scroll-margin-top: 80px; }
 .pos-card.act { border-color: var(--warn); }
 .pos-head { display: flex; align-items: center; gap: 10px; }
 .pos-who { flex: 1; min-width: 0; }

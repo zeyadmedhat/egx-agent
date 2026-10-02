@@ -259,7 +259,7 @@ export const fmt = {
   num: (v, d = 2) => (bad(v) ? '–' : minus(nf(d).format(v))),
   int: v => (bad(v) ? '–' : minus(nf(0).format(Math.round(v)))),
   signed: (v, d = 0) => (bad(v) ? '–' : (v > 0 ? '+' : '') + minus(nf(d).format(v))),
-  egp: (v, d = 0) => (bad(v) ? '–' : `${minus(nf(d).format(v))} EGP`),
+  egp: (v, d = 0) => (bad(v) ? '–' : `${minus(nf(d).format(v))} ${store.lang === 'ar' ? 'جنيه' : 'EGP'}`),
   short(v) {
     if (bad(v)) return '–';
     const a = Math.abs(v);
@@ -274,6 +274,7 @@ export const fmt = {
     const d = new Date(String(s).slice(0, 10) + 'T00:00:00');
     return d.toLocaleDateString(dateLocale(), withYear ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
   },
+  month: s => (s ? new Date(`${String(s).slice(0, 7)}-01T00:00:00`).toLocaleDateString(dateLocale(), { month: 'short', year: 'numeric' }) : '–'),
   datetime(s) {
     if (!s) return '–';
     const d = new Date(s);

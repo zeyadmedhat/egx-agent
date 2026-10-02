@@ -257,6 +257,7 @@ async function stockDetail(c, symbol) {
   const pos = await openPositions(c, sym);
   if (pos.length) {
     out.position = pos[0];
+    out.fee_pct = c.cfg.fee_pct_per_side;
     levels = [{ label: 'Avg price', price: pos[0].avg_price, kind: 'entry' },
       { label: 'Stop', price: pos[0].stop, kind: 'stop' }, { label: 'Target', price: pos[0].target, kind: 'target' }];
   }

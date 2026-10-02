@@ -57,10 +57,8 @@ export function DividendsPage() {
   return html`<${PageHead} title="Dividends & results"
       sub="Cash dividends of every EGX company, the highest yields, and bonus shares. Buy before the ex-date to get a dividend.">
       <${Seg} options=${SHOW} value=${show} onChange=${setShow} /><//>
-    ${!data.dividends.length && html`<div style="margin-bottom:14px"><${Callout}><b>No dividend data yet.</b> It downloads
-      with the next scan after the close.<//></div>`}
-    ${show === 'mine' && !held.size && html`<div style="margin-bottom:14px"><${Callout}>You have no open positions, so
-      there's nothing to show for your stocks.${' '}<a href="#/portfolio">Log a buy in My Portfolio →</a><//></div>`}
+    ${!data.dividends.length && html`<div style="margin-bottom:14px"><${Callout}><b>${t('No dividend data yet.')}</b> ${t('It downloads with the next scan after the close.')}<//></div>`}
+    ${show === 'mine' && !held.size && html`<div style="margin-bottom:14px"><${Callout}>${t("You have no open positions, so there's nothing to show for your stocks.")}${' '}<a href="#/portfolio">${t('Log a buy in My Portfolio →')}</a><//></div>`}
     <section class="section">
       <${SectionHead} title="Coming up" count=${coming.length}
         hint="Announced dividends. On the ex-date the price usually drops by about the dividend, so it isn't free money: it's part of the return." />
@@ -77,7 +75,7 @@ export function DividendsPage() {
     <section class="section">
       <${SectionHead} title=${show === 'mine' ? 'Yields of your stocks' : 'Highest yields'}
         hint=${show === 'mine' ? "The last 12 months of cash dividends ÷ today's price."
-          : `The last 12 months of cash dividends ÷ today's price, among stocks trading at least ${fmt.short(data.min_value)} EGP a day. A very high yield can mean the price fell, or a one-off payout.`} />
+          : t("The last 12 months of cash dividends ÷ today's price, among stocks trading at least {v} EGP a day. A very high yield can mean the price fell, or a one-off payout.", { v: fmt.short(data.min_value) })} />
       <div class="card flush"><${DataTable} columns=${yieldCols} rows=${yields} rowKey=${r => r.symbol}
         sort=${{ key: 'yield', dir: 'desc' }} onRowClick=${open} empty="None of these pays a cash dividend." /></div>
     </section>

@@ -701,7 +701,7 @@ def stock_detail(d: Data, symbol: str) -> dict:
 
     pos = open_positions(d, sym)
     if pos:
-        out["position"] = pos[0]
+        out["position"], out["fee_pct"] = pos[0], d.cfg["fee_pct_per_side"]
         lines = [{"label": "Avg price", "price": pos[0]["avg_price"], "kind": "entry"},
                   {"label": "Stop", "price": pos[0]["stop"], "kind": "stop"},
                   {"label": "Target", "price": pos[0]["target"], "kind": "target"}]

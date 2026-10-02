@@ -3,7 +3,7 @@
 // publisher; the good/bad dot is a rough keyword guess. Filters are remembered on this device.
 import { html, useApi, useState, useMemo, useStore, fmt, stockHref, remember } from '../lib.js';
 import { Icon, PageHead, PageLoading, Seg, Callout, NewsList, TAG_LABELS, More } from '../ui.js';
-import { t } from '../i18n.js';
+import { t, tn } from '../i18n.js';
 
 const SHOW = [{ value: 'stocks', label: 'Stock news' }, { value: 'mine', label: 'My stocks' },
   { value: 'market', label: 'Market & economy' }, { value: 'all', label: 'Everything' }];
@@ -46,52 +46,47 @@ export function NewsPage() {
 
   return html`<${PageHead} title="News" sub="Headlines about EGX stocks and the market, and what companies announced.">
       <${Seg} options=${SHOW} value=${f.show} onChange=${set('show')} /><//>
-    ${!data.items.length && html`<div style="margin-bottom:14px"><${Callout}><b>No news downloaded yet.</b> It comes with
-      the next scan after the close.<//></div>`}
-    ${f.show === 'mine' && !mine.size && html`<div style="margin-bottom:14px"><${Callout}>No stocks of yours yet: log a buy
-      in My Portfolio or star stocks for your watchlist.<//></div>`}
+    ${!data.items.length && html`<div style="margin-bottom:14px"><${Callout}><b>${t('No news downloaded yet.')}</b> ${t('It comes with the next scan after the close.')}<//></div>`}
+    ${f.show === 'mine' && !mine.size && html`<div style="margin-bottom:14px"><${Callout}>${t('No stocks of yours yet: log a buy in My Portfolio or star stocks for your watchlist.')}<//></div>`}
     <div class="news-layout">
       <div>
         <div class="card" style="margin-bottom:12px"><div class="news-filters">
-          <input class="input" style="flex:1;min-width:180px" placeholder="Search headlines, symbols, names…" value=${f.q}
+          <input class="input" style="flex:1;min-width:180px" placeholder=${t('Search headlines, symbols, names…')} value=${f.q}
             onInput=${set('q')} />
           <select class="input" style="width:auto" value=${f.source} onChange=${set('source')}>
-            <option value="">All sources</option>
+            <option value="">${t('All sources')}</option>
             ${sourcesUsed.map(s => html`<option value=${s}>${data.sources[s] || s}</option>`)}</select>
           <select class="input" style="width:auto" value=${f.tag} onChange=${set('tag')}>
-            <option value="">All topics</option>
+            <option value="">${t('All topics')}</option>
             ${data.tags.map(tag => html`<option value=${tag}>${t(TAG_LABELS[tag] || tag)}</option>`)}</select>
           <select class="input" style="width:auto" value=${f.tone} onChange=${set('tone')}>
-            <option value="">Any tone</option><option value="good">Sounds good</option><option value="bad">Sounds bad</option></select>
-          ${changed && html`<button class="linkish" onClick=${() => save({ ...DEFAULTS })}>Clear</button>`}
+            <option value="">${t('Any tone')}</option><option value="good">${t('Sounds good')}</option><option value="bad">${t('Sounds bad')}</option></select>
+          ${changed && html`<button class="linkish" onClick=${() => save({ ...DEFAULTS })}>${t('Clear')}</button>`}
         </div></div>
         <div class="card">
-          <div class="card-title"><${Icon} name="news" size=${15} />${fmt.int(items.length)} headlines
-            <span class="right faint">${data.updated ? `Updated ${fmt.datetime(data.updated)}` : ''}</span></div>
+          <div class="card-title"><${Icon} name="news" size=${15} />${t('{n} headlines', { n: fmt.int(items.length) })}
+            <span class="right faint">${data.updated ? t('Updated {when}', { when: fmt.datetime(data.updated) }) : ''}</span></div>
           <${NewsList} items=${items} sources=${data.sources} showSymbol limit=${60}
             empty="No headline matches these filters." />
         </div>
-        <${More} label="About these headlines"><p>Only headlines are kept here: each links to the publisher's
-          article. The topics and the green/red dot come from keyword rules in Arabic and English. They're a quick guide,
-          not a reading of the article. The agent reads each stock's Mubasher page every few days, and Reuters and Zawya
-          every run.</p><//>
+        <${More} label="About these headlines"><p>${t("Only headlines are kept here: each links to the publisher's article. The topics and the green/red dot come from keyword rules in Arabic and English. They're a quick guide, not a reading of the article. The agent reads each stock's Mubasher page every few days, and Reuters and Zawya every run.")}</p><//>
       </div>
       <aside class="stack">
         <div class="card"><div class="card-title"><${Icon} name="coins" size=${15} />${t('Coming ex-dates')}</div>
           ${coming.length ? html`<div class="stat-list">${coming.slice(0, 25).map(a => html`
             <span class="k"><b>${fmt.date(a.effective)}</b></span>
-            <span class="v" style="font-weight:500"><a href=${stockHref(a.symbol)}>${a.symbol}</a> · ${a.label}${
-              mine.has(a.symbol) ? html` <span class="tag">yours</span>` : ''}</span>`)}</div>`
-            : html`<p class="muted" style="font-size:13px">Nothing announced for the coming weeks.</p>`}
-          <p class="faint" style="font-size:12px;margin-top:10px">On a cash dividend's ex-date the price drops by about the
-            dividend. Bonus shares and splits re-base it. <a href="#/dividends">Dividend amounts →</a></p></div>
+            <span class="v" style="font-weight:500"><a href=${stockHref(a.symbol)}>${a.symbol}</a> · ${tn(a.label)}${
+              mine.has(a.symbol) ? html` <span class="tag">${t('yours')}</span>` : ''}</span>`)}</div>`
+            : html`<p class="muted" style="font-size:13px">${t('Nothing announced for the coming weeks.')}</p>`}
+          <p class="faint" style="font-size:12px;margin-top:10px">${t("On a cash dividend's ex-date the price drops by about the dividend. Bonus shares and splits re-base it.")}
+            <a href="#/dividends">${t('Dividend amounts →')}</a></p></div>
         <div class="card"><div class="card-title"><${Icon} name="info" size=${15} />${t('Announced this month')}</div>
           ${announced.length ? html`<div class="stat-list">${announced.slice(0, 25).map(a => html`
             <span class="k">${fmt.date(a.announced)}</span>
-            <span class="v" style="font-weight:500"><a href=${stockHref(a.symbol)}>${a.symbol}</a> · ${a.label}${
+            <span class="v" style="font-weight:500"><a href=${stockHref(a.symbol)}>${a.symbol}</a> · ${tn(a.label)}${
               a.effective ? html`<span class="faint"> · ${fmt.date(a.effective)}</span>` : ''}</span>`)}</div>`
-            : html`<p class="muted" style="font-size:13px">Nothing new this month.</p>`}
-          <p class="faint" style="font-size:12px;margin-top:10px">From Mubasher's list of the exchange's filings.</p></div>
+            : html`<p class="muted" style="font-size:13px">${t('Nothing new this month.')}</p>`}
+          <p class="faint" style="font-size:12px;margin-top:10px">${t("From Mubasher's list of the exchange's filings.")}</p></div>
       </aside>
     </div>`;
 }

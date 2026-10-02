@@ -5,7 +5,7 @@ import {
 import {
   Icon, Kpi, Callout, PageHead, PageLoading, Field, Switch, Confirm, JobProgress, useJob,
 } from '../ui.js';
-import { t } from '../i18n.js';
+import { t, tp } from '../i18n.js';
 
 const isNum = f => f.kind === 'float' || f.kind === 'int';
 
@@ -79,30 +79,31 @@ export function SettingsPage() {
   const admin = data.is_admin;
   return html`
     <${PageHead} title="Settings" sub=${website && !admin
-      ? `Your own numbers: they size your BUY signals${data.static ? '' : ' and run your paper account'}. The strategy itself is the same for everyone.`
+      ? t(data.static ? 'Your own numbers: they size your BUY signals. The strategy itself is the same for everyone.'
+        : 'Your own numbers: they size your BUY signals and run your practice account. The strategy itself is the same for everyone.')
       : 'Changes apply from the next scan, or press Re-score now to apply them to the latest data.'}>
-      <button class="btn ghost" onClick=${() => setConfirmReset(true)}>${admin ? 'Restore default rules' : 'Reset my settings'}</button><//>
+      <button class="btn ghost" onClick=${() => setConfirmReset(true)}>${t(admin ? 'Restore default rules' : 'Reset my settings')}</button><//>
     ${saved && admin && html`<div style="margin-bottom:14px"><${Callout} tone="ok"><div class="row" style="gap:12px">
       <span style="flex:1">Saved. Re-score to see today's signals with the new settings (takes a few seconds, no download).</span>
       <button class="btn sm primary" disabled=${running} onClick=${() => startJob('/jobs/scan', { update_data: false })}>
         <${Icon} name="refresh" />Re-score now</button></div><//></div>`}
     <div class="settings-layout">
       <nav class="settings-nav">
-        <a role="button" onClick=${() => scrollTo('sec-alerts')}>${data.static ? 'This device' : 'Alerts'}</a>
-        ${data.sections.map(s => html`<a role="button" onClick=${() => scrollTo(slug(s.title))}>${s.title}</a>`)}
-        <a role="button" onClick=${() => scrollTo('sec-data')}>Data</a>
+        <a role="button" onClick=${() => scrollTo('sec-alerts')}>${t(data.static ? 'This device' : 'Alerts')}</a>
+        ${data.sections.map(s => html`<a role="button" onClick=${() => scrollTo(slug(s.title))}>${t(s.title)}</a>`)}
+        <a role="button" onClick=${() => scrollTo('sec-data')}>${t('Data')}</a>
       </nav>
       <div class="stack">
         ${data.static ? html`<${DeviceCard} telegram=${data.telegram} scanUrl=${data.scan_url} />` : html`<${AlertsCard} />`}
         ${data.sections.map(s => html`<div class="card settings-section" id=${slug(s.title)}>
-          <div class="card-title" style="font-size:14px;color:var(--text)">${s.title}${website && admin && html`
+          <div class="card-title" style="font-size:14px;color:var(--text)">${t(s.title)}${website && admin && html`
             <span class=${cls('scope-tag', s.scope === 'strategy' && 'everyone')}>${s.scope === 'strategy'
               ? 'Everyone: the strategy' : 'Only you'}</span>`}</div>
           <div class="fields">${s.fields.map(f => html`<${SettingField} f=${f} value=${draft[f.key]}
             onChange=${set(f.key)} error=${errors[f.key]} />`)}</div>
         </div>`)}
-        ${dirty && html`<div class="savebar"><span class="msg"><${Icon} name="info" size=${15} /> You have unsaved changes.</span>
-          <button class="btn ghost" onClick=${() => { setDraft(original); setErrors({}); }}>Discard</button>
+        ${dirty && html`<div class="savebar"><span class="msg"><${Icon} name="info" size=${15} /> ${t('You have unsaved changes.')}</span>
+          <button class="btn ghost" onClick=${() => { setDraft(original); setErrors({}); }}>${t('Discard')}</button>
           <button class="btn primary" disabled=${saving} onClick=${save}><${Icon} name="check" />${t('Save settings')}</button></div>`}
         <${DataCard} d=${data.data} running=${running} admin=${admin} />
       </div>
@@ -110,12 +111,13 @@ export function SettingsPage() {
     ${confirmReset && html`<${Confirm} title=${admin ? 'Restore the default rules?' : 'Reset your settings?'}
       confirmLabel=${admin ? 'Restore defaults' : 'Reset'}
       text=${admin ? `All rules go back to the tested defaults${website ? ' for everyone' : ''}. Your capital, paper capital and fees are kept.`
-        : `Your risk limits${data.static ? ' and Shariah filter' : ', Shariah filter and paper-trading choice'} go back to the defaults. Your capital and fees are kept.`}
+        : data.static ? 'Your risk limits and Shariah filter go back to the defaults. Your capital and fees are kept.'
+        : 'Your risk limits, Shariah filter and paper-trading choice go back to the defaults. Your capital and fees are kept.'}
       onConfirm=${restore} onClose=${() => setConfirmReset(false)} />`}`;
 }
 
 function SettingField({ f, value, onChange, error }) {
-  const label = f.unit ? html`${f.label} <span class="faint">(${f.unit})</span>` : f.label;
+  const label = f.unit ? html`${t(f.label)} <span class="faint">(${t(f.unit)})</span>` : t(f.label);
   if (isNum(f)) {
     return html`<${Field} label=${label} help=${f.help} error=${error}>
       <input class=${cls('input', error && 'invalid')} type="number" step=${f.step} min=${f.min} max=${f.max}
@@ -124,7 +126,7 @@ function SettingField({ f, value, onChange, error }) {
   if (f.kind === 'select') {
     return html`<${Field} label=${label} help=${f.help} error=${error}>
       <select class="input" value=${value} onChange=${e => onChange(e.target.value)}>
-        ${f.options.map(o => html`<option value=${o.value}>${o.label}</option>`)}</select><//>`;
+        ${f.options.map(o => html`<option value=${o.value}>${t(o.label)}</option>`)}</select><//>`;
   }
   if (f.kind === 'list' || f.kind === 'map') {
     return html`<${Field} className="wide" label=${label} help=${f.help} error=${error}>
@@ -144,22 +146,21 @@ function SettingField({ f, value, onChange, error }) {
       </div><//>`;
   }
   return html`<${Field} className="wide" help=${f.help} error=${error}>
-    <${Switch} checked=${!!value} onChange=${onChange} label=${f.label} /><//>`;
+    <${Switch} checked=${!!value} onChange=${onChange} label=${t(f.label)} /><//>`;
 }
 
 function DataCard({ d, running, admin }) {
   return html`<div class="card settings-section" id="sec-data">
-    <div class="card-title" style="font-size:14px;color:var(--text)">Data</div>
+    <div class="card-title" style="font-size:14px;color:var(--text)">${t('Data')}</div>
     <div class="kpis">
       <${Kpi} compact label="Stocks (from Kashif)" value=${d.stocks} />
       <${Kpi} compact label="With price history" value=${d.priced} />
       <${Kpi} compact label="Latest price bar" value=${fmt.date(d.last_bar)} />
-      <${Kpi} compact label="Kashif checked" value=${d.kashif_checked ? fmt.date(d.kashif_checked) : 'never'} />
+      <${Kpi} compact label="Kashif checked" value=${d.kashif_checked ? fmt.date(d.kashif_checked) : t('never')} />
     </div>
     ${d.missing.length > 0 && html`<div class="missing-list" style="margin-top:16px">
-      <div class="muted">Stocks without usable prices. They're checked again weekly and join the scan by themselves
-        once they trade and build enough history.</div>
-      ${d.missing.map(g => html`<div><b>${g.note}</b><div class="syms">${g.symbols.map(s => html`<code>${s}</code>`)}</div></div>`)}
+      <div class="muted">${t("Stocks without usable prices. They're checked again weekly and join the scan by themselves once they trade and build enough history.")}</div>
+      ${d.missing.map(g => html`<div><b>${t(g.note)}</b><div class="syms">${g.symbols.map(s => html`<code>${s}</code>`)}</div></div>`)}
     </div>`}
     ${admin ? html`<div class="row" style="margin-top:18px">
       <button class="btn" disabled=${running} onClick=${() => startJob('/jobs/scan', { update_data: false })}>
@@ -170,7 +171,7 @@ function DataCard({ d, running, admin }) {
         <${Icon} name="shield" />Refresh Kashif Shariah data</button>
     </div>
     <div style="margin-top:14px"><${JobProgress} /></div>` : html`<p class="faint" style="font-size:12.5px;margin-top:14px">
-      The site downloads the latest prices and scans by itself after every close.</p>`}
+      ${t('The site downloads the latest prices and scans by itself after every close.')}</p>`}
   </div>`;
 }
 
@@ -191,7 +192,7 @@ function DeviceCard({ telegram, scanUrl }) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    toast('Backup downloaded. Keep it somewhere safe, for example in your email or cloud drive.');
+    toast(t('Backup downloaded. Keep it somewhere safe, for example in your email or cloud drive.'));
   };
   const pick = e => {
     const file = e.target.files && e.target.files[0];
@@ -201,65 +202,53 @@ function DeviceCard({ telegram, scanUrl }) {
       const site = await import('../local/site.js');
       const book = site.readBackup(text);
       const n = book.trades.filter(x => x.account === 'real' && x.status === 'open').length;
-      setRestore({ book, text: `It has ${n} open position${n === 1 ? '' : 's'}${book.trades.length ? '' : ' and nothing else'}. `
-        + 'Everything saved in this browser now is replaced by the backup.' });
+      setRestore({ book, text: `${t(book.trades.length ? 'It has {n} open positions.' : 'It has {n} open positions and nothing else.', { n })} `
+        + t('Everything saved in this browser now is replaced by the backup.') });
     }).catch(err => toast(err.message, 'error', 9000));
   };
   const apply = async () => {
     const site = await import('../local/site.js');
     site.saveBook(restore.book);
-    toast('Backup restored.');
+    toast(t('Backup restored.'));
     refreshAll();
   };
   return html`<div class="card settings-section" id="sec-alerts">
-    <div class="card-title" style="font-size:14px;color:var(--text)"><${Icon} name="shield" size=${16} />Your data on this device</div>
-    <p class="muted" style="font-size:13px">Your portfolio and settings are saved only in this browser.
-      Nobody else can see them, not even the person who runs the site. They don't move to your other phone or computer by
-      themselves: connect Telegram below (it keeps the newest copy for your other devices), or download a backup here and
-      restore it there.</p>
+    <div class="card-title" style="font-size:14px;color:var(--text)"><${Icon} name="shield" size=${16} />${t('Your data on this device')}</div>
+    <p class="muted" style="font-size:13px">${t("Your portfolio and settings are saved only in this browser. Nobody else can see them, not even the person who runs the site. They don't move to your other phone or computer by themselves: connect Telegram below (it keeps the newest copy for your other devices), or download a backup here and restore it there.")}</p>
     <div class="device-actions">
       <button class="btn primary" onClick=${download}><${Icon} name="download" />${t('Download a backup')}</button>
-      <label class="btn"><${Icon} name="refresh" />Restore from a backup
+      <label class="btn"><${Icon} name="refresh" />${t('Restore from a backup')}
         <input type="file" accept="application/json,.json" hidden onChange=${pick} /></label>
     </div>
-    <p class="faint" style="font-size:12.5px;margin-top:12px">On iPhone, use the site from its Home Screen icon (Share →
-      Add to Home Screen): Safari may delete a website's saved data if you don't open it for 7 days.</p>
+    <p class="faint" style="font-size:12.5px;margin-top:12px">${t("On iPhone, use the site from its Home Screen icon (Share → Add to Home Screen): Safari may delete a website's saved data if you don't open it for 7 days.")}</p>
     <div class="sub-block"><h3>${t('Alerts on your phone (Telegram)')}</h3>
       ${telegram ? html`
-        <div class="muted" style="font-size:12.5px">After each close, the bot sends you the day's signals: what to buy,
-          up to which price, the stop and the target. Your share counts are here on the site.</div>
+        <div class="muted" style="font-size:12.5px">${t("After each close, the bot sends you the day's signals: what to buy, up to which price, the stop and the target. Your share counts are here on the site.")}</div>
         <ol class="steps" style="margin-top:10px">
-          <li><div>Press <b>Connect Telegram</b> below, then <b>Start</b> in Telegram.</div></li>
-          <li><div>The bot answers <b>"Connected"</b>${telegram.worker ? ' right away' : ' within about 3 hours: it checks for'
-            + ' new people a few times a day'}. Then you get the latest signals, and new ones after each close.</div></li>
-          ${telegram.worker && html`<li><div>It also links your portfolio on this device: after each close the bot tells
-            you what to do with your own positions (sell, move a stop), and your portfolio comes with you to your
-            other phone or computer.</div></li>`}
+          <li><div>${tp('Press {connect} below, then {start} in Telegram.', { connect: html`<b>${t('Connect Telegram')}</b>`, start: html`<b>Start</b>` })}</div></li>
+          <li><div>${t(telegram.worker ? 'The bot answers "Connected" right away. Then you get the latest signals, and new ones after each close.'
+            : 'The bot answers "Connected" within about 3 hours: it checks for new people a few times a day. Then you get the latest signals, and new ones after each close.')}</div></li>
+          ${telegram.worker && html`<li><div>${t('It also links your portfolio on this device: after each close the bot tells you what to do with your own positions (sell, move a stop), and your portfolio comes with you to your other phone or computer.')}</div></li>`}
         </ol>
         <div class="device-actions">
           <a class="btn primary" href=${connect ? connect.href : telegram.link} target="_blank" rel="noopener noreferrer"
             onClick=${() => { if (connect) connect.arm(); setTimeout(() => setArmed(x => x + 1), 300); }}>
             <${Icon} name="send" />${t('Connect Telegram')}</a>
         </div>
-        <p class="faint" style="font-size:12.5px;margin-top:10px">To stop, send <b>/stop</b> to @${telegram.bot}. Keep this
-          button's link to yourself: anyone who opens it gets the messages too.</p>
+        <p class="faint" style="font-size:12.5px;margin-top:10px">${t("To stop, send /stop to @{bot}. Keep this button's link to yourself: anyone who opens it gets the messages too.", { bot: telegram.bot })}</p>
         ${telegram.worker && html`<${BotPortfolio} bot=${telegram.bot} key=${armed} />`}`
-      : html`<div class="muted" style="font-size:12.5px">The site has no Telegram alerts yet. Open it after each close
-          (from about 4 pm Cairo time) for the next session's orders.</div>`}
+      : html`<div class="muted" style="font-size:12.5px">${t("The site has no Telegram alerts yet. Open it after each close (from about 4 pm Cairo time) for the next session's orders.")}</div>`}
     </div>
     ${scanUrl && html`<div class="sub-block"><h3>${t('Run a scan now (for the person who runs the site)')}</h3>
-      <div class="muted" style="font-size:12.5px">The site scans by itself after every close. To scan now, open the
-        scan on GitHub and press <b>Run workflow</b>, then the green <b>Run workflow</b> button. It needs your GitHub
-        sign-in, so it only works for you. The new data shows here in about 5 minutes. During trading hours the
-        prices aren't final: the site scans again after the close.</div>
+      <div class="muted" style="font-size:12.5px">${t("The site scans by itself after every close. To scan now, open the scan on GitHub and press Run workflow, then the green Run workflow button. It needs your GitHub sign-in, so it only works for you. The new data shows here in about 5 minutes. During trading hours the prices aren't final: the site scans again after the close.")}</div>
       <div class="device-actions">
         <a class="btn" href=${scanUrl} target="_blank" rel="noopener noreferrer" onClick=${() => watchForData()}>
-          <${Icon} name="refresh" />Run scan on GitHub</a>
+          <${Icon} name="refresh" />${t('Run scan on GitHub')}</a>
       </div>
       <label class="check" style="font-size:13px"><input type="checkbox" checked=${owner}
-        onChange=${e => setOwner(e.target.checked)} />Show a Run scan button at the top of every page on this device</label>
+        onChange=${e => setOwner(e.target.checked)} />${t('Show a Run scan button at the top of every page on this device')}</label>
     </div>`}
-    ${restore && html`<${Confirm} title="Restore this backup?" confirmLabel="Restore" danger text=${restore.text}
+    ${restore && html`<${Confirm} title="Restore this backup?" confirmLabel=${t('Restore')} danger text=${restore.text}
       onConfirm=${apply} onClose=${() => setRestore(null)} />`}
   </div>`;
 }

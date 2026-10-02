@@ -34,17 +34,17 @@ export function PredictPage() {
       <button class="linkish" onClick=${train} disabled=${running}>retrain it now</button>.`}<//></div>`}
     <div class="kpis">
       <${Kpi} label="Its top 10% each day: reached the target first" value=${fmt.pct(r.top.hit, 0, false)} valueClass="up"
-        sub=${`the average stock ${fmt.pct(r.all.hit, 0, false)}`} />
+        sub=${t('the average stock {v}', { v: fmt.pct(r.all.hit, 0, false) })} />
       <${Kpi} label="Its top 10%: average trade" value=${fmt.pct(r.top.ret, 1)} valueClass=${tone(r.top.ret)}
-        sub=${`the average stock ${fmt.pct(r.all.ret, 1)}, after fees`} />
+        sub=${t('the average stock {v}, after fees', { v: fmt.pct(r.all.ret, 1) })} />
       <${Kpi} label="Years it beat the average stock" value=${`${r.good_years} / ${(r.years || []).length}`}
-        sub=${`tested ${fmt.date(r.from)} – ${fmt.date(r.to)}`} />
+        sub=${t('tested {a} – {b}', { a: fmt.date(r.from), b: fmt.date(r.to) })} />
     </div>
     <div class="stack" style="margin-top:12px"><${Health} h=${data.health} /><${Recent} rec=${(data.recent || {})[String(HZ)]} /></div>
 
     <section class="section">
       <${SectionHead} title="Today's ranking" count=${data.rows.length}
-        hint=${`From the ${fmt.date(data.date)} close, best first. A chance shows only for its top ${fmt.int(data.top_n)}.`}>
+        hint=${t('From the {date} close, best first. A chance shows only for its top {n}.', { date: fmt.date(data.date), n: fmt.int(data.top_n) })}>
         <${ShariahNote} mode=${data.shariah_filter} /><${Seg} options=${SHOW} value=${show} onChange=${setShow} /><//>
       <div class="card flush"><${ChanceTable} rows=${rows} base=${data.base || {}} /></div>
     </section>
@@ -103,7 +103,6 @@ function ChanceTable({ rows, base }) {
     { key: `rank${HZ}`, label: '#', align: 'r', width: '64px',
       render: r => html`<span class="faint">${fmt.int(r[`rank${HZ}`])}</span> <${RankMove} now=${r[`rank${HZ}`]} before=${r[`prev_rank${HZ}`]} />` },
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
-    { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
     { key: 'p10', label: 'Chance in 2 weeks', align: 'r', title: 'Chance it reaches the target before the stop within 10 sessions',
       render: r => html`<${Chance} p=${r.p10} base=${base[10]} top=${r.top10} />` },
     { key: 'ev', label: 'Average trade', align: 'r', sortValue: r => expected(r, HZ) ?? -1,
@@ -114,6 +113,7 @@ function ChanceTable({ rows, base }) {
     { key: 'action', label: 'Agent', sortValue: r => (r.action === 'BUY' ? 0 : r.action ? 1 : r.held ? 2 : 3),
       render: r => html`<div class="row" style="gap:6px">${r.action && html`<${StatusChip} status=${r.action} />`}
         ${r.held && html`<span class="tag"><${Icon} name="briefcase" size=${12} />${t('Held')}</span>`}</div>` },
+    { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
   ];
   return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol} limit=${10}
     sort=${{ key: `rank${HZ}`, dir: 'asc' }} onRowClick=${r => go(stockHref(r.symbol))}
@@ -140,9 +140,9 @@ const HEALTH = {
 function Health({ h }) {
   if (!h || !HEALTH[h.status]) return null;
   const tone = h.status === 'bad' ? 'warn' : '';
-  return html`<${Callout} tone=${tone}><span class=${`health-dot ${h.status}`}></span><b>Live check</b>${' '}
-    ${HEALTH[h.status].replace('{min}', h.min_days)}${h.edge != null ? html`${' '}Last ${fmt.int(h.days)} sessions: its top 10%
-    ${fmt.pct(h.top, 2)} a trade against ${fmt.pct(h.all, 2)} for all scored stocks (tested gap ${fmt.pct(h.tested_edge, 2)}).` : ''}<//>`;
+  return html`<${Callout} tone=${tone}><span class=${`health-dot ${h.status}`}></span><b>${t('Live check')}</b>${' '}
+    ${t(HEALTH[h.status], { min: h.min_days })}${h.edge != null ? ` ${t('Last {days} sessions: its top 10% {top} a trade against {all} for all scored stocks (tested gap {gap}).', {
+      days: fmt.int(h.days), top: fmt.pct(h.top, 2), all: fmt.pct(h.all, 2), gap: fmt.pct(h.tested_edge, 2) })}` : ''}<//>`;
 }
 
 function ComboTable({ c }) {

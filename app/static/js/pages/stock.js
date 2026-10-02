@@ -2,7 +2,7 @@
 import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, WatchStar,
-  Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard,
+  Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard, sessionState,
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
@@ -60,8 +60,10 @@ export function StockPage({ route }) {
       ${st && html`<div class="price"><div class="big">${fmt.price(st.close)}</div>
         <div class="chg"><${Change} value=${st.change} pill /> <span class="faint" style="font-weight:500">${t('on the day')}</span></div>
         <div class="faint" style="font-size:12px">${t('Close of {date}', { date: fmt.date(st.last_bar) })}</div>
-        ${quote && Math.abs(quote.price - st.close) > 1e-9 && html`<div class="live-now"><span class="live-dot"></span>
-          ${t('Live')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /> <span class="faint">${t('~15 min late')}</span></div>`}
+        ${quote && Math.abs(quote.price - st.close) > 1e-9 && (sessionState().state === 'open'
+          ? html`<div class="live-now"><span class="live-dot"></span>
+              ${t('Live')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /> <span class="faint">${t('~15 min late')}</span></div>`
+          : html`<div class="live-now">${t('Newest close')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /></div>`)}
         ${data.corporate && data.corporate.results && data.corporate.results.next && html`<div class="next-results">
           <${Term} k="results">${t('Next results')}<//>: <b>${t('expected around {date}', { date: fmt.date(data.corporate.results.next) })}</b></div>`}</div>`}
     </div>
@@ -107,7 +109,8 @@ export function StockPage({ route }) {
         <aside class="stack">
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
-          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes} />`}
+          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes}
+            fee=${data.fee_pct} />`}
           ${data.signal && html`<${SignalPanel} data=${data} />`}
           ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} />`}
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
@@ -385,18 +388,18 @@ const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower
 
 // Your position: the same card as Today and My Portfolio (live price, P&L, stop to target), and where the stop and
 // target come from. The stop rises to each new support under the price (egx_agent/engine.py); the target stays.
-function PositionPanel({ p, hold, c, atr, quotes }) {
+function PositionPanel({ p, hold, c, atr, quotes, fee }) {
   const next = p.stop != null && c ? nextTarget(p, c, atr) : null;
   const sw = p.stop != null ? stopWhy(p, c, atr) : '';
   const tw = targetWhy(p, c, atr);
-  return html`<${PositionCard} p=${livePosition(p, quotes, 0.25)} hold=${hold}>
+  return html`<${PositionCard} p=${livePosition(p, quotes, fee)} hold=${hold}>
     ${(sw || tw || next) && html`<${More} label="Where the stop and target come from"><ul class="level-why">
       ${sw && html`<li><b class="down">${t('Stop')}</b> ${sw}</li>`}
       ${tw && html`<li><b class="up">${t('Target')}</b> ${tw}</li>`}
       ${next && html`<li><b class="up">${t('Next target')}</b> ${fmt.price(next)}: ${t('the next resistance above your target, if the price gets through it')}</li>`}
     </ul>
     <p class="faint" style="font-size:12px;margin-top:8px">${t('Each evening the stop rises to just under the newest support below the price, and never goes down. The target stays where it was set.')}</p><//>`}
-    <a class="btn sm block" href="#/portfolio">${t('Sell or edit in My Portfolio')}</a>
+    <a class="btn sm block" href=${`#/portfolio?open=${p.id}`}>${t('Sell or edit in My Portfolio')}</a>
   <//>`;
 }
 

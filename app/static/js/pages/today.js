@@ -33,7 +33,7 @@ export function TodayPage() {
       <${SessionBadge} dataDate=${m.date} /><//>
     <${Brief} data=${data} blocked=${blocked} alerts=${alerts} />
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
-      ${m.warnings.map(w => html`<${Callout} tone="warn">${w}<//>`)}</div>`}
+      ${m.warnings.map(w => html`<${Callout} tone="warn">${tn(w)}<//>`)}</div>`}
     ${data.orders && html`<${OrdersCard} o=${data.orders} />`}
     ${data.positions.length > 0 && html`<${Positions} positions=${data.positions} cfg=${data.cfg} alerts=${alerts} />`}
     <section class="section">
@@ -362,7 +362,7 @@ function NearList({ rows, model }) {
     { key: 'why', label: 'Why', sortable: false, title: 'What lifted (▲) and lowered (▼) its rating most',
       render: r => html`<${Reason} items=${r.pred && r.pred.why10} stacked />` },
     { key: 'score', label: html`<${Term} k="score">${t('Score')}<//>`, width: '140px', render: r => html`<${ScoreBar} score=${r.score} />` },
-    { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
+    { key: 'close', label: 'Price', align: 'r', fmt: v => fmt.price(v) },
     { key: 'trigger', label: html`<${Term} k="breakout">${t('Breakout above')}<//>`, align: 'r', fmt: v => html`<b>${fmt.price(v)}</b>` },
     { key: 'to_trigger', label: 'Distance', align: 'r', fmt: v => html`<span class="muted">${fmt.pct(v)}</span>`,
       title: 'How far the price must rise to break out' },

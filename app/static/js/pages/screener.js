@@ -123,7 +123,7 @@ const COLUMNS = [
   { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
   { key: 'rating', label: 'Rating', align: 'r', title: "The model's rank among the day's actively traded stocks, 1–100 (91+ is its top 10%)",
     render: r => html`<${Rating} v=${r.rating} />` },
-  { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
+  { key: 'close', label: 'Price', align: 'r', fmt: v => fmt.price(v) },
   { key: 'chg1', label: 'Day', align: 'r', render: r => pctCell(r.chg1) },
   { key: 'ret21', label: '1 month', align: 'r', render: r => pctCell(r.ret21, 0) },
   { key: 'ret63', label: '3 months', align: 'r', render: r => pctCell(r.ret63, 0) },
@@ -142,5 +142,5 @@ const COLUMNS = [
     fmt: v => (v ? fmt.date(v) : html`<span class="faint">–</span>`) },
   { key: 'action', label: 'Signal', sortValue: r => (r.action === 'BUY' ? 0 : r.action ? 1 : r.held ? 2 : 3),
     render: r => html`<div class="row" style="gap:6px">${r.action && html`<${StatusChip} status=${r.action} />`}
-      ${r.held && html`<span class="tag"><${Icon} name="briefcase" size=${12} />Held</span>`}</div>` },
+      ${r.held && html`<span class="tag"><${Icon} name="briefcase" size=${12} />${t('Held')}</span>`}</div>` },
 ];

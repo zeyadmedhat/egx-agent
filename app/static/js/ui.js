@@ -26,6 +26,7 @@ const ICONS = {
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
   alert: '<path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4M12 17h.01"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   checkCircle: '<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>',
@@ -68,7 +69,7 @@ export function Badges({ info, compact }) {
   const src = info.egx33_manual ? 'added by you in Settings' : "Kashif's EGX33 index list";
   const egx = info.egx33
     ? html`<span class="badge ok" title=${`Member of the EGX33 Shariah index (source: ${src})`}>EGX33 ✓</span>`
-    : html`<span class="badge muted" title="Not in the EGX33 Shariah index">EGX33 ✗</span>`;
+    : html`<span class="badge muted" title=${t('Not in the EGX33 Shariah index')}>EGX33 ✗</span>`;
   const [c, en] = KASHIF[info.kashif_status] || ['muted', 'Not on Kashif'];
   const text = t(en);
   const tip = [
@@ -184,14 +185,15 @@ export function useQuotes(symbols) {
   return q;
 }
 
-// A position at the live price when there is one: price, P&L after fees (the selling fee on the new value) and
-// whether it has already crossed its stop or target. p: views.open_positions / local/api.js openPositions.
+// A position at the newest price when there is one: price, P&L after fees (the selling fee on the new value) and
+// whether it has already crossed its stop or target. Live only while the session is open; otherwise the quote is the
+// last close. p: views.open_positions / local/api.js openPositions.
 export function livePosition(p, q, feePct) {
   const quote = q && q[p.symbol];
   if (!quote || p.adjust) return { ...p, price: p.last, live: false, day_change: null };
   const price = quote.price;
   const pnl = p.pnl + (price - p.last) * p.shares * (1 - feePct / 100);
-  return { ...p, price, live: true, day_change: quote.change, pnl, pnl_pct: price / p.avg_price - 1,
+  return { ...p, price, live: sessionState().state === 'open', day_change: quote.change, pnl, pnl_pct: price / p.avg_price - 1,
     hit_stop: p.stop != null && price <= p.stop, hit_target: price >= p.target };
 }
 
@@ -217,7 +219,7 @@ function PlanBar({ p }) {
 export function PositionCard({ p, hold, children, onOpen, open }) {
   const urgent = p.hit_stop ? { tone: 'exit', text: 'At or under your stop now: sell' }
     : p.hit_target ? { tone: 'hold', text: 'At your target now: take the profit' } : null;
-  return html`<article class=${cls('card pos-card', p.status !== 'HOLD' && 'act', open && 'open')}>
+  return html`<article class=${cls('card pos-card', p.status !== 'HOLD' && 'act', open && 'open')} id=${`pos-${p.id}`}>
     <div class="pos-head">
       <${StockAvatar} symbol=${p.symbol} size=${36} />
       <div class="pos-who"><a class="sym-big" href=${stockHref(p.symbol)}>${p.symbol}</a>
@@ -237,8 +239,8 @@ export function PositionCard({ p, hold, children, onOpen, open }) {
     ${p.status !== 'HOLD' && html`<p class="pos-reason" dir="auto">${tn(p.reason)}</p>`}
     ${p.cautions && p.cautions.length > 0 && html`<div style="margin-bottom:8px"><${Cautions} items=${p.cautions} compact /></div>`}
     <div class="pos-foot"><${DayBar} day=${p.day} max=${hold.max} review=${hold.review} />
-      ${onOpen && html`<button class="btn sm ghost" onClick=${onOpen} aria-expanded=${!!open}>${t(open ? 'Close' : 'Sell or edit')}
-        <${Icon} name=${open ? 'down' : 'chevron'} size=${14} /></button>`}</div>
+      ${onOpen && (open ? html`<button class="btn sm" onClick=${onOpen} aria-expanded="true"><${Icon} name="x" size=${14} />${t('Close')}</button>`
+        : html`<button class="btn sm ghost" onClick=${onOpen} aria-expanded="false">${t('Sell or edit')}<${Icon} name="chevron" size=${14} /></button>`)}</div>
     ${children}
   </article>`;
 }
@@ -441,7 +443,7 @@ export const TAG_LABELS = { dividend: 'Dividend', bonus: 'Bonus shares', results
   deal: 'Deal', financing: 'Financing', legal: 'Legal', meeting: 'Meeting', buyback: 'Buyback', analysis: 'Analysis' };
 export function NewsList({ items, sources = {}, showSymbol, limit, empty = 'No news yet.' }) {
   const [all, setAll] = useState(false);
-  if (!items || !items.length) return html`<p class="muted" style="font-size:13px">${empty}</p>`;
+  if (!items || !items.length) return html`<p class="muted" style="font-size:13px">${tx(empty)}</p>`;
   const shown = limit && !all ? items.slice(0, limit) : items;
   return html`<ul class="news-list">${shown.map(n => html`<li key=${`${n.id}|${n.symbol || ''}`}>
       <span class=${cls('tone-dot', n.tone > 0 ? 'up' : n.tone < 0 ? 'down' : '')}
@@ -455,7 +457,7 @@ export function NewsList({ items, sources = {}, showSymbol, limit, empty = 'No n
         </div>
       </div></li>`)}</ul>
     ${limit && items.length > limit && html`<button class="linkish" style="margin-top:8px" onClick=${() => setAll(!all)}>
-      ${all ? 'Show fewer' : `Show all ${items.length}`}</button>`}`;
+      ${t(all ? 'Show fewer' : 'Show all {n}', { n: items.length })}</button>`}`;
 }
 
 // The market switch for the model's picks: full size, half size or no new buys, from breadth.
@@ -565,7 +567,7 @@ export function DataTable({ columns, rows, rowKey = (r, i) => i, onRowClick, sor
       <//>`;
     }) : html`<tr><td colspan=${columns.length} class="table-empty">${tx(empty)}</td></tr>`}</tbody>
   </table>${limit && sorted.length > limit && html`<div class="table-more">
-    <button class="linkish" onClick=${() => setAll(a => !a)}>${all ? 'Show fewer' : `Show all ${sorted.length}`}</button></div>`}</div>`;
+    <button class="linkish" onClick=${() => setAll(a => !a)}>${t(all ? 'Show fewer' : 'Show all {n}', { n: sorted.length })}</button></div>`}</div>`;
 }
 
 // ------------------------------------------------------------------ stock picker / search
@@ -665,7 +667,7 @@ export function Toasts() {
   const toasts = useStore(s => s.toasts);
   return html`<div class="toasts" role="status">${toasts.map(x => html`<div class=${`toast ${x.tone}`} key=${x.id}>
     <${Icon} name=${x.tone === 'error' ? 'xCircle' : 'checkCircle'} /><div>${x.message}</div>
-    <button class="x" onClick=${() => dismissToast(x.id)} aria-label="Dismiss"><${Icon} name="x" size=${14} /></button></div>`)}</div>`;
+    <button class="x" onClick=${() => dismissToast(x.id)} aria-label=${t('Dismiss')}><${Icon} name="x" size=${14} /></button></div>`)}</div>`;
 }
 
 export function useJob(kind) {
@@ -686,8 +688,8 @@ export function JobControl() {
       <span class="pbar"><span style=${`width:${pct}%`}></span></span><b>${pct}%</b></div>`;
   }
   if (store.me && !store.me.user.is_admin) {
-    const pill = market && html`<span class="data-pill" title="The site scans by itself after every close">
-      <${Icon} name="check" size=${14} /><span class="hide-mobile">Data:${' '}</span>${fmt.date(market.date, false)} close</span>`;
+    const pill = market && html`<span class="data-pill" title=${t('The site scans by itself after every close')}>
+      <${Icon} name="check" size=${14} /><span class="hide-mobile">${t('Data:')}${' '}</span>${t('{date} close', { date: fmt.date(market.date, false) })}</span>`;
     // The GitHub Pages site: the owner's button opens the scan on GitHub (Settings → Run a scan now).
     const url = STATIC && owner && scanUrl;
     return url ? html`${pill}<a class="btn primary" href=${url} target="_blank" rel="noopener noreferrer"
@@ -747,7 +749,7 @@ export function LiveQuotes({ symbols, title = 'Live' }) {
   const opts = { width: '100%', height: '100%', colorTheme: theme, isTransparent: true, showSymbolLogo: true,
     symbolsGroups: [{ name: title, symbols: list.map(s => ({ name: tvSymbol(s), displayName: s })) }] };
   return html`<${TvFrame} key=${theme + list.join()} height=${96 + 38 * list.length} src=${widgetSrc('market-quotes', opts)}
-    title="Live prices from TradingView" />`;
+    title=${t('Live prices from TradingView')} />`;
 }
 
 export const LIVE_NOTE = 'Live prices from TradingView, about 15 minutes late. The signals, stops and your profit / loss still use the last close.';

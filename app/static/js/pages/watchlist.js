@@ -23,7 +23,7 @@ export function WatchlistPage() {
   const columns = [
     { key: 'star', label: '', sortable: false, width: '34px', render: r => html`<${WatchStar} symbol=${r.symbol} />` },
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
-    { key: 'close', label: 'Close', align: 'r', fmt: v => fmt.price(v) },
+    { key: 'close', label: 'Price', align: 'r', fmt: v => fmt.price(v) },
     { key: 'chg1', label: 'Day', align: 'r', render: r => pct(r.chg1) },
     { key: 'ret21', label: '1 month', align: 'r', render: r => pct(r.ret21, 0) },
     { key: 'trend', label: 'Above avg', sortValue: r => (r.vs_ema20 > 0) + (r.vs_ema50 > 0) + (r.vs_ema200 > 0),
@@ -42,9 +42,9 @@ export function WatchlistPage() {
         onRowClick=${r => go(stockHref(r.symbol))} /></div>`
       : html`<div class="card"><${Empty} icon="eye" title="No stocks yet"
         text="Add one with the search box above, or press the star (☆) next to a stock on its page or in the Screener." /></div>`}
-    <p class="faint" style="font-size:12px;margin-top:8px">${STATIC
+    <p class="faint" style="font-size:12px;margin-top:8px">${t(STATIC
       ? 'Kept in this browser with your portfolio, and in your backups (Settings → Download a backup).'
-      : 'Kept with your portfolio on this Mac.'}</p>
+      : 'Kept with your portfolio on this Mac.')}</p>
     <${Fold} title="Alerts in Telegram" hint="Get a message when a stock gets a BUY signal or closes past a price.">
       <p class="muted" style="font-size:13px;margin-bottom:10px">The website's Telegram bot can tell you after a close
         when a stock gets a BUY signal or closes past a price. Connect it on the website (Settings → Connect Telegram),

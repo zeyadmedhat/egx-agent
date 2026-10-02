@@ -214,7 +214,7 @@ function AccountDialog({ me, onClose }) {
       </form>
       <div class="actions" style="justify-content:space-between;flex-wrap:wrap">
         <button class="btn ghost" onClick=${() => out('/auth/logout-all')}>Sign out everywhere</button>
-        <div class="row" style="gap:8px"><button class="btn ghost" onClick=${onClose}>Close</button>
+        <div class="row" style="gap:8px"><button class="btn ghost" onClick=${onClose}>${t('Close')}</button>
           <button class="btn" onClick=${() => out('/auth/logout')}><${Icon} name="x" />Sign out</button></div>
       </div>
     </div></div>`;
