@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS price_events (
 CREATE TABLE IF NOT EXISTS predictions (
     date TEXT NOT NULL,             -- the session the prediction was made after (its close)
     symbol TEXT NOT NULL,
-    horizon INTEGER NOT NULL,       -- sessions allowed to reach the target (10 or 20)
+    horizon INTEGER NOT NULL,       -- sessions allowed to reach the target (5 = the week, 10 or 20)
     prob REAL NOT NULL,             -- the model's chance of target before stop (calibrated)
     raw REAL,                       -- the model's raw score, used to rank stocks on the same day
     close REAL,
@@ -252,10 +252,12 @@ def _add_columns(conn: sqlite3.Connection, pairs) -> None:
 
 # scans.priority: the model's rank that day (1 = its best), the order BUYs get money in; scans.source: why it's a
 # BUY (rules | model); predictions.why: what pushed the model's score up or down; predictions.exp_ret: what trades it
-# scored like that averaged in its tests (predict.ret_calibrator); stocks.listed_by: where the stock
+# scored like that averaged in its tests (predict.ret_calibrator); predictions.level: the week's state
+# (predict.week_state: good | other | weak); stocks.listed_by: where the stock
 # came from (NULL = Kashif, tradingview = TradingView's EGX list, for stocks Kashif doesn't cover)
 MARKET_COLUMNS = (("stocks", "price_note"), ("stocks", "listed_by"), ("scans", "priority", "REAL"),
-                  ("scans", "source"), ("predictions", "why"), ("predictions", "exp_ret", "REAL"))
+                  ("scans", "source"), ("predictions", "why"), ("predictions", "exp_ret", "REAL"),
+                  ("predictions", "level"))
 
 
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:

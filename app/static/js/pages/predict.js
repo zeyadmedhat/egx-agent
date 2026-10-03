@@ -1,23 +1,29 @@
 // Predict: a machine-learning model's chance that a trade reaches its target before its stop. Information only.
+// Next week (predict.WEEK): a short target and stop, 1.5× each stock's daily range, within 5 sessions; next 2 weeks:
+// the chart's own stop and target within 10 sessions (the model that orders the BUYs).
 import { html, useApi, useState, startJob, fmt, tone, cls, go, stockHref, STATIC } from '../lib.js';
 import {
   Icon, Badges, Kpi, Callout, PageHead, SectionHead, PageLoading, DataTable, StockCell, Seg, JobProgress,
-  useJob, StatusChip, Chance, Fold, ShariahNote,
+  useJob, StatusChip, Chance, Fold, ShariahNote, Reason,
 } from '../ui.js';
 import { t } from '../i18n.js';
 
 const SHOW = [{ value: 'all', label: 'All actively traded stocks' }, { value: 'mine', label: 'Signals & my stocks' }];
 const GRADE_TONE = { good: 'ok', weak: 'warn', none: 'bad' };
 const HZ = 10;          // the model whose rank orders the BUYs (predict.RANK_HORIZON): about 2 weeks
+const WK = 5;           // the week (predict.WEEK)
+const VIEWS = [{ value: 'week', label: 'Next week' }, { value: 'two', label: 'Next 2 weeks' }];
 
 export function PredictPage() {
   const { data, error } = useApi('/predict');
   const [show, setShow] = useState('all');
+  const [view, setView] = useState('week');
   const { running } = useJob();
   if (!data) return html`<${PageLoading} error=${error} />`;
   const train = () => startJob('/predict/train');
   const head = html`<${PageHead} title="Predictions"
     sub="A model rates every actively traded stock after each close, from its chart and its company's results. The best rated BUYs get money first." />`;
+  const week = view === 'week' && data.week;
   if (!data.model) {
     return html`${head}<${Intro} data=${data} onTrain=${train} running=${running} />`;
   }
@@ -26,8 +32,11 @@ export function PredictPage() {
   const rows = show === 'all' ? data.rows : data.rows.filter(x => x.action || x.held);
   const changed = m.changed || [];
 
+  const showSeg = html`<${ShariahNote} mode=${data.shariah_filter} /><${Seg} options=${SHOW} value=${show} onChange=${setShow} />`;
   return html`${head}
     <${JobProgress} kind="train" title="Training the prediction model…" />
+    ${data.week && html`<div style="margin-bottom:14px"><${Seg} options=${VIEWS} value=${view} onChange=${setView} /></div>`}
+    ${week ? html`<${Week} data=${data} rows=${rows} filters=${showSeg} />` : html`
     ${changed.length > 0 && html`<div style="margin-bottom:14px"><${Callout} tone="warn">
       <b>Your stop or target settings changed since the model was trained.</b>${' '}
       Its numbers still assume the old plan. It retrains by itself after the next scan${STATIC ? '.' : html`, or${' '}
@@ -45,7 +54,7 @@ export function PredictPage() {
     <section class="section">
       <${SectionHead} title="Today's ranking" count=${data.rows.length}
         hint=${t('From the {date} close, best first. A chance shows only for its top {n}.', { date: fmt.date(data.date), n: fmt.int(data.top_n) })}>
-        <${ShariahNote} mode=${data.shariah_filter} /><${Seg} options=${SHOW} value=${show} onChange=${setShow} /><//>
+        ${showSeg}<//>
       <div class="card flush"><${ChanceTable} rows=${rows} base=${data.base || {}} /></div>
     </section>
 
@@ -54,7 +63,77 @@ export function PredictPage() {
       ${data.combo && data.combo.rules && html`<div class="card flush"><${ComboTable} c=${data.combo} /></div>`}
       <${About} m=${m} data=${data} r=${r} onTrain=${train} running=${running} />
     <//>
-    <p class="faint note" style="margin-top:14px">${t('Even its best picks reach the target first only about {pct} of the time, so always use the stop. A second opinion, not advice.', { pct: fmt.pct(r.top.hit, 0, false) })}</p>`;
+    <p class="faint note" style="margin-top:14px">${t('Even its best picks reach the target first only about {pct} of the time, so always use the stop. A second opinion, not advice.', { pct: fmt.pct(r.top.hit, 0, false) })}</p>`}`;
+}
+
+// Next week: each stock's honest chance (predict.week_chances) of rising 1.5× its daily range before falling as far
+// within 5 sessions, highest first. Strong: one of its top 10% in an uptrend while the market is healthy.
+const median = xs => { const v = xs.filter(x => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
+
+function Week({ data, rows, filters }) {
+  const w = data.week, tst = w.test, s = tst.strong, a = tst.all, years = tst.years || [];
+  const move = median(data.rows.map(r => r[`move${WK}`]));
+  return html`
+    ${w.weak && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>${t('Weak market: better to skip short trades this week.')}</b>${' '}
+      ${t('Fewer than 40% of stocks are above their 50-day average. In past weak markets even its top picks reached the target first only {pct} of the time.', { pct: fmt.pct(tst.weak_top.hit, 0, false) })}<//></div>`}
+    <div class="kpis">
+      <${Kpi} label="Strong picks: reached the target first" value=${fmt.pct(s.hit, 0, false)} valueClass="up"
+        sub=${t('the average stock {v}', { v: fmt.pct(a.hit, 0, false) })} />
+      <${Kpi} label="Strong picks: average trade" value=${fmt.pct(s.ret, 1)} valueClass=${tone(s.ret)}
+        sub=${t('the average stock {v}, after fees', { v: fmt.pct(a.ret, 1) })} />
+      <${Kpi} label="Years they beat the average stock" value=${`${tst.good_years} / ${years.length}`}
+        sub=${years.length ? t('tested {a} – {b}', { a: years[0].year, b: years[years.length - 1].year }) : ''} />
+    </div>
+    <div class="stack" style="margin-top:12px"><${Recent} rec=${(data.recent || {})[String(WK)]} /></div>
+
+    <section class="section">
+      <${SectionHead} title="Next week's ranking" count=${data.rows.length}
+        hint=${t('From the {date} close, highest chance first. Chance: it rises to the target before it falls to the stop, within 5 sessions.', { date: fmt.date(data.date) })}>
+        ${filters}<//>
+      <div class="card flush"><${WeekTable} rows=${rows} base=${a.hit} top=${data.top_n} /></div>
+    </section>
+
+    <${Fold} title="How honest its chances are" hint=${t('When it said {said}, it happened {got}', bandText(tst.bands))}>
+      <p class="muted" style="font-size:13px;margin-bottom:12px">${t('Each week it asks: will the price rise {x}× its usual daily range (about {pct} now) before it falls as far, within 5 sessions? Each year was predicted by a version that had never seen it, and its chances were learnt from the years before.', {
+        x: fmt.num(w.atr, 1), pct: fmt.pct(move, 1, false) })}</p>
+      <div class="card flush"><${DataTable} rows=${tst.bands} rowKey=${b => b.from} columns=${[
+        { key: 'from', label: 'It said', sortable: false, render: b => html`<b>${fmt.pct(b.said, 0, false)}</b>` },
+        { key: 'got', label: 'It happened', align: 'r', sortable: false, render: b => html`<b>${fmt.pct(b.got, 0, false)}</b>` },
+        { key: 'n', label: 'Times', align: 'r', sortable: false, render: b => html`<span class="faint">${fmt.int(b.n)}</span>` },
+      ]} /></div>
+      ${tst.replay && tst.replay.cagr != null && html`<p class="muted" style="font-size:13px;margin-top:12px">${t('Buying its top 5 every week (half as much when the market is mixed, nothing when it is weak): {cagr} a year, worst drop {dd}. With {cost} more costs a trade: {cagr2} a year.', {
+        cagr: fmt.pct(tst.replay.cagr, 0), dd: fmt.pct(tst.replay.max_drawdown, 0), cost: fmt.pct(w.extra_cost, 1, false),
+        cagr2: fmt.pct((tst.replay_cost || {}).cagr, 0) })}</p>`}
+    <//>
+    <p class="faint note" style="margin-top:14px">${t('Even its strong picks reach the target first only about {pct} of the time, so always use the stop. A second opinion, not advice.', { pct: fmt.pct(s.hit, 0, false) })}</p>`;
+}
+
+// The fold's hint: its highest band of chances with at least 500 tests, and how often that came true.
+function bandText(bands) {
+  const b = [...(bands || [])].reverse().find(x => x.n >= 500) || (bands || [])[0];
+  return { said: fmt.pct(b && b.said, 0, false), got: fmt.pct(b && b.got, 0, false) };
+}
+
+function WeekTable({ rows, base, top }) {
+  const columns = [
+    { key: `rank${WK}`, label: '#', align: 'r', width: '64px',
+      render: r => html`<span class="faint">${fmt.int(r[`rank${WK}`])}</span> <${RankMove} now=${r[`rank${WK}`]} before=${r[`prev_rank${WK}`]} />` },
+    { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
+    { key: `p${WK}`, label: 'Chance', align: 'r', title: 'Chance it rises to the target before it falls to the stop, within 5 sessions',
+      render: r => html`<${Chance} p=${r[`p${WK}`]} base=${base} />${r.level === 'good' && r[`rank${WK}`] <= top
+        && html`<div><span class="model-pick" title=${t('One of its top 10% today, in an uptrend, while the market is healthy')}>${t('Strong')}</span></div>`}` },
+    { key: `move${WK}`, label: 'Target / stop', align: 'r', title: "The week's target and stop: 1.5× its daily range either way",
+      render: r => html`<div class="up" style="white-space:nowrap"><b>${fmt.price(r[`target${WK}`])}</b> <span class="faint">${fmt.pct(r[`move${WK}`], 1)}</span></div>
+        <div class="down" style="white-space:nowrap"><b>${fmt.price(r[`stop${WK}`])}</b> <span class="faint">${fmt.pct(-r[`move${WK}`], 1)}</span></div>` },
+    { key: 'action', label: 'Agent', sortValue: r => (r.action === 'BUY' ? 0 : r.action ? 1 : r.held ? 2 : 3),
+      render: r => html`<div class="row" style="gap:6px">${r.action && html`<${StatusChip} status=${r.action} />`}
+        ${r.held && html`<span class="tag"><${Icon} name="briefcase" size=${12} />${t('Held')}</span>`}</div>` },
+    { key: 'why', label: 'Why', sortable: false, render: r => html`<${Reason} items=${r[`why${WK}`]} />` },
+    { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
+  ];
+  return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol} limit=${10}
+    sort=${{ key: `rank${WK}`, dir: 'asc' }} onRowClick=${r => go(stockHref(r.symbol))}
+    empty="None of today's BUY signals, watchlist stocks or your holdings are traded enough to be scored." />`;
 }
 
 function Intro({ data, onTrain, running }) {

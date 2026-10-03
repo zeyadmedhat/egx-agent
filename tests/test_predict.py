@@ -118,14 +118,15 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
     root = tmp_path / "models"
     assert predict.model_dir(conn) == root
     assert (root / "prediction.joblib").exists() and (root / "prediction.json").exists()
-    assert meta["stocks"] == 10 and set(meta["horizons"]) == {"10", "20", "5"}     # 5: the paper experiment
+    assert meta["stocks"] == 10 and set(meta["horizons"]) == {"10", "20", "5"}     # 5: the week
     r = meta["horizons"]["10"]
     assert r["years"] and r["all"]["n"] > 1000 and r["grade"] in ("good", "weak", "none")
     # the honest extras: its test portfolio with and without extra costs, and whether its chances beat the average
     assert set(r["portfolio"]) == {"cagr", "max_drawdown", "sharpe"}
     assert r["portfolio_cost"]["cagr"] < r["portfolio"]["cagr"] and r["top_ret_cost"] == r["top"]["ret"] - 0.005
     assert r["chances"] == {}              # one test year here: nothing earlier to calibrate on (tested below)
-    assert "hold" in meta["horizons"]["5"] and "hold" not in r
+    week = meta["horizons"]["5"]["week"]          # the week's tests in the page's words (predict.week_eval)
+    assert "week" not in r and {"bands", "strong", "all", "weak_top", "years", "good_years"} <= set(week)
     # the BUY rules replayed with and without the model, on its test years only
     combo = meta["combo"]
     assert "error" not in combo, combo
@@ -136,6 +137,9 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
     assert len(lt) == 10 and lt["p10"].between(0, 1).all() and set(lt["rank10"]) <= set(range(1, 11))
     # what trades it scored like this averaged in its tests: never higher for a lower-ranked stock
     assert lt["exp10"].notna().all() and lt.sort_values("rank10")["exp10"].is_monotonic_decreasing
+    # the week: an honest chance per stock, ranked by it, with its own target and stop (±1.5 × the daily range)
+    assert lt["p5"].between(0, 1).all() and (lt["move5"] > 0).all() and set(lt["level"]) <= {"good", "other", "weak"}
+    assert lt.sort_values("rank5")["p5"].is_monotonic_decreasing
     day = lt["date"].iloc[0]
     assert conn.execute("SELECT COUNT(*) FROM predictions WHERE resolved IS NULL").fetchone()[0] == 30
     # why it scored each stock as it did: plain words, up and down
@@ -156,8 +160,8 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
     assert predict.resolve(conn, cfg) == 30
     live = predict.live_record(conn)
     assert live["10"]["n"] == 10 and live["10"]["all"]["hit"] == 1.0   # a steady doubling reaches every target
-    assert live["5"]["n"] == 10 and live["5"]["all"]["hit"] == 1.0 and live["5"]["picks"]["n"] == 5   # sold on day 5
-    assert live["5"]["all"]["ret"] > 0.1
+    assert live["5"]["n"] == 10 and live["5"]["all"]["hit"] == 1.0 and live["5"]["picks"]["n"] == 5
+    assert live["5"]["all"]["ret"] > 0 and "strong" in live["5"]
 
 
 def test_chances_are_judged_against_last_years_average():
@@ -249,6 +253,8 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
         assert page["model"]["stocks"] == 10 and len(page["rows"]) == 10
         row = page["rows"][0]
         assert {"p10", "p20", "rank10", "rank20", "stop", "target", "info"} <= set(row)
+        assert {"p5", "rank5", "move5", "target5", "stop5", "level", "why5"} <= set(row) and row["stop5"] < row["target5"]
+        assert page["week"]["test"]["strong"]["n"] >= 0 and page["week"]["weak"] in (True, False)
         assert page["base"]["10"] is not None
         assert page["top_n"] == 1 and sum(r["top10"] for r in page["rows"]) == 1   # its best 10% of 10 stocks
         assert page["model"]["live_since"] == page["model"]["data_to"]

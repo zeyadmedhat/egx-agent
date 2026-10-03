@@ -1,5 +1,8 @@
 """Prediction model: the chance that a trade bought at the next open reaches its target before its stop.
 
+The week (WEEK, the Predictions page's first view) asks a shorter question with its own target and stop: does the
+price rise 1.5 times its average daily range before it falls as far, within 5 sessions?
+
 The trade uses the agent's own plan, set from the signal day's close exactly like a BUY card: with levels_mode
 "chart" (the default) the stop and target from that day's support and resistance (levels.py), otherwise the stop
 entry − 2×ATR (kept 4–12% below) and the target +2R. Walk-forward in 2026-09, training on the chart's trades
@@ -31,15 +34,22 @@ from .data import fundamentals, macro, news, prices, universe
 from .indicators import add_indicators, ema
 
 HORIZONS = (10, 20)
-EXPERIMENT = 5                # a 5-session model on paper only: bought at the next open, sold 5 sessions later
+WEEK = 5                      # the week: within 5 sessions, does the price reach +WEEK_ATR × its average daily range
+WEEK_ATR = 1.5                # (ATR) before it falls as far? Bought at the next open. Its chances: week_chances.
+# Walk-forward in 2026-10 (2017–2026): a plain "higher in 5 sessions?" was a coin flip (its top 5 a day 50% against
+# 46%, and its 70%+ chances came true 42% of the time), so the week asks for a move instead. +1.5×ATR (about 6.5%)
+# before −1.5×ATR: the average stock 31%, its top 5 a day 44%, those in an uptrend while at least half the market is
+# above its 50-day average 53%, better than the average stock every year; while under 40% of it is, 33%. A 1×ATR move
+# came first more often (58%) but made about nothing with 0.5% more costs a trade (1.5×: still +20% a year).
 RANK_HORIZON = 10             # the model whose daily rank orders the BUYs and adds its own (config model_picks)
 EXTRA_COST = 0.005            # a stress test: 0.25% more slippage on each side of every trade
 PICKS = 5                     # the test portfolio: the day's top 5, bought equally every horizon
-MODEL_VERSION = 6             # 2: Egypt data for the 20-session model, untradeable entry days left out of results;
+MODEL_VERSION = 7             # 2: Egypt data for the 20-session model, untradeable entry days left out of results;
                               # 3: the Egypt data is downloaded before training (2 could train without it);
                               # 4: dividend, bonus-share and rights-issue events (Mubasher, data/news.py);
                               # 5: trades use the chart's stop and target when levels_mode is chart (levels.py);
-                              # 6: the company's results as known each day (data/fundamentals.py)
+                              # 6: the company's results as known each day (data/fundamentals.py);
+                              # 7: the 5-session model asks for +1.5×ATR before −1.5×ATR (WEEK), not a 5-day hold
 MIN_TRAIN_YEARS = 3           # the first tested year needs at least this much history before it
 RETRAIN_DAYS = 30
 MODEL_DIR = config.ROOT / "data" / "models"
@@ -68,7 +78,7 @@ FEATURES = [
 # and LightGBM too, from +0.90% to +1.04% (10 of 11 years, from 9). The company's results (2026-10, 4 seeds) then took the
 # rules-plus-picks replay from 30.8% to 33.8% a year and its worst drop from -25.8% to -18.3% (data/fundamentals.py).
 LEVEL_FEATURES = ["lvl_stop_pct", "lvl_target_pct", "lvl_rr", "lvl_support", "lvl_resist", "lvl_support_str"]
-ALL_HORIZONS = HORIZONS + (EXPERIMENT,)
+ALL_HORIZONS = HORIZONS + (WEEK,)
 ALL_FEATURES = FEATURES + macro.FEATURES + news.EVENT_FEATURES + fundamentals.FEATURES
 HORIZON_FEATURES = {hz: ALL_FEATURES for hz in ALL_HORIZONS}
 
@@ -286,14 +296,13 @@ def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
         target = np.where(chart, lv["target"], rules["target"])
         f["rule_stop"], f["rule_target"] = stop, target
         if labels:
+            move = WEEK_ATR * ind["atr14"].to_numpy(float)
             for hz in ALL_HORIZONS:
-                out = trade_outcomes(ind, cfg, hz, stop, target)
+                lo, hi = (ind["close"].to_numpy(float) - move, ind["close"].to_numpy(float) + move) if hz == WEEK \
+                    else (stop, target)
+                out = trade_outcomes(ind, cfg, hz, lo, hi)
                 f[f"hit{hz}"] = out["hit"]
                 f[f"ret{hz}_trade"] = out["ret"]
-            # the experiment's own result: bought at the next open, sold at the close EXPERIMENT sessions later
-            fee = cfg["fee_pct_per_side"] / 100
-            f[f"hold{EXPERIMENT}"] = (ind["close"].shift(-EXPERIMENT) * (1 - fee)
-                                      / (ind["open"].shift(-1) * (1 + fee)) - 1).clip(-0.5, 1.0)
             # the entry day (the next session) had no volume or one price all day: an order couldn't have filled
             f["entry_locked"] = ((ind["high"] == ind["low"]) | (ind["volume"] <= 0)).shift(-1).astype(float)
         parts.append(f)
@@ -380,7 +389,7 @@ def walk_forward(ds: pd.DataFrame, hz: int,
                                  f"{pd.Timestamp(days[0]).year}–{pd.Timestamp(cutoff).year} only…")
         feats = HORIZON_FEATURES[hz]
         m = new_model(len(train), hz).fit(train[feats], train[y_col])
-        extra = [c for c in (f"hold{hz}", "breadth50") if c in test]    # the experiment's result; the switch
+        extra = [c for c in ("breadth50", "trend_ok") if c in test]     # the market switch; the week's states
         t = test[["date", "symbol", y_col, f"ret{hz}_trade", "rule_buy", *extra]].copy()
         t["prob"] = m.predict_proba(test[feats])[:, 1]
         oos.append(t)
@@ -409,11 +418,9 @@ def evaluate(oos: pd.DataFrame, hz: int, top: float = 0.10) -> dict:
     groups = [{"label": label, **_group(oos[(oos["day_rank"] > lo) & (oos["day_rank"] <= hi)], hz)}
               for lo, hi, label in RANK_GROUPS]
     overall = block(oos)
-    hold = f"hold{hz}"
-    if hold in oos:                                   # the experiment: plain 5-session holds
-        top_rows = oos[oos["day_rank"] > 1 - top]
-        overall["hold"] = {"all": float(oos[hold].mean()), "top": float(top_rows[hold].mean())}
-    ret_col = hold if hold in oos else f"ret{hz}_trade"
+    if hz == WEEK and "trend_ok" in oos:
+        overall["week"] = week_eval(oos)
+    ret_col = f"ret{hz}_trade"
     overall.update(top_ret_cost=(overall["top"]["ret"] - EXTRA_COST) if overall["top"]["ret"] is not None else None,
                    portfolio=portfolio(oos, hz, ret_col), portfolio_cost=portfolio(oos, hz, ret_col, EXTRA_COST),
                    chances=chance_quality(oos, hz), extra_cost=EXTRA_COST)
@@ -482,6 +489,66 @@ def chance_quality(oos: pd.DataFrame, hz: int) -> dict:
     brier, brier_base = float(np.mean((s - g) ** 2)), float(np.mean((b - g) ** 2))
     skill = 1 - brier / brier_base if brier_base else 0.0
     return {"brier": brier, "brier_base": brier_base, "skill": skill, "useful": bool(skill >= 0.005)}
+
+
+def week_state(breadth50, trend_ok) -> np.ndarray:
+    """weak (under 40% of stocks above their 50-day average: the market switch's no-new-buys), good (the stock in an
+    uptrend while at least half are) or other. The same rank came true 27%, 34% and 30% of the time in them (2026-10)."""
+    b = np.asarray(breadth50, float)
+    up = np.asarray(trend_ok, float) == 1
+    with np.errstate(invalid="ignore"):
+        return np.where(b < breadth.SWITCH_OFF_BELOW, "weak",
+                        np.where(up & (b >= breadth.SWITCH_HALF_BELOW), "good", "other"))
+
+
+def week_chances(oos: pd.DataFrame) -> dict:
+    """The week's honest chance, per state: how often stocks at the same place in that day's ranking reached the
+    target first in the tests. Its raw score's own chance was over-sure (2026-10: said 70%+, came true 42%); by the
+    day's rank and state it said 55–60% and 57% came true."""
+    from sklearn.isotonic import IsotonicRegression
+    o = oos.assign(pct=oos.groupby("date")["prob"].rank(pct=True), state=week_state(oos["breadth50"], oos["trend_ok"]))
+    return {s: IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip").fit(g["pct"], g[f"hit{WEEK}"])
+            for s, g in o.groupby("state") if len(g) >= 100}
+
+
+def week_chance(cals: dict, raw: np.ndarray, state: np.ndarray) -> np.ndarray:
+    """Chances for one day's stocks from their raw scores (ranked among themselves) and states."""
+    pct = pd.Series(raw).rank(pct=True).to_numpy()
+    out = np.full(len(raw), np.nan)
+    for s, iso in cals.items():
+        m = state == s
+        if m.any():
+            out[m] = iso.predict(pct[m])
+    return out
+
+
+WEEK_BANDS = ((0.0, 0.3), (0.3, 0.4), (0.4, 0.5), (0.5, 1.0))
+
+
+def week_eval(oos: pd.DataFrame, top: float = 0.10) -> dict:
+    """The week's tests in the page's words. Each year's chances come from the years before it only; then how often
+    each band of chances came true, and its strong picks (its top 10% in the good state) against the average stock."""
+    y, r = f"hit{WEEK}", f"ret{WEEK}_trade"
+    o = oos.assign(state=week_state(oos["breadth50"], oos["trend_ok"]), year=oos["date"].dt.year,
+                   pct=oos.groupby("date")["prob"].rank(pct=True), chance=np.nan)
+    years = sorted(o["year"].unique())
+    for yr in years[1:]:
+        cur = o["year"] == yr
+        o.loc[cur, "chance"] = week_chance(week_chances(o[o["year"] < yr]), o.loc[cur, "prob"].to_numpy(),
+                                           o.loc[cur, "state"].to_numpy()) if cur.any() else np.nan
+    said = o[o["chance"].notna()]
+    bands = [{"from": lo, "to": hi, "n": int(len(g)), "said": float(g["chance"].mean()), "got": float(g[y].mean())}
+             for lo, hi in WEEK_BANDS if len(g := said[(said["chance"] >= lo) & (said["chance"] < hi)])]
+    strong = o[(o["state"] == "good") & (o["pct"] > 1 - top)]
+    grp = lambda g: {"n": int(len(g)), "hit": float(g[y].mean()) if len(g) else None,  # noqa: E731
+                     "ret": float(g[r].mean()) if len(g) else None}
+    per_year = [{"year": int(yr), "strong": grp(strong[strong["year"] == yr]), "all": grp(g)}
+                for yr, g in o.groupby("year") if len(g) >= 1000]
+    weak = o[(o["state"] == "weak") & (o["pct"] > 1 - top)]
+    by_chance = said.assign(prob=said["chance"] + said["prob"] * 1e-6)    # the page's order: its chance first
+    return {"bands": bands, "strong": grp(strong), "all": grp(o), "weak_top": grp(weak), "years": per_year,
+            "good_years": sum(1 for x in per_year if (x["strong"]["hit"] or 0) > (x["all"]["hit"] or 0)),
+            "replay": portfolio(by_chance, WEEK, r), "replay_cost": portfolio(by_chance, WEEK, r, EXTRA_COST)}
 
 
 def model_picks_mask(rank: pd.DataFrame, eligible: pd.DataFrame, trend: pd.DataFrame, risk_off: pd.Series,
@@ -619,8 +686,8 @@ def needs_training(conn: sqlite3.Connection, cfg: dict, today: date | None = Non
         return False
     return (age_days(meta, today) >= RETRAIN_DAYS or bool(settings_changed(meta, cfg))
             or meta.get("version", 1) != MODEL_VERSION
-            # trained before the 5-session experiment and the rules-with-the-model replay were added (2026-09)
-            or str(EXPERIMENT) not in meta.get("horizons", {}) or "combo" not in meta
+            # trained before the 5-session model and the rules-with-the-model replay were added (2026-09)
+            or str(WEEK) not in meta.get("horizons", {}) or "combo" not in meta
             or (not meta.get("egypt_data", True) and egypt_data_ready(conn))
             or (not meta.get("events_data", True) and events_data_ready(conn))
             or (not meta.get("fin_data", True) and fundamentals.ready(conn)))
@@ -651,7 +718,7 @@ def train(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], 
     if span < MIN_TRAIN_YEARS + 1:
         raise RuntimeError(f"Only {span:.1f} years of liquid price history; the model needs at least "
                            f"{MIN_TRAIN_YEARS + 1}.")
-    results, models, calibrators, ret_cals, tested = {}, {}, {}, {}, {}
+    results, models, calibrators, ret_cals, tested, week_cals = {}, {}, {}, {}, {}, {}
     for j, hz in enumerate(ALL_HORIZONS):
         base = 0.15 + 0.24 * j
         oos, folds = walk_forward(ds, hz, lambda p, m: say(base + 0.2 * p, m))
@@ -659,6 +726,8 @@ def train(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], 
         results[str(hz)] = {**evaluate(oos, hz), "folds": folds}
         calibrators[hz] = calibrator(oos, hz)
         ret_cals[hz] = ret_calibrator(oos, hz)
+        if hz == WEEK and not oos.empty:
+            week_cals = week_chances(oos)
         say(base + 0.21, f"{hz}-session model: training the final version on all the history…")
         rows = liquid[liquid[f"hit{hz}"].notna()]
         models[hz] = new_model(len(rows), hz).fit(rows[HORIZON_FEATURES[hz]], rows[f"hit{hz}"])
@@ -670,7 +739,7 @@ def train(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], 
         combo = {"error": f"{type(exc).__name__}: {exc}"}
     root.mkdir(parents=True, exist_ok=True)
     tmp = model_path(root).with_suffix(".tmp")
-    joblib.dump({"models": models, "calibrators": calibrators, "ret_calibrators": ret_cals,
+    joblib.dump({"models": models, "calibrators": calibrators, "ret_calibrators": ret_cals, "week_chances": week_cals,
                  "features": dict(HORIZON_FEATURES),
                  "sklearn": sklearn.__version__}, tmp)
     tmp.replace(model_path(root))
@@ -709,12 +778,16 @@ def predict_latest(conn: sqlite3.Connection, cfg: dict, root: Path | None = None
     if rows.empty:
         return 0
     raw, chance, why, exp = {}, {}, {}, {}
+    state = week_state(rows["breadth50"], rows["trend_ok"])
     for hz, m in bundle["models"].items():
         feats = bundle["features"]
         feats = feats[hz] if isinstance(feats, dict) else feats   # models saved before version 2 had one list
         raw[hz] = m.predict_proba(rows[feats])[:, 1]
         cal = bundle.get("calibrators", {}).get(hz)
         chance[hz] = cal.predict(raw[hz]) if cal is not None else raw[hz]
+        if hz == WEEK and bundle.get("week_chances"):
+            wk = week_chance(bundle["week_chances"], raw[hz], state)
+            chance[hz] = np.where(np.isnan(wk), chance[hz], wk)
         rcal = bundle.get("ret_calibrators", {}).get(hz)     # models trained before 2026-09-30 have none
         exp[hz] = rcal.predict(raw[hz]) if rcal is not None else [None] * len(rows)
         try:
@@ -726,13 +799,16 @@ def predict_latest(conn: sqlite3.Connection, cfg: dict, root: Path | None = None
     recs = []
     for i, r in enumerate(rows.itertuples(index=False)):
         for hz in raw:
+            week = int(hz) == WEEK      # its own stop and target: WEEK_ATR × the daily range either way
+            stop_pct, target_pct = ((WEEK_ATR * r.atr_pct,) * 2 if week
+                                    else (1 - r.rule_stop / r.close, r.rule_target / r.close - 1))
             recs.append((day_s, r.symbol, int(hz), float(chance[hz][i]), float(raw[hz][i]), float(r.close),
-                         float(1 - r.rule_stop / r.close), float(r.rule_target / r.close - 1), now, why[hz][i],
-                         None if exp[hz][i] is None else float(exp[hz][i])))
+                         float(stop_pct), float(target_pct), now, why[hz][i],
+                         None if exp[hz][i] is None else float(exp[hz][i]), state[i] if week else None))
     conn.execute("DELETE FROM predictions WHERE date=? AND resolved IS NULL", (day_s,))
     conn.executemany(
         """INSERT OR REPLACE INTO predictions(date, symbol, horizon, prob, raw, close, stop_pct, target_pct, created, why,
-           exp_ret) VALUES (?,?,?,?,?,?,?,?,?,?,?)""", recs)
+           exp_ret, level) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", recs)
     conn.commit()
     db.set_meta(conn, "prediction_date", day_s)
     db.set_meta(conn, "prediction_updated", now)
@@ -814,15 +890,7 @@ def resolve(conn: sqlite3.Connection, cfg: dict) -> int:
             stop, target = base * (1 - r.stop_pct), base * (1 + r.target_pct)
             first = after.iloc[0]
             entry = float(first["open"])
-            if int(r.horizon) == EXPERIMENT:        # the paper experiment: sold at the close 5 sessions later
-                if first["high"] == first["low"] or first["volume"] <= 0:
-                    hit, ret, status = None, None, "cancelled"
-                elif len(after) < EXPERIMENT:
-                    continue
-                else:
-                    ret = float(after["close"].iloc[EXPERIMENT - 1]) * (1 - fee) / (entry * (1 + fee)) - 1
-                    hit, status = int(ret > 0), "done"
-            elif entry <= stop or first["high"] == first["low"] or first["volume"] <= 0:
+            if entry <= stop or first["high"] == first["low"] or first["volume"] <= 0:
                 # the order would not have been placed, or couldn't have filled (no trading, or locked all day)
                 hit, ret, status = None, None, "cancelled"
             else:
@@ -843,23 +911,34 @@ def latest(conn: sqlite3.Connection) -> pd.DataFrame:
     day = db.get_meta(conn, "prediction_date")
     if not day:
         return pd.DataFrame()
-    df = pd.read_sql_query("SELECT symbol, horizon, prob, raw, close, stop_pct, target_pct, exp_ret FROM predictions "
-                           "WHERE date=?", conn, params=(day,))
+    df = pd.read_sql_query("SELECT symbol, horizon, prob, raw, close, stop_pct, target_pct, exp_ret, level "
+                           "FROM predictions WHERE date=?", conn, params=(day,))
     if df.empty:
         return df
-    df["rank"] = df.groupby("horizon")["raw"].rank(ascending=False, method="min")
+    df["rank"] = _score(df).groupby(df["horizon"]).rank(ascending=False, method="min")
     wide = df.pivot_table(index="symbol", columns="horizon", values=["prob", "rank", "exp_ret"], dropna=False)
     wide.columns = [f"{ {'prob': 'p', 'rank': 'rank', 'exp_ret': 'exp'}[k]}{hz}" for k, hz in wide.columns]
-    out = df.drop_duplicates("symbol").set_index("symbol")[["close", "stop_pct", "target_pct"]].join(wide)
+    week = df[df["horizon"] == WEEK].set_index("symbol")
+    plan = df[df["horizon"] != WEEK] if (df["horizon"] != WEEK).any() else df   # the chart's stop and target
+    out = plan.drop_duplicates("symbol").set_index("symbol")[["close", "stop_pct", "target_pct"]].join(wide)
+    out[f"move{WEEK}"] = week["target_pct"]        # the week's target and stop: ± this from the close
+    out["level"] = week["level"]                   # the week's state (week_state)
     out["date"] = day
     return out
+
+
+def _score(df: pd.DataFrame) -> pd.Series:
+    """What ranks the stocks of a day: the week by its chance (its raw score between equal chances), the others by
+    their raw score (their chance follows it anyway)."""
+    return pd.Series(np.where(df["horizon"] == WEEK, df["prob"] + df["raw"] * 1e-6, df["raw"]), index=df.index)
 
 
 def live_record(conn: sqlite3.Connection, top: float = 0.10, since: str | None = None) -> dict:
     """How predictions made since the model went live turned out (from `since`: this model design's first day).
     A day counts once all its trades are decided."""
-    df = pd.read_sql_query("SELECT date, symbol, horizon, raw, hit, ret, resolved FROM predictions WHERE date >= ?",
-                           conn, params=(since or "",))
+    df = pd.read_sql_query("SELECT date, symbol, horizon, prob, raw, hit, ret, resolved, level FROM predictions "
+                           "WHERE date >= ?", conn, params=(since or "",))
+    df["score"] = _score(df)
     out = {}
     for hz in ALL_HORIZONS:
         g = df[df["horizon"] == hz]
@@ -868,9 +947,9 @@ def live_record(conn: sqlite3.Connection, top: float = 0.10, since: str | None =
         if g.empty:
             out[str(hz)] = {"n": 0, "pending_days": len(open_days)}
             continue
-        g["day_rank"] = g.groupby("date")["raw"].rank(pct=True)
+        g["day_rank"] = g.groupby("date")["score"].rank(pct=True)
         t = g[g["day_rank"] > 1 - top]
-        p = g[g.groupby("date")["raw"].rank(ascending=False, method="first") <= PICKS]
+        p = g[g.groupby("date")["score"].rank(ascending=False, method="first") <= PICKS]
         out[str(hz)] = {
             "n": int(len(g)), "days": int(g["date"].nunique()), "pending_days": len(open_days),
             "from": g["date"].min(), "to": g["date"].max(),
@@ -880,6 +959,10 @@ def live_record(conn: sqlite3.Connection, top: float = 0.10, since: str | None =
             "picks": {"n": int(len(p)), "hit": float(p["hit"].mean()) if len(p) else None,     # its top 5 a day
                       "ret": float(p["ret"].mean()) if len(p) else None},
         }
+        if hz == WEEK:                     # its strong picks: top 10% in the good state (week_eval)
+            s = t[t["level"] == "good"]
+            out[str(hz)]["strong"] = {"n": int(len(s)), "hit": float(s["hit"].mean()) if len(s) else None,
+                                      "ret": float(s["ret"].mean()) if len(s) else None}
     return out
 
 
@@ -891,10 +974,11 @@ def recent_record(conn: sqlite3.Connection, since: str | None = None, days: int 
                   top: int = RECENT_TOP) -> dict:
     """Its daily top `top` over the last `days` sessions whose trades are all decided, per horizon: how many reached
     the target first, how many didn't, the average result, and the same average for every scored stock."""
-    df = pd.read_sql_query("SELECT date, horizon, raw, hit, ret, resolved FROM predictions WHERE date >= ?",
+    df = pd.read_sql_query("SELECT date, horizon, prob, raw, hit, ret, resolved FROM predictions WHERE date >= ?",
                            conn, params=(since or "",))
+    df["score"] = _score(df)
     out = {}
-    for hz in HORIZONS:
+    for hz in ALL_HORIZONS:
         g = df[df["horizon"] == hz]
         open_days = set(g.loc[g["resolved"].isna(), "date"])
         g = g[~g["date"].isin(open_days) & (g["resolved"] == "done")]
@@ -903,7 +987,7 @@ def recent_record(conn: sqlite3.Connection, since: str | None = None, days: int 
         if g.empty:
             out[str(hz)] = {"n": 0}
             continue
-        t = g[g.groupby("date")["raw"].rank(ascending=False, method="first") <= top]
+        t = g[g.groupby("date")["score"].rank(ascending=False, method="first") <= top]
         out[str(hz)] = {"n": int(len(t)), "days": len(last), "from": last[0], "to": last[-1], "top": top,
                         "hits": int(t["hit"].sum()), "misses": int(len(t) - t["hit"].sum()),
                         "ret": float(t["ret"].mean()), "all_ret": float(g["ret"].mean())}
@@ -912,11 +996,13 @@ def recent_record(conn: sqlite3.Connection, since: str | None = None, days: int 
 
 def ranks_for(conn: sqlite3.Connection, day: str, hz: int = RANK_HORIZON) -> dict[str, dict]:
     """The model's rank of each scored stock on `day`: {symbol: {rank (1 = best), of, pct (1.0 = best)}}."""
-    df = pd.read_sql_query("SELECT symbol, raw FROM predictions WHERE date=? AND horizon=?", conn, params=(day, hz))
+    df = pd.read_sql_query("SELECT symbol, horizon, prob, raw FROM predictions WHERE date=? AND horizon=?", conn,
+                           params=(day, hz))
     if df.empty:
         return {}
-    df["pct"] = df["raw"].rank(pct=True)
-    df["rank"] = df["raw"].rank(ascending=False, method="first").astype(int)
+    score = _score(df)
+    df["pct"] = score.rank(pct=True)
+    df["rank"] = score.rank(ascending=False, method="first").astype(int)
     return {r.symbol: {"rank": int(r.rank), "of": len(df), "pct": float(r.pct)} for r in df.itertuples(index=False)}
 
 

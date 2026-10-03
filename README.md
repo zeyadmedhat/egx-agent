@@ -44,7 +44,7 @@ The ⚙ button (**More** on a phone) holds Settings, Admin, the language and the
 | **Today → News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month |
 | **Market → Overview** | Breadth: how many stocks are above their 50-day average, up/down counts, 1-year highs/lows, the biggest movers (day, week, month), a sector table and the market switch for the model's picks. The 1-year breadth chart and the 20-/200-day counts open on a tap. Context only: it doesn't change the BUY rules |
 | **Market → Heatmap** | The whole market in one picture: a tile for every stock that traded at the last close, grouped by sector, sized by the company's market value (or the money traded in it), green or red by its move over the last session, week or month. Tap a tile for the stock |
-| **Market → Predictions** | Three numbers on how good the model is, its live check and how its daily top 10 did lately, then today's ranking: each actively traded stock's chance of reaching its target before its stop within 2 weeks, what trades rated like it made on average, its chart stop/target and ▲▼ for its move in rank. *How it was tested* (the BUY rules with and without it, and the model's details) opens on a tap. Information only |
+| **Market → Predictions** | *Next week* (first): each actively traded stock's chance of rising 1.5× its daily range before falling as far within 5 sessions, highest first, with that target and stop in EGP, *Strong* on its top picks in an uptrend while the market is healthy, a warning to skip short trades in a weak market, and *How honest its chances are* (what it said against what happened). *Next 2 weeks*: three numbers on how good the model is, its live check and how its daily top 10 did lately, then today's ranking: each actively traded stock's chance of reaching its target before its stop within 2 weeks, what trades rated like it made on average, its chart stop/target and ▲▼ for its move in rank. *How it was tested* (the BUY rules with and without it, and the model's details) opens on a tap. Information only |
 | **Market → Dividends & results** | Every EGX company's cash dividends from TradingView (coming up, highest yields), the companies whose results are expected in the next 6 weeks, and the bonus shares, rights issues and splits announced on Mubasher. Recent dividends and last year's bonus shares open on a tap |
 | **Stocks → Stock** | One summary card on top: the verdict (Buy / Hold / Sell / Wait / Avoid, and why) and the stock's **rating** out of 100 with its reason in one line (see below); the live price next to the close during the session; four key numbers (3-month change, 1-year low–high, money traded a day, P/E). Then the agent's chart (always first) or TradingView's live chart. The agent's chart has daily, 4-hour and 1-hour candles, the support and resistance zones shaded, Fibonacci levels on a tap, averages, volume, RSI, MACD, your levels and your buys/sells marked; a *Stop-loss & target* card gives every stock's stop and target from the chart with the support and resistance behind them; your position as the same card as on Today; why a stock isn't a BUY yet (on a tap); the company's numbers (P/E, growth, margins, debt) next to its sector's; news and anything to know now; dividends and Shariah details open on a tap |
 | **Stocks → Screener** | Every stock in one table, best rated first: rating, trend (above its 20/50/200-day averages), RSI, 1- and 3-month returns, the model's top picks, dividend yield, P/E, next ex-dividend date and signal. Ready-made lists in one tap (Best rated, Shariah and close to a BUY, Ex-dividend in the next 30 days, At a 1-year high, Cheapest on P/E, Uptrend with volume, High dividend yield), the main filters, and **More filters**, remembered on the device |
@@ -311,10 +311,16 @@ no rating.
 market switch), the same with 0.5% more cost per trade, and whether its chance numbers beat simply giving every stock
 the average chance (checked year by year). For 20 sessions they don't: use its rank, not the %.
 
-**5-day experiment (paper only).** A third model picks 5 stocks to buy at the next open and sell 5 sessions later.
-Its tests look strong (with the market switch, +65% a year even with 0.5% more cost), but it trades every week and
-has no stop, so it's only tracked on the Predict page. It won't become signals unless its live results match its
-tests for a few months.
+**Next week (Oct 2026).** A third model asks a short question with its own target and stop: bought at the next open,
+does the price rise 1.5× its average daily range (ATR, about 6.5%) before it falls as far, within 5 sessions? A plain
+"higher in 5 days?" was a coin flip in the tests (its best 5 a day 50% against 46%), so it isn't asked. Its chance
+isn't the model's raw number (that was over-sure: its 70%+ came true 42% of the time) but how often stocks at the
+same place in the day's ranking came out right in the years before, learnt apart for three states: a weak market
+(under 40% of stocks above their 50-day average), the stock in an uptrend while at least half are, and the rest. On
+2017–2026 (each year unseen): the average stock 31%, its strong picks (top 10% in an uptrend, healthy market) 48%
+and better every year, in a weak market its top picks 32%; when it said 54% it happened 54%. Buying its top 5 every
+week with the market switch: +26% a year, worst drop −20%; with 0.5% more cost a trade, +7%. Not signals: it's on
+the Predict page only.
 
 **Tested and not used (Sep 2026):** other exits (trailing sooner or later, wider or tighter, no trend exit, partial
 profits, other time limits; none was better in both halves), Bollinger/volume/company-size measures (no gain),

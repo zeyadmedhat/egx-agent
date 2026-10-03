@@ -1076,7 +1076,7 @@ def rating_bands(meta: dict | None) -> list[dict]:
 
 HORIZON_KEYS = ("all", "top", "rule", "rule_agree", "rule_disagree", "auc", "lift", "grade", "verdict", "years",
                 "groups", "from", "to", "train_n", "good_years", "top_share", "features", "top_ret_cost", "portfolio",
-                "portfolio_cost", "chances", "extra_cost", "hold")
+                "portfolio_cost", "chances", "extra_cost")
 TOP_SHARE = 0.10   # the model's top picks: its best 10% each day
 
 
@@ -1101,37 +1101,41 @@ def predict_public(d: Data) -> dict:
     preds = predictions(d)
     out.update(base=preds["base"], date=preds["date"], count=preds["count"], top_n=preds.get("top_n"))
     lt = predict.latest(d.conn)
+    wk = predict.WEEK
+    why_wk = {s: json.loads(w or "null") for s, w in d.conn.execute(
+        "SELECT symbol, why FROM predictions WHERE date=? AND horizon=?", (preds["date"], wk))}
     for sym, r in lt.iterrows():
         close = float(r["close"])
+        move = r.get(f"move{wk}")
+        week = {} if move is None or not math.isfinite(move) else {   # the week: its chance, target and stop
+            f"p{wk}": r.get(f"p{wk}"), f"rank{wk}": r.get(f"rank{wk}"), f"move{wk}": move, "level": r.get("level"),
+            f"target{wk}": close * (1 + move), f"stop{wk}": close * (1 - move), f"why{wk}": why_wk.get(sym)}
         out["rows"].append({
             "symbol": sym, "info": d.info(sym), "close": close, "stop": close * (1 - r["stop_pct"]),
             "target": close * (1 + r["target_pct"]), "target_pct": r["target_pct"], "stop_pct": r["stop_pct"],
-            **preds["by_symbol"].get(sym, {}),
+            **preds["by_symbol"].get(sym, {}), **week,
         })
     out["live"] = predict.live_record(d.conn, since=meta.get("live_since"))
     out["recent"] = predict.recent_record(d.conn, since=meta.get("live_since"))
     # each stock's rank at the close before, for the ▲▼ next to today's rank
     prev = d.conn.execute("SELECT MAX(date) FROM predictions WHERE date < ?", (preds["date"],)).fetchone()[0]
     if prev:
-        before = {hz: predict.ranks_for(d.conn, prev, hz) for hz in predict.HORIZONS}
+        before = {hz: predict.ranks_for(d.conn, prev, hz) for hz in predict.ALL_HORIZONS}
         for row in out["rows"]:
-            for hz in predict.HORIZONS:
+            for hz in predict.ALL_HORIZONS:
                 row[f"prev_rank{hz}"] = (before[hz].get(row["symbol"]) or {}).get("rank")
         out["prev_date"] = prev
     b = breadth_data(d)
     out["switch"] = breadth.switch(b["above50"]) if b else None
-    # the BUY rules with and without it on its test years, whether it still works live, and the 5-day experiment
+    # the BUY rules with and without it on its test years, and whether it still works live
     out["combo"] = meta.get("combo")
     out["health"] = predict.health(d.conn, meta)
     out["model_picks"] = int(d.cfg.get("model_picks", 0) or 0)
-    ex = str(predict.EXPERIMENT)
-    if ex in meta["horizons"] and f"rank{ex}" in lt:
-        top = lt.sort_values(f"rank{ex}").head(predict.PICKS)
-        out["experiment"] = {
-            "hz": predict.EXPERIMENT, "test": {k: meta["horizons"][ex].get(k) for k in HORIZON_KEYS},
-            "live": out["live"].get(ex), "picks": [{"symbol": s, "info": d.info(s), "close": float(r["close"]),
-                                                    "rank": int(r[f"rank{ex}"])} for s, r in top.iterrows()],
-        }
+    test = meta["horizons"].get(str(wk)) or {}
+    if test.get("week") and "level" in lt:
+        # the week: its tests and replay (predict.week_eval), how it did live, and today's market state
+        out["week"] = {"hz": wk, "atr": predict.WEEK_ATR, "test": test["week"], "extra_cost": test.get("extra_cost"),
+                       "live": out["live"].get(str(wk)), "weak": bool((lt["level"] == "weak").any())}
     return out
 
 

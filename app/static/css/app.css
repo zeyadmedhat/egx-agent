@@ -874,6 +874,7 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .sym-line .avatar { margin-inline-end: 3px; }
 .stock-cell > div { min-width: 0; }
 .table .stock-cell .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+@media (max-width: 520px) { .table .stock-cell .sub { max-width: 110px; } }   /* room for the next columns on a phone */
 
 /* Segmented control: the highlight slides to the chosen option (ui.js sets --x/--y/--w/--h). */
 .seg { position: relative; }
