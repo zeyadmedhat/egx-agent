@@ -10,6 +10,7 @@ import {
 } from '../ui.js';
 import { t, tn, tp } from '../i18n.js';
 import { LineChart } from '../charts.js';
+import { orderFee } from '../local/engine.js';
 import { equityCurve, correlations, sectorMix, stopRisk, journal, inMoney, checkup } from '../insights.js';
 
 const TABS = [{ value: 'positions', label: 'My stocks' }, { value: 'health', label: 'Checkup' },
@@ -91,7 +92,8 @@ export function PortfolioPage({ route }) {
       <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
         empty="Nothing closed yet." /></div>
       <p class="faint" style="font-size:12.5px;margin-top:10px">${t('Starting capital {v}', { v: fmt.egp(s.start) })}${' '}
-        (<a href="#/settings">${t('change it in Settings')}</a>). ${t('Profit and loss include {fee}% fees each way.', { fee: data.fee_pct })}</p>
+        (<a href="#/settings">${t('change it in Settings')}</a>). ${data.fee_cfg.broker === 'other' ? t('Profit and loss include {fee}% fees each way.', { fee: data.fee_pct })
+          : t("Profit and loss include Thndr's fees each way.")}</p>
     </section>`}`;
 }
 
@@ -260,7 +262,6 @@ function JournalTab({ data }) {
 }
 
 function PositionDetail({ p, data, onDone, onClose }) {
-  const fee = data.fee_pct / 100;
   const [form, setForm] = useState({ date: todayISO(), shares: String(p.shares), price: String(p.price ?? p.last), reason: data.sell_reasons[0] });
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -269,7 +270,7 @@ function PositionDetail({ p, data, onDone, onClose }) {
   const qty = parseInt(form.shares, 10) || 0;
   const price = parseFloat(form.price) || 0;
   const valid = qty >= 1 && qty <= p.shares && price > 0 && !!form.date;
-  const pnl = valid ? (price - p.avg_price) * qty - (p.fees * qty) / p.shares - price * qty * fee : null;
+  const pnl = valid ? (price - p.avg_price) * qty - (p.fees * qty) / p.shares - orderFee(price * qty, data.fee_cfg) : null;
 
   const submit = async e => {
     e.preventDefault();
@@ -461,7 +462,7 @@ function BuyForm({ data, query }) {
 
   let preview = null;
   if (valid) {
-    const cost = price * shares, fees = (cost * data.fee_pct) / 100;
+    const cost = price * shares, fees = orderFee(cost, data.fee_cfg);
     preview = html`<div class="preview-box">
       <span>Cost <b>${fmt.egp(cost)}</b> + fees <b>${fmt.egp(fees, 2)}</b> · cash after <b class=${data.summary.cash - cost - fees < 0 ? 'down' : ''}>${fmt.egp(data.summary.cash - cost - fees)}</b></span>
       <span>${held

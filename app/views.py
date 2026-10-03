@@ -243,7 +243,6 @@ def signal_order(r: dict) -> tuple:
 
 
 def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
-    fee = d.cfg["fee_pct_per_side"] / 100
     pending = corporate.pending(d.conn, "real")
     dividends = corporate.dividends_by_trade(d.conn, "real")
     out = []
@@ -278,7 +277,7 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
             "reason": stt["reason"], "first_buy": r.entry_date, "avg_price": float(r.entry_price),
             "shares": int(r.shares), "last": last, "value": worth * int(r.shares),
             "pnl_pct": worth / float(r.entry_price) - 1,
-            "pnl": (worth - r.entry_price) * r.shares - fees - worth * r.shares * fee + div,
+            "pnl": (worth - r.entry_price) * r.shares - fees - config.order_fee(worth * r.shares, d.cfg) + div,
             "stop": stt["stop"], "prev_stop": stt.get("prev_stop"), "initial_stop": float(r.initial_stop),
             "target": float(r.target), "day": int(stt["days_held"]),
             "sell_by": sessions_after(r.entry_date, d.cfg["max_hold_days"] - 1),
@@ -378,8 +377,8 @@ def today(d: Data) -> dict:
         "paper": {"equity": paper["equity"], "return_pct": paper["return_pct"], "open": paper["open_count"],
                   "last_scan": json.loads(paper_scan) if paper_scan else None},
         "model": {k: preds[k] for k in ("base", "count", "date")} if preds["by_symbol"] else None,
-        "cfg": {k: cfg[k] for k in ("max_hold_days", "review_day", "riskoff_block_buys", "auto_paper", "buy_score",
-                                    "shariah_filter", "fee_pct_per_side")},
+        "cfg": {**{k: cfg[k] for k in ("max_hold_days", "review_day", "riskoff_block_buys", "auto_paper", "buy_score",
+                                       "shariah_filter")}, "fee_pct_per_side": config.fee_pct(cfg)},
         "record": signal_record(d), "odds": record.public_odds(record.stored_odds(d.conn)),
     })
 
@@ -661,7 +660,7 @@ def screener_view(d: Data) -> dict:
 
 
 CALC_KEYS = ("capital", "risk_per_trade_pct", "max_position_pct", "max_open_risk_pct", "max_positions", "max_per_sector",
-             "max_pct_of_adv", "fee_pct_per_side", "target_r", "stop_min_pct", "stop_max_pct")
+             "max_pct_of_adv", "broker", "fee_pct_per_side", "target_r", "stop_min_pct", "stop_max_pct")
 
 
 def calc_view(d: Data) -> dict:
@@ -670,8 +669,12 @@ def calc_view(d: Data) -> dict:
     real = portfolio.account_summary(d.conn, "real", d.cfg, d.closes())
     m = market_info(d.conn)
     b = breadth_data(d)
+    since = (pd.Timestamp.today() - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
+    n, value = d.conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(f.shares * f.price), 0) FROM fills f JOIN trades t ON t.id = f.trade_id "
+        "WHERE t.account = 'real' AND f.side IN ('buy', 'sell') AND f.date >= ?", (since,)).fetchone()
     return clean({
-        "equity": real["equity"], "cash": real["cash"],
+        "equity": real["equity"], "cash": real["cash"], "orders_30d": {"n": n, "value": value},
         "positions": portfolio.positions_for_allocation(d.conn, "real", ("open",)),
         "cfg": {k: d.cfg[k] for k in CALC_KEYS},
         "risk_off": bool(m.get("risk_off")) if m else False,
@@ -701,7 +704,7 @@ def stock_detail(d: Data, symbol: str) -> dict:
 
     pos = open_positions(d, sym)
     if pos:
-        out["position"], out["fee_pct"] = pos[0], d.cfg["fee_pct_per_side"]
+        out["position"], out["fee_pct"] = pos[0], config.fee_pct(d.cfg)
         lines = [{"label": "Avg price", "price": pos[0]["avg_price"], "kind": "entry"},
                   {"label": "Stop", "price": pos[0]["stop"], "kind": "stop"},
                   {"label": "Target", "price": pos[0]["target"], "kind": "target"}]
@@ -734,7 +737,8 @@ def portfolio_view(d: Data) -> dict:
     buy_signals = [{k: r[k] for k in ("symbol", "entry_high", "shares")} for r in sig_rows if r["action"] == "BUY"]
     return clean({
         "summary": s, "positions": open_positions(d), "closed": rows, "closed_stats": stats, "signals": buy_signals,
-        "fee_pct": cfg["fee_pct_per_side"], "sell_reasons": SELL_REASONS, "max_hold_days": cfg["max_hold_days"],
+        "fee_pct": config.fee_pct(cfg), "fee_cfg": {k: cfg[k] for k in ("broker", "fee_pct_per_side")},
+        "sell_reasons": SELL_REASONS, "max_hold_days": cfg["max_hold_days"],
         "review_day": cfg["review_day"], "max_open_risk_pct": cfg["max_open_risk_pct"],
         "limits": {k: cfg[k] for k in LIMIT_KEYS},
     })
@@ -1179,9 +1183,13 @@ SETTINGS_SECTIONS = [
         _f("capital", "Your trading capital", 1_000, 1e9, 5_000, "EGP",
            "Used for position sizing and the My Portfolio page. Include money you have added to the account."),
         _f("paper_capital", "Paper account", 1_000, 1e9, 5_000, "EGP", "Starting value of the virtual account."),
+        {"key": "broker", "label": "Your broker", "kind": "select",
+         "options": [{"value": k, "label": v} for k, v in config.BROKERS.items()],
+         "help": "Thndr: its exact fees on every order (EGP 2 + 0.1%, plus the exchange's and government's fees). "
+                 "Thndr Trader: the same without Thndr's commission. Compare the two in Calculator → Thndr fees."},
         _f("fee_pct_per_side", "Fees per buy or sell", 0, 2, 0.01, "%",
-           "Commission + EGX, clearing and regulator fees + taxes, for ONE side of a trade. "
-           "Check your broker's fee sheet."),
+           "Only with another broker: commission + EGX, clearing and regulator fees + taxes, for ONE side of a "
+           "trade. Check your broker's fee sheet."),
     ]},
     {"title": "Risk per trade", "fields": [
         _f("risk_per_trade_pct", "Max loss per trade", 0.25, 5, 0.25, "% of account",

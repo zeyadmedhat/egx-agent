@@ -42,7 +42,7 @@ from .accounts import LOCAL, Person
 STATIC = Path(__file__).with_name("static")
 APP_ID = "egx-trading-agent"
 COOKIE = "egx_session"
-KEEP_ON_RESET = ("capital", "paper_capital", "fee_pct_per_side",  # your own numbers and connections, not rules
+KEEP_ON_RESET = ("capital", "paper_capital", "broker", "fee_pct_per_side",  # your own numbers and connections, not rules
                  "telegram_token", "telegram_chat_id", "telegram_only_action")
 PUBLIC_API = {"/api/health", "/api/auth/login", "/api/auth/invite", "/api/auth/join", "/api/auth/reset"}
 BEFORE_TERMS = {"/api/me", "/api/auth/accept-terms", "/api/auth/logout"}
@@ -563,9 +563,8 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
             fail(404, "This position is no longer open. Refresh the page.")
         if body.shares > pos["shares"]:
             fail(400, f"You hold {pos['shares']:,} shares, so you can't sell {body.shares:,}.")
-        fee = d.cfg["fee_pct_per_side"] / 100
         pnl = ((body.price - pos["entry_price"]) * body.shares - (pos["fees"] or 0) * body.shares / pos["shares"]
-               - body.price * body.shares * fee)
+               - config.order_fee(body.price * body.shares, d.cfg))
         try:
             result = portfolio.sell_real(d.conn, d.cfg, body.trade_id, str(body.date), body.price, body.shares,
                                          body.reason)

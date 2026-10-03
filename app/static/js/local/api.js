@@ -11,7 +11,7 @@ const fail = (status, message, extra) => { throw new LocalError(message, status,
 
 const STATUS_ORDER = { ADJUST: 0, EXIT: 1, REVIEW: 2, 'TIGHTEN STOP': 3, HOLD: 4, 'NO DATA': 5 };
 const ACTION_STATUSES = ['ADJUST', 'EXIT', 'REVIEW', 'TIGHTEN STOP'];
-const KEEP_ON_RESET = ['capital', 'fee_pct_per_side'];
+const KEEP_ON_RESET = ['capital', 'broker', 'fee_pct_per_side'];
 
 const localToday = () => {
   const d = new Date();
@@ -24,6 +24,8 @@ async function context() {
   const book = loadBook();
   const cfg = { ...core.strategy, ...core.personal_defaults };
   for (const [k, v] of Object.entries(book.settings || {})) if (k in core.personal_defaults) cfg[k] = v;
+  // set your own fee % before the broker choice came: keep it
+  if (book.settings && 'fee_pct_per_side' in book.settings && !('broker' in book.settings)) cfg.broker = 'other';
   return { core, book, cfg, stocks: new Map(core.stocks.map(s => [s.symbol, s])), bars: {} };
 }
 
@@ -82,7 +84,6 @@ function signals(c) {
 
 async function openPositions(c, symbol = null) {
   const { book, cfg, core } = c;
-  const fee = cfg.fee_pct_per_side / 100;
   const pend = E.pending(book, core.events, 'real');
   const divs = E.dividendsByTrade(book, 'real');
   const open = E.trades(book, 'real', ['open']).filter(t => !symbol || t.symbol === symbol);
@@ -117,7 +118,7 @@ async function openPositions(c, symbol = null) {
       id: r.id, symbol: r.symbol, info: info(c, r.symbol), status: stt.status, reason: stt.reason,
       first_buy: r.entry_date, avg_price: r.entry_price, shares: r.shares, last, value: worth * r.shares,
       pnl_pct: worth / r.entry_price - 1,
-      pnl: (worth - r.entry_price) * r.shares - fees - worth * r.shares * fee + div,
+      pnl: (worth - r.entry_price) * r.shares - fees - E.orderFee(worth * r.shares, cfg) + div,
       stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target,
       stop_src: r.stop_src || null, target_src: r.target_src || null, day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
       notes: r.notes || '', fills, adjust: ev || null, n_buys: fills.filter(f => f.side === 'buy').length || 1,
@@ -227,8 +228,8 @@ async function today(c) {
     scan_date: scanDate, buys, watch, positions,
     spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today, paper: null,
     model: Object.keys(preds.by_symbol).length ? { base: preds.base, count: preds.count, date: preds.date } : null,
-    cfg: Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
-      'shariah_filter', 'fee_pct_per_side'].map(k => [k, cfg[k]])),
+    cfg: { ...Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
+      'shariah_filter'].map(k => [k, cfg[k]])), fee_pct_per_side: E.feePct(cfg) },
     record: core.record || null, odds: core.odds || null,
   };
 }
@@ -257,7 +258,7 @@ async function stockDetail(c, symbol) {
   const pos = await openPositions(c, sym);
   if (pos.length) {
     out.position = pos[0];
-    out.fee_pct = c.cfg.fee_pct_per_side;
+    out.fee_pct = E.feePct(c.cfg);
     levels = [{ label: 'Avg price', price: pos[0].avg_price, kind: 'entry' },
       { label: 'Stop', price: pos[0].stop, kind: 'stop' }, { label: 'Target', price: pos[0].target, kind: 'target' }];
   }
@@ -297,7 +298,8 @@ async function portfolioView(c) {
   return {
     summary: s, positions: await openPositions(c), closed: rows, closed_stats: stats,
     signals: sig.filter(r => r.action === 'BUY').map(r => ({ symbol: r.symbol, entry_high: r.entry_high, shares: r.shares })),
-    fee_pct: cfg.fee_pct_per_side, sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
+    fee_pct: E.feePct(cfg), fee_cfg: { broker: cfg.broker, fee_pct_per_side: cfg.fee_pct_per_side },
+    sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
     review_day: cfg.review_day, max_open_risk_pct: cfg.max_open_risk_pct,
     limits: Object.fromEntries(['max_position_pct', 'max_positions', 'max_per_sector', 'max_open_risk_pct'].map(k => [k, cfg[k]])),
     nothing_saved: !book.trades.some(t => t.account === 'real'),
@@ -372,12 +374,19 @@ function saveWatchlist(c, body) {
 
 // The size calculator's side (views.calc_view): your account, your limits and the market's state.
 const CALC_KEYS = ['capital', 'risk_per_trade_pct', 'max_position_pct', 'max_open_risk_pct', 'max_positions',
-  'max_per_sector', 'max_pct_of_adv', 'fee_pct_per_side', 'target_r', 'stop_min_pct', 'stop_max_pct'];
+  'max_per_sector', 'max_pct_of_adv', 'broker', 'fee_pct_per_side', 'target_r', 'stop_min_pct', 'stop_max_pct'];
+// Your buy and sell orders in the last 30 days: how many and their value (for Calculator → Thndr fees).
+function orders30(book) {
+  const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
+  const f = book.fills.filter(x => real.has(x.trade_id) && (x.side === 'buy' || x.side === 'sell') && x.date >= since);
+  return { n: f.length, value: f.reduce((a, x) => a + x.shares * x.price, 0) };
+}
 function calcView(c) {
   const real = E.accountSummary(c.book, 'real', c.cfg, closes(c), c.core.events);
   const b = c.core.breadth_today;
   return {
-    equity: real.equity, cash: real.cash, positions: E.positionsForAllocation(c.book, 'real', ['open']),
+    equity: real.equity, cash: real.cash, orders_30d: orders30(c.book), positions: E.positionsForAllocation(c.book, 'real', ['open']),
     cfg: Object.fromEntries(CALC_KEYS.map(k => [k, c.cfg[k]])),
     risk_off: !!(c.core.market && c.core.market.risk_off), switch: (b && b.switch) || null,
     money: c.core.money || null, shares_value: real.equity - real.cash,
@@ -474,8 +483,7 @@ function sell(c, body) {
   const pos = c.book.trades.find(t => t.id === id && t.account === 'real' && t.status === 'open');
   if (!pos) fail(404, 'This position is no longer open. Refresh the page.');
   if (shares > pos.shares) fail(400, `You hold ${E.int(pos.shares)} shares, so you can't sell ${E.int(shares)}.`);
-  const fee = c.cfg.fee_pct_per_side / 100;
-  const pnl = (price - pos.entry_price) * shares - (pos.fees || 0) * shares / pos.shares - price * shares * fee;
+  const pnl = (price - pos.entry_price) * shares - (pos.fees || 0) * shares / pos.shares - E.orderFee(price * shares, c.cfg);
   const before = { symbol: pos.symbol, shares: pos.shares, avg: pos.entry_price };
   let result;
   try {

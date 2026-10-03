@@ -1,17 +1,20 @@
 // Calculators. Position size: how many shares to buy with your own risk rules, and what the buy would do to your
 // portfolio (the BUY signals' own sizing: sizing.js → risk.py's rule). Zakat: what's due on your shares and cash, with
-// the nisab from today's gold price. Bank certificate: what the same money earns in a certificate. Nothing is saved.
+// the nisab from today's gold price. Bank certificate: what the same money earns in a certificate. Thndr fees: an
+// order's cost on Thndr and whether the Thndr Trader plan pays for itself. Nothing is saved.
 import { html, useApi, useState, useEffect, fmt, go, cls, tone } from '../lib.js';
 import {
   Icon, PageLoading, StockPicker, Field, Seg, Callout, MarketSwitch, StatusChip, Chance, Empty,
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { planTrade } from '../sizing.js';
+import { thndrCommission, governmentFees, feePct } from '../local/engine.js';
 
 const SIZES = [{ value: 'full', label: 'Full size' }, { value: 'half', label: 'Half size' }];
 const LEVEL = { ok: ['checkCircle', 'ok'], warn: ['alert', 'warn'], bad: ['xCircle', 'bad'] };
 
-const TOOLS = [{ value: 'size', label: 'Position size' }, { value: 'zakat', label: 'Zakat' }, { value: 'cert', label: 'Bank certificate' }];
+const TOOLS = [{ value: 'size', label: 'Position size' }, { value: 'zakat', label: 'Zakat' }, { value: 'cert', label: 'Bank certificate' },
+  { value: 'thndr', label: 'Thndr fees' }];
 
 export function CalcPage({ route }) {
   const tool = TOOLS.some(x => x.value === route.query.tool) ? route.query.tool : 'size';
@@ -24,7 +27,7 @@ export function CalcPage({ route }) {
   const tabs = html`<div style="margin-bottom:14px"><${Seg} options=${TOOLS} value=${tool}
     onChange=${v => go(v === 'size' ? '#/calc' : `#/calc?tool=${v}`)} /></div>`;
   if (tool !== 'size') {
-    const Tool = tool === 'zakat' ? ZakatTool : CertificateTool;
+    const Tool = { zakat: ZakatTool, cert: CertificateTool, thndr: ThndrTool }[tool];
     return html`${tabs}${acct ? html`<${Tool} acct=${acct} />` : html`<${PageLoading} error=${error} />`}`;
   }
   const head = html`${tabs}<div class="page-head"><div><h1>${t('Size calculator')}</h1>
@@ -86,7 +89,7 @@ export function CalcPage({ route }) {
         </div>
         <p class="faint" style="font-size:12px;margin-top:10px">Your rules: risk ${cfg.risk_per_trade_pct}% of the
           account a trade, at most ${cfg.max_position_pct}% in one stock and ${cfg.max_pct_of_adv}% of its daily traded
-          value, fees ${cfg.fee_pct_per_side}% a side.${' '}<a href="#/settings">Change them in Settings →</a></p>
+          value, ${cfg.broker === 'other' ? `fees ${cfg.fee_pct_per_side}% a side` : t("Thndr's fees")}.${' '}<a href="#/settings">Change them in Settings →</a></p>
       </div>
       <${Result} res=${res} sym=${st.symbol} entry=${Number(f.entry)} />
     </div>
@@ -197,7 +200,7 @@ function CertificateTool({ acct }) {
   const interest = amount * rate * years;                 // Egyptian certificates pay simple interest
   const infl = m.inflation != null ? m.inflation / 100 : null;
   const real = infl != null ? (1 + rate) / (1 + infl) - 1 : null;
-  const fee = (acct.cfg && acct.cfg.fee_pct_per_side) || 0;
+  const fee = acct.cfg ? feePct(acct.cfg) : 0;
   return html`<div class="page-head"><div><h1>${t('Bank certificate calculator')}</h1>
       <div class="sub">${t('What the same money would earn in a bank certificate: the return your stocks have to beat. Nothing is saved.')}</div></div></div>
     <div class="grid grid-2 calc-grid">
@@ -228,6 +231,62 @@ function CertificateTool({ acct }) {
         <p class="muted" style="font-size:13px;margin-top:12px">${t('To beat it, your trades need more than {rate}% a year after fees ({fee}% a side) and after the losing trades.', {
           rate: fmt.num(rate * 100, 2), fee })}</p>
         <p class="faint" style="font-size:12px;margin-top:10px">${t("The interest is fixed when you buy, isn't added to the amount (it's paid out), and the money is locked until the end: breaking a certificate early usually costs some of the interest. Your account against a bank deposit is on My Portfolio → Health.")}</p>
+      </div>
+    </div>`;
+}
+
+// ------------------------------------------------------------------ Thndr fees
+// Thndr's fee sheet (Aug 2026): its commission is EGP 2 + 0.1% an order; Thndr Trader (245 EGP a month) drops it on
+// the first 50 orders a month. The exchange's and government's fees stay either way (engine.js governmentFees).
+const TRADER_EGP = 245, FREE_ORDERS = 50;
+
+function ThndrTool({ acct }) {
+  const o = acct.orders_30d || { n: 0, value: 0 };
+  const defaults = { amount: String(o.n ? Math.max(100, Math.round(o.value / o.n / 100) * 100) : 20000), orders: String(o.n || 8) };
+  const [form, setForm] = useState(null);
+  const f = { ...defaults, ...(form || {}) };
+  const set = k => e => setForm({ ...f, [k]: e.target.value });
+  const amount = num(f.amount), orders = Math.max(0, Math.round(num(f.orders)));
+  const comm = thndrCommission(amount), gov = governmentFees(amount);
+  const without = orders * comm;
+  const withPlan = TRADER_EGP + Math.max(0, orders - FREE_ORDERS) * comm;
+  const saves = without - withPlan;
+  const breakEven = comm > 0 ? Math.ceil(TRADER_EGP / comm) : null;
+  const pct = v => (amount > 0 ? fmt.pct(v / amount, 2, false) : '');
+  const yours = { thndr: 'Your settings use Thndr without the plan.', thndr_trader: 'Your settings use Thndr Trader.' }[acct.cfg.broker]
+    || 'Your settings use another broker.';
+  return html`<div class="page-head"><div><h1>${t('Thndr fees')}</h1>
+      <div class="sub">${t('What an order costs on Thndr, and whether the Thndr Trader plan pays for itself. Nothing is saved.')}</div></div></div>
+    <div class="grid grid-2 calc-grid">
+      <div class="card">
+        <div class="form-grid">
+          <${Field} label="Order size (EGP)" help=${o.n ? t('Your average order in the last 30 days.') : t('One buy or one sell.')}>
+            <input class="input" type="number" min="0" step="1000" value=${f.amount} onInput=${set('amount')} /><//>
+          <${Field} label="Orders a month" help=${o.n ? t('Buys and sells: you placed {n} in the last 30 days.', { n: o.n }) : t('Buys and sells: a buy and its sell are 2 orders.')}>
+            <input class="input" type="number" min="0" step="1" value=${f.orders} onInput=${set('orders')} /><//>
+        </div>
+        ${form && html`<button class="linkish" style="margin-top:10px" onClick=${() => setForm(null)}>${t('Reset to the defaults')}</button>`}
+        <div class="eyebrow" style="margin-top:16px">${t('One order on Thndr')}</div>
+        <div class="stat-list" style="margin-top:8px">
+          <span class="k">${t("Thndr's commission (EGP 2 + 0.1%)")}</span><span class="v"><bdi>${fmt.egp(comm, 2)}</bdi> <bdi class="faint" style="font-weight:500">${pct(comm)}</bdi></span>
+          <span class="k">${t('Exchange and government fees')}</span><span class="v"><bdi>${fmt.egp(gov, 2)}</bdi> <bdi class="faint" style="font-weight:500">${pct(gov)}</bdi></span>
+          <span class="k">${t('Total')}</span><span class="v"><bdi>${fmt.egp(comm + gov, 2)}</bdi> <bdi class="faint" style="font-weight:500">${pct(comm + gov)}</bdi></span>
+          <span class="k">${t('A buy and its sell')}</span><span class="v">${fmt.egp(2 * (comm + gov), 2)}</span>
+          <span class="k">${t('A buy and its sell with Thndr Trader')}</span><span class="v">${fmt.egp(2 * gov, 2)}</span>
+        </div>
+      </div>
+      <div class="card calc-result">
+        <div class="eyebrow">${t('Thndr Trader: {egp} EGP a month', { egp: TRADER_EGP })}</div>
+        <div class=${cls('calc-shares', saves > 0 ? 'up' : 'down')}>${saves > 0 ? '+' : ''}${fmt.egp(saves)} <span>${t('a month')}</span></div>
+        <div class="stat-list" style="margin-top:12px">
+          <span class="k">${t("Thndr's commission a month without the plan")}</span><span class="v">${fmt.egp(without)}</span>
+          <span class="k">${t('With the plan')}</span><span class="v">${fmt.egp(withPlan)}</span>
+          ${breakEven != null && html`<span class="k">${t('It pays for itself from')}</span><span class="v">${t('{n} orders a month', { n: breakEven })}</span>`}
+        </div>
+        <p class="muted" style="font-size:13px;margin-top:12px">${saves > 0
+          ? t('Thndr Trader saves you money at this pace.') : t('Pay per order: at this pace the plan costs more than it saves.')}${' '}
+          ${t(yours)} <a href="#/settings">${t('Change it in Settings →')}</a></p>
+        <p class="faint" style="font-size:12px;margin-top:10px">${t("The plan drops only Thndr's commission, on the first 50 orders a month; the exchange's and government's fees stay. It also gives live prices, market depth, price alerts and Thndr X. From Thndr's fee sheet (Aug 2026): check the app for changes.")}</p>
       </div>
     </div>`;
 }

@@ -17,10 +17,45 @@ SHARIAH_MODES = {
     "both": "Kashif compliant AND EGX33 member",
 }
 
+BROKERS = {
+    "thndr": "Thndr",
+    "thndr_trader": "Thndr with the Thndr Trader plan",
+    "other": "Another broker (uses the % below)",
+}
+THNDR_TRADER_EGP = 245         # Thndr Trader's monthly price: no Thndr commission on the first 50 orders a month
+THNDR_FREE_ORDERS = 50
+
+
+def thndr_commission(value: float) -> float:
+    """Thndr's own commission on one order: EGP 2 + 0.1% (none on a Thndr Trader order)."""
+    return 2 + value * 0.001 if value > 0 else 0.0
+
+
+def government_fees(value: float) -> float:
+    """The fees every Egyptian broker passes on, per order (Thndr's fee sheet, Aug 2026): EGX 0.01%, clearing (MCDR)
+    0.01%, investor protection fund 0.005%, stamp duty 0.05%, and the regulator (FRA) 0.005% at EGP 1 to 250."""
+    return value * 0.00075 + min(max(value * 0.00005, 1.0), 250.0) if value > 0 else 0.0
+
+
+def order_fee(value: float, cfg: dict) -> float:
+    """What one buy or sell order of this value (EGP) costs with your broker."""
+    broker = cfg.get("broker", "other")
+    if broker == "thndr":
+        return thndr_commission(value) + government_fees(value)
+    if broker == "thndr_trader":
+        return government_fees(value)
+    return value * cfg["fee_pct_per_side"] / 100
+
+
+def fee_pct(cfg: dict) -> float:
+    """Your fees a side as a %, for estimates where the order's size isn't known."""
+    return {"thndr": 0.18, "thndr_trader": 0.08}.get(cfg.get("broker"), cfg["fee_pct_per_side"])
+
 DEFAULTS: dict = {
     # Money
     "capital": 100_000.0,            # real account starting capital (EGP)
     "paper_capital": 100_000.0,      # virtual account starting capital (EGP)
+    "broker": "other",               # thndr / thndr_trader: their exact fees (order_fee); other: fee_pct_per_side
     "fee_pct_per_side": 0.25,        # commission + exchange/clearing fees + taxes, per buy or sell (%)
     # Risk & sizing
     "risk_per_trade_pct": 1.5,       # max loss per trade if the stop is hit (% of equity)
@@ -85,7 +120,7 @@ DEFAULTS: dict = {
 
 # Each person's own numbers on the shared website. Everything else is the strategy, which the admin sets for all.
 PERSONAL_KEYS = (
-    "capital", "paper_capital", "fee_pct_per_side", "risk_per_trade_pct", "max_position_pct", "max_positions",
+    "capital", "paper_capital", "broker", "fee_pct_per_side", "risk_per_trade_pct", "max_position_pct", "max_positions",
     "max_open_risk_pct", "max_per_sector", "max_pct_of_adv", "shariah_filter", "auto_paper",
     "telegram_chat_id", "telegram_only_action",
 )

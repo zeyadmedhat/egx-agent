@@ -1,6 +1,6 @@
 // The size calculator's arithmetic: the BUY signals' own sizing rule (local/engine.js sizePosition, a port of
 // egx_agent/risk.py) plus the portfolio limits the signals check. No browser APIs: tests/js/parity.mjs runs it in Node.
-import { sizePosition, openRisk } from './local/engine.js';
+import { sizePosition, openRisk, orderFee } from './local/engine.js';
 
 const pct = (v, d = 1) => `${(v * 100).toFixed(d)}%`;
 const num = v => Math.round(v).toLocaleString('en-US');
@@ -17,7 +17,6 @@ export function planTrade({ symbol, sector, entry, stop, equity, cash, avgValue,
   if (!(entry > 0) || !(stop > 0)) return { ok: false, error: 'Enter an entry price and a stop.' };
   if (!(perShare > 0)) return { ok: false, error: 'The stop must be below the entry price.' };
   if (!(equity > 0)) return { ok: false, error: 'Enter how much your account is worth.' };
-  const fee = cfg.fee_pct_per_side / 100;
   const riskNow = openRisk(positions);
   const full = sizePosition(entry, stop, equity, cash, avgValue, riskNow, cfg);
   let shares = full.shares;
@@ -27,10 +26,10 @@ export function planTrade({ symbol, sector, entry, stop, equity, cash, avgValue,
     note = `half of ${num(full.shares)} shares (${note})`;
   }
   const amount = shares * entry;
-  const buyFee = amount * fee;
+  const buyFee = orderFee(amount, cfg);
   const target = entry + cfg.target_r * perShare;
-  const lossAtStop = shares * perShare + buyFee + shares * stop * fee;
-  const gainAtTarget = shares * (target - entry) - buyFee - shares * target * fee;
+  const lossAtStop = shares * perShare + buyFee + orderFee(shares * stop, cfg);
+  const gainAtTarget = shares * (target - entry) - buyFee - orderFee(shares * target, cfg);
   const stopPct = perShare / entry;
   const maxPos = riskOff ? Math.max(1, Math.floor(cfg.max_positions / 2)) : cfg.max_positions;
   const inSector = positions.filter(p => p.sector === sector).length;

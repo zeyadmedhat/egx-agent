@@ -5,7 +5,7 @@ import sqlite3
 
 import pandas as pd
 
-from . import corporate, db, engine, levels
+from . import config, corporate, db, engine, levels
 from .indicators import add_indicators
 from .strategy import initial_stop
 
@@ -91,7 +91,7 @@ def add_real_buy(conn: sqlite3.Connection, cfg: dict, symbol: str, date: str, pr
                  chart: dict | None = None) -> int:
     """Log a buy. If you already hold this stock, the shares join that position at the average price. chart: the
     stock's chart levels on the buy date (levels.plan_at), for the automatic stop and target."""
-    fee = price * shares * cfg["fee_pct_per_side"] / 100
+    fee = config.order_fee(price * shares, cfg)
     pos = open_position(conn, "real", symbol)
     if pos is None:
         new_stop, target = _levels(price, atr, cfg, stop, chart)
@@ -123,7 +123,7 @@ def sell_real(conn: sqlite3.Connection, cfg: dict, trade_id: int, date: str, pri
     shares = int(shares)
     if not 0 < shares <= pos["shares"]:
         raise ValueError(f"You can sell between 1 and {pos['shares']:,} shares.")
-    sell_fee = price * shares * cfg["fee_pct_per_side"] / 100
+    sell_fee = config.order_fee(price * shares, cfg)
     _add_fill(conn, trade_id, pos["symbol"], date, "sell", shares, price, sell_fee, reason)
     if shares == pos["shares"]:
         close_trade(conn, cfg, trade_id, date, price, reason)
@@ -194,7 +194,7 @@ def migrate_real_positions(conn: sqlite3.Connection, cfg: dict) -> int:
 
 def close_trade(conn: sqlite3.Connection, cfg: dict, trade_id: int, date: str, price: float, reason: str) -> None:
     row = conn.execute("SELECT shares, fees FROM trades WHERE id=?", (trade_id,)).fetchone()
-    fees = (row["fees"] or 0) + price * row["shares"] * cfg["fee_pct_per_side"] / 100
+    fees = (row["fees"] or 0) + config.order_fee(price * row["shares"], cfg)
     conn.execute(
         "UPDATE trades SET status='closed', exit_date=?, exit_price=?, exit_reason=?, fees=? WHERE id=?",
         (date, price, reason, fees, trade_id),

@@ -39,7 +39,7 @@ ITERATIONS = 600_000        # PBKDF2 rounds: each guess costs about a second on 
 SERIES_TAIL = 750           # about 3 years of daily bars per stock page
 MIN_PASSWORD = 10
 MAC_ONLY_KEYS = ("paper_capital", "auto_paper")     # settings for the Mac's paper account
-SITE_DEFAULTS = {"shariah_filter": "kashif"}         # friends start with Kashif-compliant stocks only
+SITE_DEFAULTS = {"shariah_filter": "kashif", "broker": "thndr"}   # friends start with Kashif stocks only, on Thndr
 WORKFLOW = "site.yml"       # the GitHub job that scans and publishes the site (.github/workflows/)
 # the exit rules in the browser need the ATR and the stop under support too, and a logged buy the chart's target
 STOCK_COLS = views.SERIES_COLS + ("atr14", "sup", "ptgt")

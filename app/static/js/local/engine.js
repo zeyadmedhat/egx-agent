@@ -8,6 +8,20 @@
 // Bars are { date: 'YYYY-MM-DD', open, high, low, close, atr14, ema50, div, sup } (missing numbers are NaN; div is
 // the cash dividend going ex that day, 0 on other days; sup the chart's stop under support that day, levels.py).
 
+// ------------------------------------------------------------------ fees (egx_agent/config.py)
+// Thndr's own commission on one order: EGP 2 + 0.1% (none on a Thndr Trader order).
+export const thndrCommission = v => (v > 0 ? 2 + v * 0.001 : 0);
+// What every Egyptian broker passes on, per order: EGX, clearing, investor fund and stamp duty 0.075%, FRA 0.005% (EGP 1–250).
+export const governmentFees = v => (v > 0 ? v * 0.00075 + Math.min(Math.max(v * 0.00005, 1), 250) : 0);
+// What one buy or sell order of this value (EGP) costs with your broker.
+export function orderFee(v, cfg) {
+  if (cfg.broker === 'thndr') return thndrCommission(v) + governmentFees(v);
+  if (cfg.broker === 'thndr_trader') return governmentFees(v);
+  return v * cfg.fee_pct_per_side / 100;
+}
+// Your fees a side as a %, for estimates where the order's size isn't known.
+export const feePct = cfg => ({ thndr: 0.18, thndr_trader: 0.08 })[cfg.broker] ?? cfg.fee_pct_per_side;
+
 // ------------------------------------------------------------------ small helpers
 export const f2 = v => Number(v).toFixed(2);
 export const g = v => String(+Number(v).toPrecision(6));                       // Python's {x:g}
@@ -184,7 +198,7 @@ export function sizePosition(entry, stop, equity, cash, avgValue20, openRisk, cf
     note = `reduced: total open risk limit (${g(cfg.max_open_risk_pct)}%)`;
   }
   let shares = Math.floor(budget / perShare);
-  const fee = cfg.fee_pct_per_side / 100;
+  const fee = feePct(cfg) / 100;
   const caps = [
     [`max ${g(cfg.max_position_pct)}% of account per stock`, equity * cfg.max_position_pct / 100 / entry],
     [`liquidity: ${g(cfg.max_pct_of_adv)}% of daily traded value`, avgValue20 * cfg.max_pct_of_adv / 100 / entry],
@@ -209,7 +223,7 @@ export function allocate(candidates, equity, cash, positions, cfg, riskOff) {
   for (const p of positions) sectors.set(sectorKey(p.sector), (sectors.get(sectorKey(p.sector)) || 0) + 1);
   const held = new Set(positions.map(p => p.symbol));
   let riskNow = openRisk(positions);
-  const fee = cfg.fee_pct_per_side / 100;
+  const fee = feePct(cfg) / 100;
   const none = { shares: 0, amount: 0, risk_egp: 0 };
   return candidates.map(c => {
     const res = { ...c };
@@ -369,7 +383,7 @@ function levels(price, atr, cfg, stop, chart = null) {
 
 // Log a buy. If you already hold this stock, the shares join that position at the average price.
 export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector = '', stop = null, notes = '', chart = null) {
-  const fee = price * shares * cfg.fee_pct_per_side / 100;
+  const fee = orderFee(price * shares, cfg);
   const pos = openPosition(book, 'real', symbol);
   let id;
   if (!pos) {
@@ -394,7 +408,7 @@ export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector =
 
 export function closeTrade(book, cfg, tradeId, date, price, reason) {
   const t = book.trades.find(x => x.id === tradeId);
-  t.fees = (t.fees || 0) + price * t.shares * cfg.fee_pct_per_side / 100;
+  t.fees = (t.fees || 0) + orderFee(price * t.shares, cfg);
   Object.assign(t, { status: 'closed', exit_date: date, exit_price: price, exit_reason: reason });
 }
 
@@ -404,7 +418,7 @@ export function sellReal(book, cfg, tradeId, date, price, shares, reason) {
   if (!pos) throw new Error('This position is not open.');
   shares = Math.trunc(shares);
   if (!(shares > 0 && shares <= pos.shares)) throw new Error(`You can sell between 1 and ${int(pos.shares)} shares.`);
-  const sellFee = price * shares * cfg.fee_pct_per_side / 100;
+  const sellFee = orderFee(price * shares, cfg);
   addFill(book, tradeId, pos.symbol, date, 'sell', shares, price, sellFee, reason);
   if (shares === pos.shares) {
     closeTrade(book, cfg, tradeId, date, price, reason);

@@ -99,7 +99,8 @@ export function SettingsPage() {
           <div class="card-title" style="font-size:14px;color:var(--text)">${t(s.title)}${website && admin && html`
             <span class=${cls('scope-tag', s.scope === 'strategy' && 'everyone')}>${s.scope === 'strategy'
               ? 'Everyone: the strategy' : 'Only you'}</span>`}</div>
-          <div class="fields">${s.fields.map(f => html`<${SettingField} f=${f} value=${draft[f.key]}
+          <div class="fields">${s.fields.filter(f => f.key !== 'fee_pct_per_side' || !draft.broker || draft.broker === 'other')
+            .map(f => html`<${SettingField} f=${f} value=${draft[f.key]}
             onChange=${set(f.key)} error=${errors[f.key]} />`)}</div>
         </div>`)}
         ${dirty && html`<div class="savebar"><span class="msg"><${Icon} name="info" size=${15} /> ${t('You have unsaved changes.')}</span>

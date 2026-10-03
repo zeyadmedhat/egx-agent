@@ -499,6 +499,17 @@ def test_size_calculator_uses_the_signals_own_sizing_rule():
     assert bad_stop == {"ok": False, "error": "The stop must be below the entry price."}
 
 
+
+def test_thndr_fees_match_on_the_site_and_the_mac():
+    from app import views
+    thndr = {**config.DEFAULTS, "broker": "thndr"}
+    assert config.order_fee(1_000, thndr) == pytest.approx(4.75)            # Thndr's own example: EGP 3 + 1.75
+    assert config.order_fee(1_000, {**thndr, "broker": "thndr_trader"}) == pytest.approx(1.75)
+    cfg = {k: thndr[k] for k in views.CALC_KEYS}
+    plan, = run_js({"op": "plan", "args": dict(symbol="BBB", sector="Banks", entry=20.0, stop=18.6, equity=100_000.0,
+                                               cash=60_000.0, avgValue=5e6, positions=[], cfg=cfg, riskOff=False)})
+    assert plan["buy_fee"] == pytest.approx(config.order_fee(plan["amount"], cfg))
+
 def _history_db(path: Path, apply_bonus: bool):
     conn = db.connect(path)
     conn.execute("INSERT INTO stocks(symbol, name_ar, sector_ar) VALUES ('AAA', 'أ', 'بنوك'), ('BBB', 'ب', 'عقاري')")
