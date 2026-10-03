@@ -23,11 +23,13 @@ export function PortfolioPage({ route }) {
   const { data, error } = useApi('/portfolio');
   const [openId, setOpenId] = useState(route.query.open ? Number(route.query.open) : null);
   const [add, setAdd] = useState('type');
+  const [closedId, setClosedId] = useState(null);
   useEffect(() => { if (route.query.open) setOpenId(Number(route.query.open)); }, [route.query.open]);
   useEffect(() => { if (data && route.query.open) setTimeout(() => scrollTo(`pos-${route.query.open}`), 50); }, [!!data, route.query.open]);
   const q = useQuotes(data ? data.positions.map(p => p.symbol) : []);
   if (!data) return html`<${PageLoading} error=${error} />`;
   const s = data.summary;
+  const openClosed = data.closed.find(r => r.id === closedId) || null;
   const list = data.positions.map(p => livePosition(p, q, data.fee_pct));
   const live = list.some(p => p.live);
   const openPnl = list.reduce((a, p) => a + p.pnl, 0);
@@ -90,7 +92,10 @@ export function PortfolioPage({ route }) {
       <${SectionHead} title="Closed trades" count=${cs.count}
         hint=${cs.count ? t('Won {pct} · total {v} EGP', { pct: fmt.pct(cs.win_rate, 0, false), v: fmt.signed(cs.total) }) : ''} />
       <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
-        empty="Nothing closed yet." /></div>
+        empty="Nothing closed yet." onRowClick=${STATIC ? r => setClosedId(id => (id === r.id ? null : r.id)) : undefined}
+        expandedKey=${closedId} /></div>
+      ${STATIC && data.closed.length > 0 && !openClosed && html`<p class="faint" style="font-size:12.5px;margin-top:8px">${t('Tap a closed trade to edit or delete it.')}</p>`}
+      ${openClosed && html`<${ClosedDetail} r=${openClosed} data=${data} onClose=${() => setClosedId(null)} />`}
       <p class="faint" style="font-size:12.5px;margin-top:10px">${t('Starting capital {v}', { v: fmt.egp(s.start) })}${' '}
         (<a href="#/settings">${t('change it in Settings')}</a>). ${data.fee_cfg.broker === 'other' ? t('Profit and loss include {fee}% fees each way.', { fee: data.fee_pct })
           : t("Profit and loss include Thndr's fees each way.")}</p>
@@ -338,15 +343,7 @@ function PositionDetail({ p, data, onDone, onClose }) {
     ${p.adjust ? html`<${AdjustPanel} p=${p} onDone=${onDone} />` : sellForm}
     <div>
       <h4>${t('Transactions in this position')}${p.n_buys > 1 ? ` · ${t('{n} buys combined at the average price', { n: p.n_buys })}` : ''}</h4>
-      <table class="mini-table"><thead><tr><th>${t('Date')}</th><th>${t('Side')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Price')}</th>
-        <th class="r">${t('Fees')}</th><th>${t('Note')}</th></tr></thead>
-        <tbody>${p.fills.map(f => html`<tr><td>${fmt.date(f.date)}</td><td><span class=${`side-tag ${f.side}`}>${t(f.side.toUpperCase())}</span></td>
-          <td class="r">${f.side === 'bonus' ? fmt.signed(f.shares) : fmt.int(f.shares)}</td>
-          <td class="r">${f.side === 'bonus' ? '–' : fmt.price(f.price)}</td>
-          <td class="r">${f.side === 'buy' || f.side === 'sell' ? fmt.num(f.fees, 2) : '–'}</td>
-          <td class="muted">${f.side === 'dividend' ? html`<b class="up">+${fmt.egp(f.amount, 2)}</b> ${tn(f.note)}
-            <button class="x-btn" title=${t('Remove this dividend')} onClick=${() => removeDividend(f.dividend_id)}><${Icon} name="x" size=${13} /></button>`
-            : tn(f.note) || ''}</td></tr>`)}</tbody></table>
+      <${Fills} fills=${p.fills} tradeId=${p.id} data=${data} onRemoveDividend=${removeDividend} />
       ${showDividend
         ? html`<${DividendForm} p=${p} onClose=${() => setShowDividend(false)} />`
         : html`<button class="linkish" style="margin-top:10px" onClick=${() => setShowDividend(true)}>
@@ -361,6 +358,123 @@ function PositionDetail({ p, data, onDone, onClose }) {
     ${confirmDelete && html`<${Confirm} title=${t('Delete the {sym} position?', { sym: p.symbol })} danger confirmLabel="Delete position"
       text="This removes the position and all its transactions, as if you never logged it. Use it only for mistakes. To record a sale, use Record sale instead."
       onConfirm=${remove} onClose=${() => setConfirmDelete(false)} />`}
+  </div>`;
+}
+
+// A trade's transactions. On the website each buy and sale can be edited or deleted, and one added: the position is
+// then rebuilt from them (local/engine.js rebuildTrade). Bonus shares and dividends have their own buttons.
+function Fills({ fills, tradeId, data, onRemoveDividend }) {
+  const [editing, setEditing] = useState(null);      // a fill, 'new', or null
+  const [deleting, setDeleting] = useState(null);
+  const remove = async f => {
+    try {
+      toast((await api(`/portfolio/fills/${f.id}`, { method: 'DELETE' })).message);
+      setDeleting(null);
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
+  const editable = f => STATIC && (f.side === 'buy' || f.side === 'sell');
+  return html`<table class="mini-table"><thead><tr><th>${t('Date')}</th><th>${t('Side')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Price')}</th>
+      <th class="r">${t('Fees')}</th><th>${t('Note')}</th>${STATIC && html`<th></th>`}</tr></thead>
+      <tbody>${fills.map(f => html`<tr class=${editing && editing.id === f.id ? 'editing' : ''}><td>${fmt.date(f.date)}</td><td><span class=${`side-tag ${f.side}`}>${t(f.side.toUpperCase())}</span></td>
+        <td class="r">${f.side === 'bonus' ? fmt.signed(f.shares) : fmt.int(f.shares)}</td>
+        <td class="r">${f.side === 'bonus' ? '–' : fmt.price(f.price)}</td>
+        <td class="r">${f.side === 'buy' || f.side === 'sell' ? fmt.num(f.fees, 2) : '–'}</td>
+        <td class="muted">${f.side === 'dividend' ? html`<b class="up">+${fmt.egp(f.amount, 2)}</b> ${tn(f.note)}
+          ${onRemoveDividend && html`<button class="x-btn" title=${t('Remove this dividend')} onClick=${() => onRemoveDividend(f.dividend_id)}><${Icon} name="x" size=${13} /></button>`}`
+          : tn(f.note) || ''}</td>
+        ${STATIC && html`<td class="fill-actions">${editable(f) && html`
+          <button class="x-btn edit" title=${t('Edit')} aria-label=${t('Edit')} onClick=${() => setEditing(f)}><${Icon} name="pencil" size=${14} /></button>
+          <button class="x-btn" title=${t('Delete')} aria-label=${t('Delete')} onClick=${() => setDeleting(f)}><${Icon} name="trash" size=${14} /></button>`}</td>`}</tr>`)}</tbody></table>
+    ${STATIC && (editing
+      ? html`<${FillForm} key=${editing === 'new' ? 'new' : editing.id} fill=${editing === 'new' ? null : editing} tradeId=${tradeId} data=${data}
+          onClose=${() => setEditing(null)} />`
+      : html`<button class="linkish" style="margin-top:10px;margin-inline-end:16px" onClick=${() => setEditing('new')}>
+          <${Icon} name="plus" size=${14} /> ${t('Add a transaction')}</button>`)}
+    ${deleting && html`<${Confirm} danger confirmLabel="Delete"
+      title=${t('Delete this {side}?', { side: t(deleting.side === 'buy' ? 'buy' : 'sale') })}
+      text=${t('{n} shares at {price} on {date}. Everything after it is worked out again. Deleting the last buy deletes the whole trade.',
+        { n: fmt.int(deleting.shares), price: fmt.price(deleting.price), date: fmt.date(deleting.date) })}
+      onConfirm=${() => remove(deleting)} onClose=${() => setDeleting(null)} />`}`;
+}
+
+const SIDES = [{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }];
+
+// Add a buy or sale to a trade, or edit one (fill).
+function FillForm({ fill, tradeId, data, onClose }) {
+  const [form, setForm] = useState(fill
+    ? { side: fill.side, date: fill.date, shares: String(fill.shares), price: String(fill.price), note: fill.note || '' }
+    : { side: 'buy', date: todayISO(), shares: '', price: '', note: '' });
+  const [busy, setBusy] = useState(false);
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const shares = parseInt(form.shares, 10) || 0, price = parseFloat(form.price) || 0;
+  const valid = shares >= 1 && price > 0 && !!form.date;
+  const sell = form.side === 'sell';
+  const reasons = data.sell_reasons.includes(form.note) || !form.note ? data.sell_reasons : [form.note, ...data.sell_reasons];
+  const submit = async e => {
+    e.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    const body = { side: form.side, date: form.date, shares, price, note: sell ? (form.note || data.sell_reasons[0]) : form.note };
+    try {
+      const r = fill ? await api(`/portfolio/fills/${fill.id}`, { method: 'PUT', body })
+        : await api(`/portfolio/${tradeId}/fills`, { method: 'POST', body });
+      toast(r.message);
+      onClose();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<form class="fill-form" onSubmit=${submit}>
+    <h4>${fill ? t(fill.side === 'buy' ? 'Edit this buy' : 'Edit this sale') : t('Add a transaction')}</h4>
+    ${!fill && html`<${Seg} options=${SIDES} value=${form.side} onChange=${v => setForm(f => ({ ...f, side: v }))} />`}
+    <div class="form-grid" style="margin-top:10px">
+      <${Field} label="Date"><input class="input" type="date" max=${todayISO()} value=${form.date} onInput=${set('date')} required /><//>
+      <${Field} label="Shares"><input class="input" type="number" min="1" step="1" value=${form.shares} onInput=${set('shares')} required /><//>
+      <${Field} label=${sell ? 'Sell price' : 'Price paid'}><input class="input" type="number" min="0.001" step="0.001" value=${form.price}
+        onInput=${set('price')} required /><//>
+      ${sell && html`<${Field} label="Reason"><select class="input" value=${form.note || data.sell_reasons[0]} onChange=${set('note')}>
+        ${reasons.map(r => html`<option value=${r}>${tn(r)}</option>`)}</select><//>`}
+    </div>
+    <div class="form-foot">
+      <span class="preview">${valid ? html`${t('Fees')} <b>${fmt.egp(orderFee(price * shares, data.fee_cfg), 2)}</b>` : t('Enter the shares and price.')}</span>
+      <span class="row" style="gap:8px">
+        <button class="btn ghost" type="button" onClick=${onClose}>${t('Cancel')}</button>
+        <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="check" />${t('Save')}</button></span>
+    </div>
+  </form>`;
+}
+
+// A closed trade, opened from the table: its transactions (edit, delete, add) and deleting the whole trade.
+function ClosedDetail({ r, data, onClose }) {
+  const [confirm, setConfirm] = useState(false);
+  const remove = async () => {
+    try {
+      toast((await api(`/portfolio/closed/${r.id}`, { method: 'DELETE' })).message);
+      onClose();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
+  return html`<div class="card" style="margin-top:12px">
+    <div class="card-title"><a class="sym" href=${`#/stock/${encodeURIComponent(r.symbol)}`}>${r.symbol}</a>
+      <span class="faint">${t('Bought {a} · sold {b}', { a: fmt.date(r.entry_date), b: fmt.date(r.exit_date) })}</span></div>
+    ${r.source_open && html`<p class="muted" style="font-size:13px;margin-bottom:10px">${t('This was part of a position that is still open: these are all its transactions. Deleting this sale puts its shares back in the open position.')}</p>`}
+    <${Fills} fills=${r.fills} tradeId=${r.source_id} data=${data} />
+    <div class="row" style="margin-top:14px;justify-content:space-between">
+      ${!r.source_open ? html`<button class="btn sm danger-ghost" type="button" onClick=${() => setConfirm(true)}>
+        <${Icon} name="trash" size=${14} />${t('Delete this trade')}</button>` : html`<span></span>`}
+      <button class="btn sm" type="button" onClick=${onClose}><${Icon} name="x" size=${14} />${t('Close')}</button>
+    </div>
+    ${confirm && html`<${Confirm} title=${t('Delete the {sym} trade?', { sym: r.symbol })} danger confirmLabel="Delete trade"
+      text="This removes the trade and all its transactions from your history and your profit/loss, as if you never logged it."
+      onConfirm=${remove} onClose=${() => setConfirm(false)} />`}
   </div>`;
 }
 

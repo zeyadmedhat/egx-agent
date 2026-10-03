@@ -289,8 +289,14 @@ async function portfolioView(c) {
   });
   if (closed.length) {
     closed.sort((a, b) => (a.exit_date < b.exit_date ? 1 : a.exit_date > b.exit_date ? -1 : b.id - a.id));
-    rows = closed.map(t => Object.fromEntries(['id', 'symbol', 'entry_date', 'entry_price', 'exit_date', 'exit_price',
-      'shares', 'pnl', 'return_pct', 'exit_reason', 'notes'].map(k => [k, t[k] ?? null])));
+    rows = closed.map(t => {
+      const src = sourceOf(t), main = book.trades.find(x => x.id === src);
+      return { ...Object.fromEntries(['id', 'symbol', 'entry_date', 'entry_price', 'exit_date', 'exit_price',
+        'shares', 'pnl', 'return_pct', 'exit_reason', 'notes'].map(k => [k, t[k] ?? null])),
+      source_id: src, source_open: !!main && main.status === 'open',
+      fills: E.fillsOf(book, src).map(f => ({ id: f.id, date: f.date, side: f.side, shares: f.shares, price: f.price,
+        fees: f.fees, note: f.note })) };
+    });
     stats = { count: closed.length, win_rate: closed.filter(t => t.pnl > 0).length / closed.length,
       total: closed.reduce((a, t) => a + t.pnl, 0) };
   }
@@ -445,6 +451,14 @@ function atrOn(bars, day) {
   return use.length ? use[use.length - 1].atr14 : NaN;
 }
 
+// The ATR and the chart's stop (under support) and target on a day, or the last session before it: what a buy's
+// stop and target come from.
+const marketAt = (bars, cfg) => day => {
+  const d = bars.filter(b => b.date <= day).at(-1);
+  return { atr: bars.length ? atrOn(bars, day) : NaN,
+    chart: cfg.levels_mode === 'chart' && d && Number.isFinite(d.ptgt) ? { stop: d.sup, target: d.ptgt } : null };
+};
+
 async function buy(c, body) {
   const sym = String(body.symbol || '').trim().toUpperCase();
   if (!sym || sym.length > 20) fail(422, 'symbol: enter a symbol.');
@@ -460,9 +474,7 @@ async function buy(c, body) {
     fail(400, "There's no price history for this stock, so the automatic stop can't be calculated. Enter a stop-loss.");
   }
   const had = !!E.openPosition(c.book, 'real', sym);
-  // The chart's stop (under support) and target on the buy date, or the last session before it.
-  const day = bars.filter(b => b.date <= date).at(-1);
-  const chart = c.cfg.levels_mode === 'chart' && day && Number.isFinite(day.ptgt) ? { stop: day.sup, target: day.ptgt } : null;
+  const { chart } = marketAt(bars, c.cfg)(date);
   E.addRealBuy(c.book, c.cfg, sym, date, price, shares, atr, info(c, sym).sector || '', stop || null,
     String(body.notes || '').trim().slice(0, 500), chart);
   saveBook(c.book);
@@ -543,6 +555,83 @@ function deleteDividend(c, id) {
   c.book.dividends = c.book.dividends.filter(d => d.id !== id);
   saveBook(c.book);
   return { message: `Removed the ${money2(row.amount)} EGP ${row.symbol} dividend.` };
+}
+
+// ------------------------------------------------------------------ editing a trade's transactions
+// The trade a closed row came from: a partial sale's position, or itself.
+const sourceOf = t => { const m = /^partial sale from position #(\d+)$/.exec(t.notes || ''); return m ? +m[1] : t.id; };
+
+// Change the transactions of trade id with change(), then rebuild it (engine.rebuildTrade). First checks that its
+// transactions add up to what it holds now: one saved by an older version may not, and rebuilding it would change it.
+async function changeTrade(c, id, change) {
+  const t = c.book.trades.find(x => x.id === id && x.account === 'real');
+  if (!t) fail(404, 'This trade no longer exists. Refresh the page.');
+  const bars = (await barsFor(c, [t.symbol]))[t.symbol];
+  const at = marketAt(bars, c.cfg);
+  const copy = structuredClone(c.book);
+  let check;
+  try { check = E.rebuildTrade(copy, c.cfg, id, at); } catch { check = null; }
+  if (!check || check.shares !== t.shares || Math.abs(check.entry_price - t.entry_price) > 1e-6 || check.status !== t.status) {
+    fail(400, `The ${t.symbol} transactions don't add up to what the trade holds (it was saved by an older version), `
+      + 'so they can\'t be edited. Delete it and log it again instead.');
+  }
+  change();
+  let res;
+  try { res = E.rebuildTrade(c.book, c.cfg, id, at); } catch (e) { fail(400, e.message); }
+  saveBook(c.book);
+  return { symbol: t.symbol, trade: res };
+}
+
+function fillBody(body, side) {
+  const date = toDay(body.date);
+  if (date > localToday()) fail(422, "date: that's in the future.");
+  return { date, price: toNum(body.price, 'price'), shares: toNum(body.shares, 'shares', { min: 1, strict: false, integer: true }),
+    note: String(body.note ?? (side === 'sell' ? 'Other / my decision' : '')).trim().slice(0, 200) };
+}
+
+const changedMsg = (sym, res) => (!res ? `Deleted ${sym}: no buy was left.`
+  : res.status === 'closed' ? `Updated ${sym}. The trade is closed.`
+    : `Updated ${sym}: ${E.int(res.shares)} shares at an average of ${res.entry_price.toFixed(3)}. Stop ${E.f2(res.stop)}, target ${E.f2(res.target)}.`);
+
+async function editFill(c, fid, body) {
+  const f = c.book.fills.find(x => x.id === fid);
+  if (!f || !['buy', 'sell'].includes(f.side)) fail(404, 'This transaction no longer exists. Refresh the page.');
+  const v = fillBody({ note: f.note, ...body }, f.side);
+  const { symbol, trade } = await changeTrade(c, f.trade_id, () => Object.assign(f, v, { fees: E.orderFee(v.price * v.shares, c.cfg) }));
+  return { message: changedMsg(symbol, trade) };
+}
+
+async function deleteFill(c, fid) {
+  const f = c.book.fills.find(x => x.id === fid);
+  if (!f || !['buy', 'sell'].includes(f.side)) fail(404, 'This transaction no longer exists. Refresh the page.');
+  const { symbol, trade } = await changeTrade(c, f.trade_id, () => { c.book.fills = c.book.fills.filter(x => x.id !== fid); });
+  return { message: changedMsg(symbol, trade) };
+}
+
+async function addFillTo(c, id, body) {
+  const side = body.side === 'sell' ? 'sell' : 'buy';
+  const v = fillBody(body, side);
+  const t = c.book.trades.find(x => x.id === id && x.account === 'real');
+  if (!t) fail(404, 'This trade no longer exists. Refresh the page.');
+  const { symbol, trade } = await changeTrade(c, id, () => c.book.fills.push({ id: E.nextId(c.book), trade_id: id,
+    symbol: t.symbol, side, ...v, fees: E.orderFee(v.price * v.shares, c.cfg) }));
+  return { message: changedMsg(symbol, trade) };
+}
+
+// A closed trade, with everything it came from: its position's transactions, partial sales and dividends.
+function deleteClosed(c, id) {
+  const row = c.book.trades.find(t => t.id === id && t.account === 'real' && t.status === 'closed');
+  if (!row) fail(404, 'This trade no longer exists. Refresh the page.');
+  const src = sourceOf(row);
+  const main = c.book.trades.find(t => t.id === src);
+  if (main && main.status === 'open') {
+    fail(400, `Part of this ${row.symbol} position is still open. Delete this sale from its transactions instead.`);
+  }
+  const tag = `partial sale from position #${src}`;
+  c.book.trades = c.book.trades.filter(t => !(t.status === 'closed' && t.notes === tag));
+  E.deleteTrade(c.book, src);
+  saveBook(c.book);
+  return { message: `Deleted the ${row.symbol} trade and its transactions.` };
 }
 
 function deletePosition(c, id) {
@@ -764,6 +853,10 @@ async function route(path, { method = 'GET', body } = {}) {
   if (method === 'POST' && a === 'portfolio' && b === 'sell') return sell(c, body || {});
   if (method === 'POST' && a === 'portfolio' && x === 'adjust') return adjust(c, id, body || {});
   if (method === 'POST' && a === 'portfolio' && x === 'dividend') return dividend(c, id, body || {});
+  if (method === 'POST' && a === 'portfolio' && x === 'fills') return addFillTo(c, id, body || {});
+  if (method === 'PUT' && a === 'portfolio' && b === 'fills') return editFill(c, Number(x), body || {});
+  if (method === 'DELETE' && a === 'portfolio' && b === 'fills') return deleteFill(c, Number(x));
+  if (method === 'DELETE' && a === 'portfolio' && b === 'closed') return deleteClosed(c, Number(x));
   if (method === 'DELETE' && a === 'portfolio' && b && !x) return deletePosition(c, id);
   if (method === 'DELETE' && a === 'dividends') return deleteDividend(c, id);
   if (method === 'PUT' && a === 'settings') return saveSettings(c, body);

@@ -649,6 +649,11 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .side-tag.dividend { background: var(--accent-soft); color: var(--accent); }
 .x-btn { border: 0; background: none; color: var(--text-3); cursor: pointer; padding: 0 2px; vertical-align: middle; }
 .x-btn:hover { color: var(--down); }
+.x-btn.edit:hover { color: var(--accent); }
+.mini-table .fill-actions { white-space: nowrap; text-align: end; }
+.mini-table tr.editing td { background: var(--accent-soft, rgba(224, 176, 74, .08)); }
+.fill-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.fill-form h4 { margin-bottom: 8px; }
 
 /* bonus shares panel */
 .adjust-panel { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: var(--r); border: 1px solid color-mix(in srgb, var(--violet) 40%, transparent); background: color-mix(in srgb, var(--violet) 7%, transparent); }

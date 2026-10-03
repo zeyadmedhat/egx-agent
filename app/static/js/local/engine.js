@@ -433,6 +433,64 @@ export function sellReal(book, cfg, tradeId, date, price, shares, reason) {
 }
 
 // Remove a position logged by mistake, with its transaction history.
+// After you edit, delete or add a transaction: the position rebuilt from its transactions in date order, as if each
+// had been logged on its day. Its partial sales become closed trades again, a sale of every share closes it, and
+// removing that sale opens it again. The stop and target are worked out again only when the buys changed; at(day)
+// gives { atr, chart } on a day for that. Returns the trade, or null when no buy is left (then it's all deleted).
+export function rebuildTrade(book, cfg, tradeId, at) {
+  const t = book.trades.find(x => x.id === tradeId && x.account === 'real');
+  if (!t) throw new Error('This trade no longer exists. Refresh the page.');
+  const tag = `partial sale from position #${tradeId}`;
+  const fills = fillsOf(book, tradeId);
+  if (!fills.some(f => f.side === 'buy')) {
+    book.trades = book.trades.filter(x => !(x.status === 'closed' && x.notes === tag));
+    deleteTrade(book, tradeId);
+    return null;
+  }
+  let shares = 0, avg = 0, fees = 0, first = null, lastBuy = null, avgAtBuy = 0, scale = 1, end = null;
+  const sales = [];
+  for (const f of fills) {
+    if (end) throw new Error(`All its shares were sold on ${end.date}, so nothing can come after that. Log a later buy as a new position.`);
+    if (f.side === 'buy') {
+      avg = (avg * shares + f.price * f.shares) / (shares + f.shares);
+      shares += f.shares; fees += f.fees || 0;
+      first = first || f.date; lastBuy = f; avgAtBuy = avg; scale = 1;
+    } else if (f.side === 'bonus' && shares) {
+      const r = (shares + f.shares) / shares;
+      avg /= r; shares += f.shares; scale *= r;
+    } else if (f.side === 'sell') {
+      if (f.shares > shares) {
+        throw new Error(`On ${f.date} you'd sell ${int(f.shares)} shares, but you held ${int(shares)} then.`);
+      }
+      if (f.shares === shares) { end = f; fees += f.fees || 0; continue; }
+      const part = fees * f.shares / shares;
+      sales.push({ shares: f.shares, entry_price: avg, exit_date: f.date, exit_price: f.price,
+        exit_reason: f.note || 'Other / my decision', fees: part + (f.fees || 0) });
+      fees -= part; shares -= f.shares;
+    }
+  }
+  if (!end && book.trades.some(x => x.id !== tradeId && x.account === 'real' && x.status === 'open' && x.symbol === t.symbol)) {
+    throw new Error(`You have another open ${t.symbol} position, so this one can't open again. Sell or delete that one first.`);
+  }
+  // The stop and target: as they were unless the buys changed; then from the last buy, like logging it again.
+  let lv = {};
+  if (Math.abs(avg - t.entry_price) > 1e-9 || first !== t.entry_date) {
+    const m = at(lastBuy.date);
+    const yours = t.stop_src === 'yours' ? t.initial_stop * scale : null;
+    if (Number.isFinite(m.atr) || yours) {
+      const [s, target, src] = levels(avgAtBuy, m.atr, cfg, yours, m.chart);
+      lv = { initial_stop: s / scale, stop: s / scale, target: target / scale, highest_close: avg, ...src };
+    }
+  }
+  const base = { ...t, ...lv, entry_price: avg, entry_date: first };
+  book.trades = book.trades.filter(x => !(x.status === 'closed' && x.notes === tag));
+  for (const s of sales) book.trades.push({ ...base, ...s, id: nextId(book), status: 'closed', notes: tag });
+  Object.assign(t, base, end
+    ? { status: 'closed', shares, fees, exit_date: end.date, exit_price: end.price, exit_reason: end.note || 'Other / my decision' }
+    : { status: 'open', shares, fees, exit_date: null, exit_price: null, exit_reason: null });
+  return t;
+}
+
 export function deleteTrade(book, tradeId) {
   book.fills = book.fills.filter(f => f.trade_id !== tradeId);
   book.dividends = book.dividends.filter(d => d.trade_id !== tradeId);

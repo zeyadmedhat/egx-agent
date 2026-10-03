@@ -28,6 +28,19 @@ const OPS = {
       if (s.op === 'dividend') out.push(E.addDividend(book, s.trade_id, s.date, s.amount, s.note).per_share);
       if (s.op === 'pending') out.push(E.pending(book, events, 'real'));
       if (s.op === 'apply') out.push(E.applyEvent(book, s.trade_id, events.find(e => e.id === s.event_id), s.shares, s.today));
+      // editing transactions (local/api.js editFill / deleteFill / addFillTo): fill is its place in book.fills
+      const at = () => ({ atr: s.atr, chart: null });
+      if (s.op === 'edit') {
+        const f = book.fills[s.fill];
+        Object.assign(f, s.set);
+        f.fees = E.orderFee(f.price * f.shares, cfg);
+        out.push(E.rebuildTrade(book, cfg, f.trade_id, at) && 'ok');
+      }
+      if (s.op === 'delfill') {
+        const f = book.fills[s.fill];
+        book.fills = book.fills.filter(x => x !== f);
+        out.push(E.rebuildTrade(book, cfg, f.trade_id, at) ? 'kept' : 'deleted');
+      }
     }
     return { out, trades: E.trades(book, 'real'), fills: book.fills,
       summary: E.accountSummary(book, 'real', cfg, steps.at(-1).closes || {}, events) };

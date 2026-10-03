@@ -26,10 +26,12 @@ TRADE_KEYS = ("symbol", "status", "signal_date", "entry_date", "entry_price", "s
               "fees")
 
 
-def run_js(*cases):
+def run_js(*cases, raw=False):
     res = subprocess.run([NODE, str(ROOT / "tests" / "js" / "parity.mjs")], input=json.dumps({"cases": list(cases)}),
                          capture_output=True, text=True, timeout=120, check=True)
     out = json.loads(res.stdout)
+    if raw:                                    # [{ok, value | error}]: for cases that should fail
+        return out
     for r in out:
         assert r["ok"], r.get("error")
     return [r["value"] for r in out]
@@ -498,6 +500,36 @@ def test_size_calculator_uses_the_signals_own_sizing_rule():
     assert any(c["level"] == "warn" and "usual stop is 4–12%" in c["text"] for c in wide["checks"])
     assert bad_stop == {"ok": False, "error": "The stop must be below the entry price."}
 
+
+
+
+def test_editing_a_transaction_rebuilds_the_trade_as_if_logged_right():
+    """My Portfolio's edit/delete buttons: logging a wrong price and fixing it gives the same trades as logging it
+    right; deleting the sale of every share opens the position again; deleting its only buy deletes it."""
+    cfg = {**config.DEFAULTS, "broker": "thndr"}
+    buy = {"op": "buy", "symbol": "AAA", "sector": "Banks", "stop": None, "notes": "", "atr": 0.5}
+    right = [{**buy, "date": "2026-01-04", "price": 10.0, "shares": 100}, {**buy, "date": "2026-01-06", "price": 11.0, "shares": 100},
+             {"op": "sell", "trade_id": 1, "date": "2026-01-08", "price": 13.0, "shares": 50, "reason": "Target reached"}]
+    wrong = [right[0], {**right[1], "price": 12.0}, right[2], {"op": "edit", "fill": 1, "set": {"price": 11.0}, "atr": 0.5}]
+    closed = [right[0], {"op": "sell", "trade_id": 1, "date": "2026-01-08", "price": 12.0, "shares": 100, "reason": "Target reached"}]
+    a, b, c, d = run_js(
+        {"op": "real", "args": {"cfg": cfg, "steps": right, "events": []}},
+        {"op": "real", "args": {"cfg": cfg, "steps": wrong, "events": []}},
+        {"op": "real", "args": {"cfg": cfg, "steps": closed + [{"op": "delfill", "fill": 1, "atr": 0.5}], "events": []}},
+        {"op": "real", "args": {"cfg": cfg, "steps": [right[0], {"op": "delfill", "fill": 0, "atr": 0.5}], "events": []}})
+    strip = lambda ts: sorted(({k: v for k, v in x.items() if k != "id"} for x in ts), key=lambda x: x["status"])  # noqa: E731
+    assert len(a["trades"]) == len(b["trades"]) == 2                     # the open rest and the partial sale
+    for x, y in zip(strip(a["trades"]), strip(b["trades"])):
+        assert x.keys() == y.keys()
+        for k in x:
+            assert x[k] == (pytest.approx(y[k]) if isinstance(y[k], float) else y[k]), k
+    assert a["summary"]["cash"] == pytest.approx(b["summary"]["cash"])
+    reopened = c["trades"]
+    assert len(reopened) == 1 and reopened[0]["status"] == "open" and reopened[0]["shares"] == 100 and reopened[0]["exit_date"] is None
+    assert d["out"][-1] == "deleted" and d["trades"] == []
+    oversold, = run_js({"op": "real", "args": {"cfg": cfg, "events": [],
+                        "steps": right + [{"op": "edit", "fill": 2, "set": {"shares": 500}, "atr": 0.5}]}}, raw=True)
+    assert not oversold["ok"] and "you held 200" in oversold["error"]
 
 
 def test_thndr_fees_match_on_the_site_and_the_mac():
