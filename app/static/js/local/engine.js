@@ -162,6 +162,12 @@ export function replayStatus(p, bars, cfg) {
     return { status: 'EXIT', reason: `${p.exit_next_open}: sell at the next open`, stop: p.stop,
       days_held: p.days_held, event_date: last };
   }
+  const close = bars.length ? bars[bars.length - 1].close : null;
+  if (close != null && close <= p.stop) {
+    // no day after the buy was replayed (its date is the last close's or later, e.g. an old buy logged today)
+    return { status: 'EXIT', reason: `Stop-loss: closed at ${f2(close)}, under your stop (${f2(p.stop)}): sell at the next open`,
+      stop: p.stop, days_held: p.days_held, event_date: last };
+  }
   if (p.days_held >= cfg.review_day && p.highest_close < p.entry_price + r) {
     return { status: 'REVIEW',
       reason: `Day ${p.days_held}: no +1R move yet (needs ${f2(p.entry_price + r)}). Consider exiting.`,

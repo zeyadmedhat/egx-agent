@@ -141,6 +141,12 @@ def replay_status(pos: Position, ind: pd.DataFrame, cfg: dict) -> dict:
     if pos.exit_next_open:
         return {"status": "EXIT", "reason": f"{pos.exit_next_open}: sell at the next open",
                 "stop": pos.stop, "days_held": pos.days_held, "event_date": str(last)}
+    close = float(ind["close"].iloc[-1]) if len(ind) else None
+    if close is not None and close <= pos.stop:
+        # no day after the buy was replayed (its date is the last close's or later, e.g. an old buy logged today)
+        return {"status": "EXIT", "reason": f"Stop-loss: closed at {close:.2f}, under your stop ({pos.stop:.2f}): "
+                                            "sell at the next open",
+                "stop": pos.stop, "days_held": pos.days_held, "event_date": str(last)}
     if pos.days_held >= cfg["review_day"] and pos.highest_close < pos.entry_price + pos.r:
         return {"status": "REVIEW",
                 "reason": f"Day {pos.days_held}: no +1R move yet (needs {pos.entry_price + pos.r:.2f}). Consider exiting.",

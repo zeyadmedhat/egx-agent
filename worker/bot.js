@@ -264,6 +264,7 @@ const NOTES = [
   [/^Trend break \(closed below 50-day average\)/, "كسر الاتجاه (أغلق تحت متوسط 50 يومًا)"],
   [/^Max hold reached \((\d+) trading days\)/, "انتهت مدة الاحتفاظ ($1 جلسة)"],
   [/^Trailing stop/, "الوقف المتحرك"], [/^Breakeven stop/, "وقف التعادل"], [/^Stop-loss/, "وقف الخسارة"],
+  [/: closed at ([\d.]+), under your stop \(([\d.]+)\)/, ": أغلق عند $1، تحت وقفك ($2)"],
   [/^Target reached/, "تم الوصول للهدف"], [/: sell at the next open/, ": بع عند الافتتاح القادم"],
   [/: sell at the open \(flagged before ([\d-]+)\)/, ": بع عند الافتتاح (ظهرت قبل $1)"], [/ \(gap down\)/, " (فجوة هبوط)"],
   [/ \(gap up\)/, " (فجوة صعود)"], [/ on ([\d-]+) at ([\d.]+)/, " يوم $1 عند $2"],

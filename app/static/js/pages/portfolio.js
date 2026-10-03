@@ -596,6 +596,7 @@ function DividendForm({ p, onClose }) {
 
 function BuyForm({ data, query }) {
   const stocks = useStore(s => s.stocks);
+  const lastDate = useStore(s => s.status && s.status.market && s.status.market.date);
   const blank = { symbol: '', date: todayISO(), price: '', shares: '', stop: '', notes: '', basis: 'price', value: '', mv: '', pl: '' };
   const [form, setForm] = useState(() => ({ ...blank, symbol: query.buy || '', price: query.price || '', shares: query.shares || '' }));
   const [busy, setBusy] = useState(false);
@@ -618,6 +619,9 @@ function BuyForm({ data, query }) {
   const valid = !!form.symbol && price > 0 && shares >= 1 && !!form.date && !badStop;
   const held = data.positions.find(p => p.symbol === form.symbol);
   const signals = data.signals.map(x => x.symbol);
+  // further than a day's price limit from the last close, dated on or after it: most likely an older buy logged today
+  const st = stocks && stocks.find(x => x.symbol === form.symbol);
+  const far = st && st.close > 0 && price > 0 && lastDate && form.date >= lastDate && Math.abs(price / st.close - 1) > 0.2;
 
   let preview = null;
   if (valid) {
@@ -665,6 +669,8 @@ function BuyForm({ data, query }) {
         step="0.01" value=${form.stop} onInput=${set('stop')} placeholder=${t('automatic')} /><//>
       <${Field} label="Notes (optional)"><input class="input" value=${form.notes} onInput=${set('notes')} maxlength="500" /><//>
     </div>
+    ${far && html`<div style="margin-top:12px"><${Callout} tone="warn">${t('{sym} closed at {close} on {date}, so {price} is far from what it traded at then. If you bought earlier, set the real buy date: the stop, the day count and the exit rules start from it.', {
+      sym: form.symbol, close: fmt.price(st.close), date: fmt.date(lastDate), price: fmt.price(price) })}<//></div>`}
     <div class="form-foot">
       <div style="flex:1;min-width:260px">${preview || html`<span class="faint" style="font-size:12.5px">${t("⭐ = today's BUY signals. Buying more of a stock you already hold adds the shares to that position at the average price, and the 1-month limit keeps counting from your first buy.")}</span>`}</div>
       <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="plus" />${t('Save buy')}</button>

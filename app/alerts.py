@@ -160,6 +160,7 @@ NOTES_AR = [
     (r"^Trend break \(closed below 50-day average\)", "كسر الاتجاه (أغلق تحت متوسط 50 يومًا)"),
     (r"^Max hold reached \((\d+) trading days\)", r"انتهت مدة الاحتفاظ (\1 جلسة)"),
     (r"^Trailing stop", "الوقف المتحرك"), (r"^Breakeven stop", "وقف التعادل"), (r"^Stop-loss", "وقف الخسارة"),
+    (r": closed at ([\d.]+), under your stop \(([\d.]+)\)", r": أغلق عند \1، تحت وقفك (\2)"),
     (r"^Target reached", "تم الوصول للهدف"), (r": sell at the next open", ": بع عند الافتتاح القادم"),
     (r": sell at the open \(flagged before ([\d-]+)\)", r": بع عند الافتتاح (ظهرت قبل \1)"),
     (r" \(gap down\)", " (فجوة هبوط)"), (r" \(gap up\)", " (فجوة صعود)"), (r" on ([\d-]+) at ([\d.]+)", r" يوم \1 عند \2"),

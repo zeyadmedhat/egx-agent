@@ -65,6 +65,7 @@ const NOTES = [
   [/^Trend break \(closed below 50-day average\)/, 'كسر الاتجاه (أغلق تحت متوسط 50 يومًا)'],
   [/^Max hold reached \((\d+) trading days\)/, 'انتهت مدة الاحتفاظ ($1 جلسة)'],
   [/^Trailing stop/, 'الوقف المتحرك'], [/^Breakeven stop/, 'وقف التعادل'], [/^Stop-loss/, 'وقف الخسارة'],
+  [/: closed at ([\d.]+), under your stop \(([\d.]+)\)/, ': أغلق عند $1، تحت وقفك ($2)'],
   [/^Target reached/, 'تم الوصول للهدف'], [/: sell at the next open/, ': بع عند الافتتاح القادم'],
   [/: sell at the open \(flagged before ([\d-]+)\)/, ': بع عند الافتتاح (ظهرت قبل $1)'], [/ \(gap down\)/, ' (فجوة هبوط)'],
   [/ \(gap up\)/, ' (فجوة صعود)'], [/ on ([\d-]+) at ([\d.]+)$/, ' يوم $1 عند $2'],
@@ -1580,6 +1581,7 @@ export const AR = {
   "Exact from Thndr": "الرقم الدقيق من ثاندر",
   "From the stock's My position screen in Thndr. Type the profit/loss with its minus sign when it's a loss: the purchase value is Market value − Profit/Loss.": "من شاشة My position للسهم في ثاندر. اكتب الربح/الخسارة بعلامة السالب إذا كانت خسارة: قيمة الشراء = القيمة السوقية − الربح/الخسارة.",
   "a share": "للسهم",
+  "{sym} closed at {close} on {date}, so {price} is far from what it traded at then. If you bought earlier, set the real buy date: the stop, the day count and the exit rules start from it.": "أغلق {sym} عند {close} يوم {date}، لذا {price} بعيد عن سعر تداوله حينها. إذا اشتريت قبل ذلك، اكتب تاريخ الشراء الحقيقي: الوقف وعدد الأيام وقواعد الخروج تبدأ منه.",
   "(fees already in the price)": "(الرسوم ضمن السعر)",
   // the EGX30 page
   "Egypt's 30 biggest and most traded companies, from the {date} close.": "أكبر 30 شركة مصرية وأكثرها تداولًا، من إغلاق {date}.",

@@ -96,6 +96,21 @@ def test_exit_rules_match(cfg):
 
 
 @needs_node
+def test_an_old_buy_logged_today_under_its_stop_says_sell(cfg):
+    """A buy dated after the last close (an old position logged today at its old price) has no day to replay: if
+    the last close is under its stop the rules say sell, not hold (AMES: bought at 80, logged on 3 Oct, at 46.60)."""
+    frame = market()["S0"]
+    last = float(frame.close.iloc[-1])
+    entry = last * 1.7
+    row = pd.Series({"symbol": "S0", "entry_date": "2099-01-01", "entry_price": entry, "shares": 100,
+                     "initial_stop": entry * 0.88, "stop": entry * 0.88, "target": entry * 1.24, "sector": "A"})
+    py = portfolio.real_status(row, frame, cfg)
+    js, = run_js({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(frame), "cfg": cfg}})
+    assert py["status"] == "EXIT" and "under your stop" in py["reason"]
+    assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "last_close"))
+
+
+@needs_node
 def test_share_sizing_matches(cfg):
     rng = np.random.default_rng(5)
     cases, expected = [], []
