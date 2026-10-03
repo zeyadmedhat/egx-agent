@@ -280,6 +280,17 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
         assert idx["has_data"] and idx["years"][0]["partial"] and per["1Y"]["usd"] is None
         assert per["1Y"]["egp"] == pytest.approx(close[-1] / close[-251] - 1, rel=1e-6)
         assert len(market["movers"]["ret5"]["up"]) <= 6
+    # the bot's /week, stock card and /egx30 say what those pages say; its evening message names next week's best
+    from app import alerts, views
+    conn = db.connect(tmp_path / "egx.db")
+    info = alerts.bot_info(conn, config.DEFAULTS)
+    s = info["stocks"][row["symbol"]]
+    assert s["w"] == pytest.approx(row["p5"], abs=1e-3) and s["wr"] == row["rank5"] and s["wl"] == row["level"]
+    assert s["c"] * (1 + s["wm"]) == pytest.approx(row["target5"], rel=1e-3)
+    assert info["week"]["top"] == 1 and info["week"]["weak"] == page["week"]["weak"]
+    assert info["x30"]["r"]["1Y"] == pytest.approx(per["1Y"]["egp"], abs=1e-4) and info["x30"]["u"]["1Y"] is None
+    line = alerts._week_line(views.Data(conn, config.DEFAULTS, views.Cache()))
+    assert line.startswith("Next week") and line.endswith("(/week).")
 
 
 def test_monthly_retrain_runs_after_a_scan_only_when_due(tmp_path, cfg, fast_model):

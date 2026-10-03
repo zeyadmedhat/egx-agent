@@ -1050,6 +1050,8 @@ ul.checkup li span { color: var(--text-2); font-size: 13px; }
 .checkup-ok .icon { color: var(--up); flex: none; }
 /* holdings from a broker screenshot (My Portfolio) */
 .import-table td { vertical-align: top; }
+.import-table .import-row td { border-bottom: 0; padding-bottom: 4px; }
+.import-table .import-note td { padding-top: 0; }
 .input.sm { height: 30px; padding: 0 8px; font-size: 13px; }
 .btn.disabled { opacity: .6; pointer-events: none; }
 

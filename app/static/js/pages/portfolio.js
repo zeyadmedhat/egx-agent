@@ -773,6 +773,15 @@ function matchStock(stocks, h) {
   return h.symbol || '';
 }
 
+// A stock you already hold, checked by what you paid, fees in: the picture's market value − profit/loss (exact,
+// whatever the price did since) against this site's average × shares + buy fees (the bot's check, worker/bot.js).
+function HeldCheck({ r, p }) {
+  const here = p.avg_price * p.shares + (p.fees || 0);
+  return Math.abs(r.cost - here) <= Math.max(3, here * 1e-4)
+    ? html`<span class="up">${t('Already in My Portfolio, and it matches: you paid {v} EGP, fees in.', { v: fmt.int(here) })}</span>`
+    : html`<span class="warn">${t('Already in My Portfolio: you paid {a} EGP on the picture, {b} EGP here. Fix it with Sell or edit.', { a: fmt.int(r.cost), b: fmt.int(here) })}</span>`;
+}
+
 function ImportPanel({ data }) {
   const stocks = useStore(s => s.stocks) || [];
   const [linked, setLinked] = useState(null);
@@ -795,10 +804,20 @@ function ImportPanel({ data }) {
     try {
       const m = await import('../local/api.js');
       const got = await m.readScreenshot(await shrink(file));
+      const syms = got.holdings.map(h => matchStock(stocks, h));
+      const ask = [...new Set(syms.filter(known))].join(',');
+      const q = ask ? await api(`/quotes?s=${encodeURIComponent(ask)}`).catch(() => ({})) : {};
+      const now = sym => (q[sym] && q[sym].price) || (stocks.find(s => s.symbol === sym) || {}).close;
       setRows(got.holdings.map((h, i) => {
-        const symbol = matchStock(stocks, h);
-        return { id: i, symbol, name: h.name || '', shares: String(h.shares || ''), price: String(h.avg_price || h.last || ''),
-          guessed: !h.avg_price, on: known(symbol) && !held(symbol) && !!h.avg_price };
+        const symbol = syms[i];
+        // Market value − profit/loss is exactly what you paid, fees in (Thndr's own sum); with no share count on the
+        // picture (Thndr's list of stocks), the shares are the market value ÷ the price now.
+        const cost = h.value && h.pnl != null && h.value - h.pnl > 0 ? h.value - h.pnl : null;
+        const shares = h.shares || (cost && now(symbol) ? Math.round(h.value / now(symbol)) : null);
+        const price = cost && shares ? cost / shares : h.avg_price || h.last;
+        return { id: i, symbol, name: h.name || '', shares: String(shares || ''), price: price ? String(+price.toFixed(4)) : '',
+          cost, value: h.value, pnl: h.pnl, est: !h.shares && !!shares, at: now(symbol),
+          guessed: !cost && !h.avg_price, on: known(symbol) && !held(symbol) && !!(cost || h.avg_price) };
       }));
     } catch (err) {
       toast(t(err.message), 'error', 9000);
@@ -806,8 +825,13 @@ function ImportPanel({ data }) {
       setBusy(false);
     }
   };
-  const edit = (id, k) => e => setRows(rs => rs.map(r => (r.id === id
-    ? { ...r, [k]: k === 'on' ? e.target.checked : k === 'symbol' ? e.target.value.toUpperCase().trim() : e.target.value } : r)));
+  const edit = (id, k) => e => setRows(rs => rs.map(r => {
+    if (r.id !== id) return r;
+    const v = k === 'on' ? e.target.checked : k === 'symbol' ? e.target.value.toUpperCase().trim() : e.target.value;
+    const n = parseInt(v, 10);         // fewer or more shares for the same total paid: the average follows
+    return { ...r, [k]: v, ...(k === 'shares' ? { est: false } : {}),
+      ...(k === 'shares' && r.cost && n >= 1 ? { price: String(+(r.cost / n).toFixed(4)) } : {}) };
+  }));
   const ok = r => known(r.symbol) && parseInt(r.shares, 10) >= 1 && parseFloat(r.price) > 0;
   const chosen = (rows || []).filter(r => r.on && ok(r));
   const add = async () => {
@@ -828,23 +852,26 @@ function ImportPanel({ data }) {
     if (done) { toast(t('Added {n} to My Portfolio.', { n: done })); refreshAll(); }
   };
   return html`<div class="import-panel">
-    <p class="muted" style="font-size:13px">${t('Take a screenshot of the holdings screen in your broker\'s app and pick it here. The bot reads it with Cloudflare\'s free AI (about 15 seconds); the picture isn\'t kept. Check every number before adding: the reader can misread.')}</p>
+    <p class="muted" style="font-size:13px">${t('Take a screenshot of your holdings in your broker\'s app (Thndr\'s home screen with all your stocks works) and pick it here. The bot reads every stock on it with Cloudflare\'s free AI (about 15 seconds): each one\'s market value and profit/loss give what you paid, fees in. The picture isn\'t kept. Check every number before adding: the reader can misread.')}</p>
     <label class=${cls('btn', busy && 'disabled')} style="margin-top:10px"><${Icon} name="plus" />
       ${busy && !rows ? t('Reading the picture…') : t('Pick a screenshot')}
       <input type="file" accept="image/*" hidden disabled=${busy} onChange=${pickFile} /></label>
     ${rows && (rows.length ? html`
       <div class="table-wrap" style="margin-top:12px"><table class="table import-table">
-        <thead><tr><th></th><th>${t('Stock')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Average price')}</th><th></th></tr></thead>
-        <tbody>${rows.map(r => html`<tr key=${r.id}>
+        <thead><tr><th></th><th>${t('Stock')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Average cost')}</th></tr></thead>
+        <tbody>${rows.map(r => html`<tr key=${r.id} class="import-row">
           <td><input type="checkbox" checked=${r.on} disabled=${!ok(r)} onChange=${edit(r.id, 'on')}
             aria-label=${t('Add {sym}', { sym: r.symbol || r.name })} /></td>
-          <td><input class="input sm" value=${r.symbol} onInput=${edit(r.id, 'symbol')} style="width:90px" />
+          <td><input class="input sm" value=${r.symbol} onInput=${edit(r.id, 'symbol')} style="width:76px" />
             ${r.name && html`<div class="faint" style="font-size:11.5px" dir="auto">${r.name}</div>`}</td>
-          <td class="r"><input class="input sm" type="number" min="1" step="1" value=${r.shares} onInput=${edit(r.id, 'shares')} style="width:90px" /></td>
-          <td class="r"><input class="input sm" type="number" min="0.001" step="0.001" value=${r.price} onInput=${edit(r.id, 'price')} style="width:96px" /></td>
-          <td style="font-size:12px">${!known(r.symbol) ? html`<span class="warn">${t("Not an EGX symbol the agent knows: type it.")}</span>`
+          <td class="r"><input class="input sm" type="number" min="1" step="1" value=${r.shares} onInput=${edit(r.id, 'shares')} style="width:80px" /></td>
+          <td class="r"><input class="input sm" type="number" min="0.001" step="any" value=${r.price} onInput=${edit(r.id, 'price')} style="width:86px" />
+            ${r.cost && html`<div class="faint" dir="auto" style="font-size:11.5px;white-space:nowrap">${t('{v} worth', { v: fmt.int(r.value) })}${' · '}<span class="num">${r.pnl >= 0 ? '+' : '−'}${fmt.int(Math.abs(r.pnl))}</span></div>`}</td>
+          </tr><tr key=${`${r.id}n`} class="import-note"><td></td><td colspan="3" style="font-size:12px">${!known(r.symbol) ? html`<span class="warn">${t("Not an EGX symbol the agent knows: type it.")}</span>`
+            : held(r.symbol) && r.cost ? html`<${HeldCheck} r=${r} p=${held(r.symbol)} />`
             : held(r.symbol) ? html`<span class="warn">${t('Already in My Portfolio ({n} shares): adding joins it.', { n: fmt.int(held(r.symbol).shares) })}</span>`
             : r.guessed ? html`<span class="warn">${t('No average price on the picture: this is the last price. Type what you paid.')}</span>`
+            : r.est ? html`<span class="warn">${t('Shares worked out from the market value ÷ the price now ({p}): check the units in your broker\'s app.', { p: fmt.price(r.at) })}</span>`
             : html`<span class="faint">${t('New position')}</span>`}</td></tr>`)}</tbody></table></div>
       <div class="row" style="margin-top:12px;gap:12px;flex-wrap:wrap;align-items:end">
         <${Field} label="Bought on" help="Sets each stop and target from the chart on that day. Change it if you bought earlier.">

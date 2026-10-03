@@ -747,8 +747,8 @@ async function sendBook(c) {
     const pv = await portfolioView(c);
     const book = { date: c.core.scan_date, start: pv.summary.start, cash: pv.summary.cash, closed: pv.closed_stats,
       watchlist: c.book.watchlist || [],
-      positions: pv.positions.map(p => ({ symbol: p.symbol, shares: p.shares, avg: p.avg_price, last: p.last, stop: p.stop,
-        target: p.target, status: p.status, reason: p.reason || '' })) };
+      positions: pv.positions.map(p => ({ symbol: p.symbol, shares: p.shares, avg: p.avg_price, fees: p.fees, last: p.last,
+        stop: p.stop, target: p.target, status: p.status, reason: p.reason || '' })) };
     await botPost(link.url, '/book', { token: link.token, book, full: c.book, changed: changedOf(c.book) });
     setLink({ url: link.url, token: link.token, synced: true, sent: c.core.scan_date });
   } catch (err) {

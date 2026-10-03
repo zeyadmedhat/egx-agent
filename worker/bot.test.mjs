@@ -69,8 +69,14 @@ const book = { date: "2026-09-28", start: 100000, cash: 20000, closed: { count: 
               { symbol: "ABUK", shares: 10, avg: 55, last: 51, stop: 51, target: 60, status: "EXIT", reason: "Closed under the stop" }] }
 const pt = portfolioText({ ...book, sent: "2026-09-29" }, st.info)
 assert.match(pt, /Your portfolio<\/b>: 33,301 EGP \(-66.7% since the start\)/)      // 20000 + 100×128.01 + 10×50
-assert.match(pt, /COMI<\/b> 100 × 120.00 → 128.01 \(\+6.7%, \+801 EGP\)\n   HOLD · stop 115.80/)
-assert.match(pt, /ABUK<\/b> 10 × 55.00 → 50.00 \(-9.1%, -50 EGP\) ⚠️ at or under your stop\n   EXIT .*\n   Closed under the stop/)
+assert.match(pt, /COMI<\/b> 100 × 120.00 → 128.01 \(\+6.7%, \+801 EGP\)\n   Hold · stop 115.80/)
+assert.match(pt, /ABUK<\/b> 10 × 55.00 → 50.00 \(-9.1%, -50 EGP\) ⚠️ at or under your stop\n   Sell .*\n   Closed under the stop/)
+// like Thndr's: the buy fees count in what you paid (12,000 + 21.5), no selling fee until you sell
+const withFees = portfolioText({ ...book, positions: [{ ...book.positions[0], fees: 21.5 }], sent: "2026-09-29" }, st.info)
+assert.match(withFees, /\(\+6.5%, \+780 EGP\)/)
+assert.match(portfolioText({ ...book, positions: [{ ...book.positions[1], status: "BOUNCE",
+  reason: "Big loss (-35.0%): sell at the first close above its 20-day average (59.77 now), by 2026-10-29 at the latest" }],
+  sent: "2026-09-29" }, st.info), /Sell on a bounce · stop 51.00[\s\S]*Big loss \(-35.0%\)/)
 assert.match(pt, /Closed trades: 2, 50.0% won, \+1,500 EGP/)
 assert.match(watchlistText(book, st.info), /COMI<\/b> 128.01 \(-0.4%\) · 13.4% chance in 10 days\n<b>ZZZZ<\/b>/)
 console.log("portfolio ok")
@@ -173,9 +179,11 @@ const storage2 = { get: async k => structuredClone(kv2.get(k)), put: async (k, v
   list: async ({ prefix }) => new Map([...kv2].filter(([k]) => k.startsWith(prefix))) }
 globalThis.fetch = async (url, init) => {
   if (String(url).startsWith("https://api.github.com/")) { github.push(JSON.parse(init.body)); return new Response(null, { status: 204 }) }
+  if (String(url).includes("/file/bot")) return new Response(new Uint8Array([137, 80, 78, 71]))     // a photo's bytes
   const body = JSON.parse(init.body)
   if (url.endsWith("/sendMessage")) sent2.push(body)
-  return new Response(JSON.stringify({ ok: true, result: url.endsWith("/getWebhookInfo") ? { url: "" } : true }))
+  return new Response(JSON.stringify({ ok: true, result: url.endsWith("/getWebhookInfo") ? { url: "" }
+    : url.endsWith("/getFile") ? { file_path: "photos/1.jpg" } : true }))
 }
 const env2 = { BOT_TOKEN: "123:test", SYNC_KEY: "k".repeat(48), GH_TOKEN: "gh", GITHUB_REPO: "me/egx" }
 const bot2 = new Bot({ storage: storage2 }, env2)
@@ -257,8 +265,27 @@ assert.match(await handle(st, u("/morning")), /remind you at 9:30/)
 assert.equal(st.subs[9].morning, true)
 assert.deepEqual(parseHoldings('```json\n{"holdings": [{"symbol": "comi", "name": "CIB", "shares": "1,200", ' +
   '"avg_price": 81.2, "last": null}, {"symbol": null, "name": null, "shares": 5}, {"symbol": "FWRY", "shares": 0}]}\n```'),
-  [{ symbol: "COMI", name: "CIB", shares: 1200, avg_price: 81.2, last: null }])
+  [{ symbol: "COMI", name: "CIB", shares: 1200, avg_price: 81.2, last: null, value: null, pnl: null }])
 assert.deepEqual(parseHoldings("I can't read that."), [])
+{ // a screenshot against your portfolio, by what you paid (fees in): Thndr's KORA screen, 12,299 at 6.433 a share
+  const { shotText } = await import("./bot.js")
+  const site = (avg, fees = 0) => ({ positions: [{ symbol: "KORA", shares: 12299, avg, fees }] })
+  const screen = { symbol: "KORA", shares: 12299, avg_price: 6.43, value: 76007.82, pnl: -3111.38 }
+  assert.match(shotText([screen], site(6.433), st.info), /✅ <b>KORA<\/b> matches: you paid 79,119 EGP/)
+  assert.doesNotMatch(shotText([screen], site(6.433), st.info), /Only on the website|isn't on/)
+  // a buy fee counted twice on the website: 88 EGP more
+  assert.match(shotText([screen], site(6.43, 125), st.info), /⚠️ <b>KORA<\/b>: you paid 79,119 EGP on the picture, 79,208 EGP on the website/)
+  assert.match(shotText([{ ...screen, shares: 12000 }], site(6.433), st.info), /12,000 shares on the picture, 12,299 on the website/)
+  // only Thndr's rounded average: close enough
+  assert.match(shotText([{ symbol: "KORA", shares: 12299, avg_price: 6.43 }], site(6.433), st.info), /✅ <b>KORA<\/b> matches/)
+  assert.match(shotText([screen], site(6.433), st.info, "ar"), /✅ <b>KORA<\/b> متطابق: دفعت 79,119 جنيه/)
+  assert.match(shotText([], site(6.433), st.info), /found no holdings/)
+}
+// Thndr's list of stocks: only each one's market value and profit/loss (a loss with a minus, or as a number)
+assert.deepEqual(parseHoldings('{"holdings": [{"symbol": "FCMD", "shares": null, "value": 23130, "pnl": 1202}, ' +
+  '{"symbol": "KORA", "value": "76,008", "pnl": "−3,111"}, {"symbol": "AMES", "value": null, "pnl": -50}]}'),
+  [{ symbol: "FCMD", name: null, shares: null, avg_price: null, last: null, value: 23130, pnl: 1202 },
+   { symbol: "KORA", name: null, shares: null, avg_price: null, last: null, value: 76008, pnl: -3111 }])
 
 // the reminder: once, at 9:30 Cairo on the day it's for, to friends who haven't turned it off
 await post2("/state", { fp: fp24, seen: uid2, stocks: {}, subs: { 11: { weekly: true }, 12: { weekly: true, morning: false } },
@@ -285,8 +312,20 @@ bot2.env.AI = { run: async (model, input) => {
 assert.equal((await post2("/read", { token: "x".repeat(32), image: png })).status, 401)
 assert.equal((await post2("/read", { token: nonce2, image: "data:text/html;base64,PGI+" })).status, 400)
 assert.deepEqual((await (await post2("/read", { token: nonce2, image: png })).json()).holdings,
-                 [{ symbol: "COMI", name: "CIB", shares: 450, avg_price: 81.2, last: 86.95 }])
-for (let i = 0; i < 18; i++) await post2("/read", { token: nonce2, image: png })
+                 [{ symbol: "COMI", name: "CIB", shares: 450, avg_price: 81.2, last: 86.95, value: null, pnl: null }])
+// a screenshot sent to the bot itself: read the same way (the same 20 a day), checked against the linked portfolio
+let asked = null
+bot2.env.AI = { run: async (model, input) => {
+  asked = input.messages[0].content[1].image_url.url
+  return { response: '{"holdings": [{"symbol": "COMI", "value": 12801, "pnl": 801}, {"symbol": "FCMD", "value": 23130, "pnl": 1202}]}' }
+} }
+assert.equal((await post2("/book", { token: nonce2, book })).status, 200)
+await post2("/telegram", { update_id: ++uid2, message: { chat: { id: 11, type: "private" }, from: { language_code: "en" },
+  photo: [{ file_id: "small", file_size: 10 }, { file_id: "big", file_size: 900 }] } }, { "X-Telegram-Bot-Api-Secret-Token": hook })
+assert.equal(asked, "data:image/jpeg;base64,iVBORw==")
+assert.match(sent2.at(-2).text, /Reading your screenshot/)
+assert.match(sent2.at(-1).text, /COMI<\/b> matches: you paid 12,000 EGP, fees in\n➕ <b>FCMD<\/b> isn't on the website \(23,130 worth, \+1,202 EGP\)\nOnly on the website: ABUK/)
+for (let i = 0; i < 17; i++) await post2("/read", { token: nonce2, image: png })
 assert.equal((await post2("/read", { token: nonce2, image: png })).status, 200)             // the 20th
 assert.equal((await post2("/read", { token: nonce2, image: png })).status, 429)
 console.log("why, morning, screenshots ok")
@@ -302,4 +341,26 @@ console.log("why, morning, screenshots ok")
   assert.deepEqual(asked.symbols.tickers, ["EGX:AIH", "EGX:COMI"])
   assert.deepEqual(await res.json(), { AIHC: { price: 0.75, change: 0.015 }, COMI: { price: 127.7, change: -0.004 } })
   console.log("quotes ok")
+}
+
+{ // next week (Predictions → Next week) and EGX30 (Market → EGX30)
+  const info = { ...st.info, week: { strong: 0.4815, all: 0.3106, top: 1, weak: false },
+    x30: { d: "2026-10-01", c: 53055, ch: 0.0224, e50: 54220.17, r: { "1W": -0.0134, "1M": -0.0471, YTD: 0.2684, "1Y": 0.5068 },
+           u: { YTD: 0.1563, "1Y": 0.3883 }, ath: -0.0639, hi: 56937.2, lo: 35207.5, off: true, blk: true, b50: 0.324 },
+    stocks: { COMI: { ...st.info.stocks.COMI, w: 0.42, wr: 2, wm: 0.05, wl: "good" },
+              ABUK: { ...st.info.stocks.ABUK, w: 0.48, wr: 1, wm: 0.06, wl: "good" } } }
+  const s2 = { ...st, info }, q = text => handle(s2, u(text))
+  const wk = await q("/week")
+  assert.match(wk, /Next week's best chances<\/b> \(from the 29 Sep close\)\n1\. <b>ABUK<\/b> 48.0% · target 53.00 \(\+6.0%\) · stop 47.00 · 💪 Strong\n2\. <b>COMI<\/b> 42.0% · target 134.41 \(\+5.0%\) · stop 121.61\n/)
+  assert.match(wk, /strong picks .* got there first 48.1% of the time, the average stock 31.1%/)
+  assert.doesNotMatch(wk, /Weak market/)
+  info.week.weak = true
+  assert.match(await q("/week"), /close\)\n⚠️ <b>Weak market<\/b>/)
+  assert.match(await q("/stock comi"), /No signal today.\nNext week: 42.0% chance to reach 134.41 before 121.61 \(rank 2\)\nChance to reach/)
+  assert.match(await q("/egx30"), /<b>EGX30<\/b> 53,055 \(\+2.2%\) · 1 Oct\nWeek -1.3% · month -4.7% · this year \+26.8% · a year \+50.7%\nIn dollars: this year \+15.6% · a year \+38.8%\n1-year range 35,208 – 56,937 · 6.4% under its record\n🔴 Under its 50-day average \(54,220\): the agent makes no new BUYs\n32.4% of stocks/)
+  assert.equal(callbackText("k"), "/week")
+  assert.equal(callbackText("e"), "/egx30")
+  assert.match(await q("/help"), /\/week[\s\S]*\/egx30[\s\S]*📷 Send a screenshot/)
+  assert.match(await handle({ ...st, info: { ...st.info, x30: null } }, u("/egx30")), /hasn't reached me/)
+  console.log("week and egx30 ok")
 }

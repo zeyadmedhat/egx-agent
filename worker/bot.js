@@ -19,6 +19,8 @@ const STOCK_RE = /^(?:\/(?:stock|s)(?:@\w+)?\s+)?([A-Za-z0-9]{2,12})\s*$/i
 const ASK_RE = /^\/(?:stock|s)(?:@\w+)?\s+(.+)$/i
 const TOP_RE = /^\/top(?:@\w+)?(?:\s+(10|20))?\s*$/i
 const BUYS_RE = /^\/(?:buys|signals)(?:@\w+)?\s*$/i
+const WEEK_RE = /^\/(?:week|next)(?:@\w+)?\s*$/i
+const EGX30_RE = /^\/(?:egx30|index)(?:@\w+)?\s*$/i
 const HELP_RE = /^\/(?:help|start)(?:@\w+)?\s*$/i
 const CODE_LEN = 24           // the site's code (static_site.telegram_code); a longer /start carries a browser's link
 const NONCE_RE = /^[a-f0-9]{32}$/
@@ -43,9 +45,12 @@ const EN = {
     "positions. /portfolio any time.",
   stopped: "Stopped. To start again, open the website → Settings → Connect Telegram.",
   help: "<b>Ask about any stock</b>: send its symbol (COMI) or part of its Arabic name (التجاري).\n" +
+    "/week: next week's best chances: up to the target before the stop, within 5 sessions\n" +
     "/top: the 10 best chances to reach the target in 10 days (/top 20: in 20 days)\n" +
     "/buys: today's BUY signals\n" +
-    "/why COMI: why it is or isn't a BUY, its rating and its levels\n\n" +
+    "/why COMI: why it is or isn't a BUY, its rating and its levels\n" +
+    "/egx30: the index in brief: its returns, in dollars too, and its 50-day average\n" +
+    "📷 Send a screenshot of your broker's holdings: I check it against your website portfolio\n\n" +
     "<b>Alerts for the stocks you follow</b>, checked after each close:\n" +
     "/watch COMI: when COMI gets a BUY signal\n" +
     "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n" +
@@ -138,7 +143,8 @@ const EN = {
   closed: (n, w, t) => `Closed trades: ${n}, ${w} won, ${t} EGP`,
   atStop: " ⚠️ at or under your stop", atTarget: " 🎯 at your target",
   stopW: "stop", targetW: "target",
-  status: s => s,
+  status: s => ({ EXIT: "Sell", BOUNCE: "Sell on a bounce", REVIEW: "Consider selling", "TIGHTEN STOP": "Raise your stop",
+                  HOLD: "Hold", ADJUST: "Update your shares", "NO DATA": "No price yet" })[s] || s,
   note: s => s,
   foot: (sent, scan) => `\n\nSent by your browser on ${sent}; prices from the ${scan} close. ` +
     "Open the website to update the exit rules.",
@@ -147,6 +153,40 @@ const EN = {
   wl: "<b>Your watchlist</b>",
   wlChance: p => ` · ${p} chance in 10 days`,
   wlFoot: "/stock SYMBOL for more.",
+  // next week (the website's Predictions → Next week)
+  bWeek: "📅 Next week", bX30: "📈 EGX30",
+  week: d => `<b>Next week's best chances</b> (from the ${d} close)`,
+  weekLine: (i, sym, p, tgt, up, stop, strong) => `${i}. <b>${sym}</b> ${p} · target ${tgt} (+${up}) · stop ${stop}` +
+    (strong ? " · 💪 Strong" : ""),
+  weekWeak: "⚠️ <b>Weak market</b>: fewer than 40% of stocks are above their 50-day average. Better to skip short " +
+    "trades this week.",
+  weekFoot: (strong, all) => "Chance: it rises to the target (1.5× its daily range) before it falls as far to the " +
+    "stop, within 5 sessions." + (strong ? ` In its tests, strong picks (its top 10%, in an uptrend, while the market ` +
+    `is healthy) got there first ${strong} of the time, the average stock ${all}.` : "") + " Always use the stop. Not advice.",
+  weekCard: (p, tgt, stop, rank) => `Next week: ${p} chance to reach ${tgt} before ${stop} (rank ${rank})`,
+  // EGX30 (the website's Market → EGX30)
+  x30: (c, ch, d) => `<b>EGX30</b> ${c} (${ch}) · ${d}`,
+  x30Ret: r => `Week ${r["1W"]} · month ${r["1M"]} · this year ${r.YTD} · a year ${r["1Y"]}`,
+  x30Usd: (y, yr) => `In dollars: this year ${y} · a year ${yr}`,
+  x30Range: (lo, hi, ath) => `1-year range ${lo} – ${hi} · ${ath ? `${ath} under its record` : "at its record"}`,
+  x30Up: e => `🟢 Above its 50-day average (${e}): the BUY rules are on`,
+  x30Down: (e, blk) => `🔴 Under its 50-day average (${e})` + (blk ? ": the agent makes no new BUYs" : ""),
+  x30Breadth: b => `${b} of stocks are above their own 50-day average`,
+  // a broker screenshot sent here, against the website's portfolio
+  shotReading: "📷 Reading your screenshot…",
+  shotNone: "I found no holdings on that picture. Send a screenshot of your broker's list of stocks or a stock's screen.",
+  shotFail: "I couldn't read that picture just now. Try again in a minute.",
+  shotLimit: n => `That's ${n} pictures today. Try again tomorrow.`,
+  shotHead: "<b>Your screenshot against your website portfolio</b>",
+  shotSame: (sym, paid) => `✅ <b>${sym}</b> matches: you paid ${paid} EGP, fees in`,
+  shotSameShares: (sym, n) => `✅ <b>${sym}</b>: the same ${n} shares`,
+  shotDiff: (sym, them, site) => `⚠️ <b>${sym}</b>: you paid ${them} EGP on the picture, ${site} EGP on the website`,
+  shotShares: (sym, them, site) => `⚠️ <b>${sym}</b>: ${them} shares on the picture, ${site} on the website`,
+  shotMissing: (sym, v, pl) => `➕ <b>${sym}</b> isn't on the website (${v} worth, ${pl} EGP)`,
+  shotOnly: syms => `Only on the website: ${syms}`,
+  shotFoot: missing => (missing ? "To add them: the website → My Portfolio → From a screenshot. " : "") +
+    "To fix one: the website → My Portfolio → Sell or edit. What you paid is the market value − the profit/loss, so " +
+    "the price moving since doesn't count.",
 }
 
 const AR = {
@@ -157,9 +197,12 @@ const AR = {
   linkedOnly: "🔗 <b>تم ربط محفظة هذا المتصفح.</b> بعد كل إغلاق سأخبرك بما تفعله في مراكزك. /portfolio في أي وقت.",
   stopped: "تم الإيقاف. للبدء من جديد افتح الموقع ← الإعدادات ← ربط تيليجرام.",
   help: "<b>اسأل عن أي سهم</b>: أرسل رمزه (COMI) أو جزءًا من اسمه (التجاري).\n" +
+    "/week: أفضل فرص الأسبوع القادم: الصعود إلى الهدف قبل الوقف خلال 5 جلسات\n" +
     "/top: أفضل 10 فرص للوصول إلى الهدف خلال 10 أيام (/top 20: خلال 20 يومًا)\n" +
     "/buys: إشارات الشراء اليوم\n" +
-    "/why COMI: لماذا هو إشارة شراء أو لا، وتقييمه ومستوياته\n\n" +
+    "/why COMI: لماذا هو إشارة شراء أو لا، وتقييمه ومستوياته\n" +
+    "/egx30: المؤشر باختصار: عوائده، وبالدولار أيضًا، ومتوسط 50 يومًا\n" +
+    "📷 أرسل صورة لأسهمك في تطبيق السمسرة: أقارنها بمحفظتك على الموقع\n\n" +
     "<b>تنبيهات للأسهم التي تتابعها</b>، تُفحص بعد كل إغلاق:\n" +
     "/watch COMI: عندما يحصل COMI على إشارة شراء\n" +
     "/watch COMI 45: عندما يغلق COMI فوق 45 (أو تحته إذا كان 45 أقل من سعر اليوم)\n" +
@@ -256,6 +299,35 @@ const AR = {
   wl: "<b>قائمة متابعتك</b>",
   wlChance: p => ` · فرصة ${p} خلال 10 أيام`,
   wlFoot: "/stock ورمز السهم للمزيد.",
+  bWeek: "📅 الأسبوع القادم", bX30: "📈 EGX30",
+  week: d => `<b>أفضل فرص الأسبوع القادم</b> (من إغلاق ${d})`,
+  weekLine: (i, sym, p, tgt, up, stop, strong) => `${i}. <b>${sym}</b> ${p} · الهدف ${tgt} (+${up}) · الوقف ${stop}` +
+    (strong ? " · 💪 قوي" : ""),
+  weekWeak: "⚠️ <b>سوق ضعيف</b>: أقل من 40% من الأسهم فوق متوسط 50 يومًا. الأفضل تجنب الصفقات القصيرة هذا الأسبوع.",
+  weekFoot: (strong, all) => "الفرصة: أن يصعد إلى الهدف (1.5 ضعف مداه اليومي) قبل أن يهبط بالقدر نفسه إلى الوقف، خلال 5 جلسات." +
+    (strong ? ` في اختباراته، الاختيارات القوية (أفضل 10% لديه، في اتجاه صاعد، والسوق سليم) وصلت أولًا في ${strong} من المرات، ومتوسط الأسهم ${all}.` : "") +
+    " استخدم الوقف دائمًا. ليست نصيحة.",
+  weekCard: (p, tgt, stop, rank) => `الأسبوع القادم: فرصة ${p} للوصول إلى ${tgt} قبل ${stop} (الترتيب ${rank})`,
+  x30: (c, ch, d) => `<b>EGX30</b> ${c} (${ch}) · ${d}`,
+  x30Ret: r => `أسبوع ${r["1W"]} · شهر ${r["1M"]} · هذا العام ${r.YTD} · سنة ${r["1Y"]}`,
+  x30Usd: (y, yr) => `بالدولار: هذا العام ${y} · سنة ${yr}`,
+  x30Range: (lo, hi, ath) => `مدى سنة ${lo} – ${hi} · ${ath ? `${ath} تحت قمته التاريخية` : "عند قمته التاريخية"}`,
+  x30Up: e => `🟢 فوق متوسط 50 يومًا (${e}): قواعد الشراء تعمل`,
+  x30Down: (e, blk) => `🔴 تحت متوسط 50 يومًا (${e})` + (blk ? ": لا يشتري الوكيل جديدًا" : ""),
+  x30Breadth: b => `${b} من الأسهم فوق متوسط 50 يومًا الخاص بها`,
+  shotReading: "📷 أقرأ صورتك…",
+  shotNone: "لم أجد أسهمًا في هذه الصورة. أرسل صورة لقائمة أسهمك في تطبيق السمسرة أو لشاشة سهم.",
+  shotFail: "لم أستطع قراءة الصورة الآن. حاول بعد دقيقة.",
+  shotLimit: n => `هذه ${n} صورة اليوم. حاول غدًا.`,
+  shotHead: "<b>صورتك مقارنة بمحفظتك على الموقع</b>",
+  shotSame: (sym, paid) => `✅ <b>${sym}</b> متطابق: دفعت ${paid} جنيه شاملًا الرسوم`,
+  shotSameShares: (sym, n) => `✅ <b>${sym}</b>: نفس عدد الأسهم (${n})`,
+  shotDiff: (sym, them, site) => `⚠️ <b>${sym}</b>: دفعت ${them} جنيه في الصورة، و${site} جنيه على الموقع`,
+  shotShares: (sym, them, site) => `⚠️ <b>${sym}</b>: ${them} سهم في الصورة، و${site} على الموقع`,
+  shotMissing: (sym, v, pl) => `➕ <b>${sym}</b> ليس على الموقع (قيمته ${v}، ${pl} جنيه)`,
+  shotOnly: syms => `على الموقع فقط: ${syms}`,
+  shotFoot: missing => (missing ? "لإضافتها: الموقع ← محفظتي ← من صورة. " : "") +
+    "لتصحيح سهم: الموقع ← محفظتي ← بيع أو تعديل. ما دفعته = القيمة السوقية − الربح أو الخسارة، فتحرك السعر بعدها لا يُحسب.",
 }
 
 // The exit rules' notes (egx_agent/engine.py), in Arabic. Anything else stays as written. Kept in step with
@@ -292,7 +364,8 @@ const reply = (text, kb) => ({ text, kb: kb && kb.length ? kb : undefined })
 const cb = (text, data) => ({ text, callback_data: data })
 // Buttons send these; each becomes the command it stands for (the website's run reads it like a typed message).
 const CALLBACKS = { w: s => `/watch ${s}`, l: s => `/watch ${s} levels`, u: s => `/unwatch ${s}`, s: s => `/stock ${s}`,
-                    y: s => `/why ${s}`, b: () => "/buys", t: () => "/top", t20: () => "/top 20" }
+                    y: s => `/why ${s}`, b: () => "/buys", t: () => "/top", t20: () => "/top 20", k: () => "/week",
+                    e: () => "/egx30" }
 export function callbackText(data) {
   const [k, sym = ""] = String(data || "").split(":")
   if (!Object.hasOwn(CALLBACKS, k)) return null
@@ -312,6 +385,7 @@ const rows = (buttons, per) => {
   return out
 }
 const symbolButtons = syms => rows(syms.map(s => cb(s, `s:${s}`)), 4)
+const menuButtons = T => [[cb(T.bBuys, "b"), cb(T.bWeek, "k")], [cb(T.bTop, "t"), cb(T.bX30, "e")]]
 
 // ------------------------------------------------------------------ asking about the website's data
 function stockCard(state, cid, sym, lang) {
@@ -321,6 +395,7 @@ function stockCard(state, cid, sym, lang) {
   if (s.a === "BUY") lines.push(T.buy(px(s.e), px(s.s), px(s.t)))
   else if (s.a) lines.push(T.signal(esc(s.a), s.e ? px(s.e) : null, s.e ? px(s.s) : null, s.e ? px(s.t) : null))
   else lines.push(T.noSignal)
+  if (s.w != null) lines.push(T.weekCard(pct(s.w), px(s.c * (1 + s.wm)), px(s.c * (1 - s.wm)), s.wr))
   const ch = [10, 20].filter(hz => s["p" + hz] != null).map(hz =>
     T.inDays(pct(s["p" + hz]), hz, s["r" + hz], s["x" + hz] != null ? pct(s["x" + hz], true) : null))
   if (ch.length) lines.push(T.chance + ch.join(" · "))
@@ -379,10 +454,36 @@ function top(info, hz, lang) {
     ` · ${px(s.c)}`).join("\n") + "\n\n" + T.topFoot, symbolButtons(list.map(([sym]) => sym)))
 }
 
+// Next week (the website's Predictions → Next week): the 10 best chances of rising 1.5× the daily range before
+// falling as far within 5 sessions. Strong: its top 10%, in an uptrend, while the market is healthy (level "good").
+function week(info, lang) {
+  const T = L(lang), w = info.week || {}
+  const list = Object.entries(info.stocks).filter(([, s]) => s.wr != null).sort((a, b) => a[1].wr - b[1].wr).slice(0, 10)
+  if (!list.length) return reply(T.noPred)
+  const lines = list.map(([sym, s], i) => T.weekLine(i + 1, esc(sym), pct(s.w), px(s.c * (1 + s.wm)), pct(s.wm),
+    px(s.c * (1 - s.wm)), s.wl === "good" && w.top != null && s.wr <= w.top))
+  return reply([T.week(T.day(info.pred)), ...(w.weak ? [T.weekWeak] : []), ...lines, "",
+                T.weekFoot(w.strong != null ? pct(w.strong) : null, w.all != null ? pct(w.all) : null)].join("\n"),
+               symbolButtons(list.map(([sym]) => sym)))
+}
+
+function egx30(info, lang) {
+  const T = L(lang), x = info.x30
+  if (!x) return reply(T.noData)
+  const r = Object.fromEntries(Object.entries(x.r).map(([k, v]) => [k, v != null ? pct(v, true) : "–"]))
+  const lines = [T.x30(egp(x.c), pct(x.ch, true), T.day(x.d)), T.x30Ret(r)]
+  if (x.u && x.u.YTD != null) lines.push(T.x30Usd(pct(x.u.YTD, true), x.u["1Y"] != null ? pct(x.u["1Y"], true) : "–"))
+  lines.push(T.x30Range(egp(x.lo), egp(x.hi), x.ath < -0.0005 ? pct(-x.ath) : null),
+             x.off ? T.x30Down(egp(x.e50), x.blk) : T.x30Up(egp(x.e50)))
+  if (x.b50 != null) lines.push(T.x30Breadth(pct(x.b50)))
+  const app = appButton(info, lang, "egx30")
+  return reply(lines.join("\n"), [[cb(T.bWeek, "k"), cb(T.bBuys, "b")], ...(app ? [[app]] : [])])
+}
+
 function buys(info, lang) {
   const T = L(lang)
   const list = Object.entries(info.stocks).filter(([, s]) => s.a === "BUY")
-  if (!list.length) return reply(T.noBuys(T.day(info.scan)), [[cb(T.bTop, "t")]])
+  if (!list.length) return reply(T.noBuys(T.day(info.scan)), [[cb(T.bWeek, "k"), cb(T.bTop, "t")]])
   return reply(T.buys(T.day(info.scan)) + "\n" + list.map(([sym, s]) => T.buyLine(esc(sym), px(s.e), px(s.s), px(s.t)))
     .join("\n") + "\n\n" + T.buysFoot, symbolButtons(list.map(([sym]) => sym)))
 }
@@ -424,9 +525,11 @@ function ask(state, cid, text, lang) {
   let m = TOP_RE.exec(text)
   if (m) return info ? top(info, +(m[1] || 10), lang) : reply(T.noData)
   if (BUYS_RE.test(text)) return info ? buys(info, lang) : reply(T.noData)
+  if (WEEK_RE.test(text)) return info ? week(info, lang) : reply(T.noData)
+  if (EGX30_RE.test(text)) return info ? egx30(info, lang) : reply(T.noData)
   if (HELP_RE.test(text)) {
     const app = appButton(info, lang)
-    return reply(T.help, [[cb(T.bBuys, "b"), cb(T.bTop, "t")], ...(app ? [[app]] : [])])
+    return reply(T.help, [...menuButtons(T), ...(app ? [[app]] : [])])
   }
   m = WHY_RE.exec(text)
   if (m) {
@@ -505,7 +608,7 @@ export async function respond(state, update) {
     if (subbed || (await sha(code)).slice(0, 16) !== state.fp) return null
     state.subs[cid] = { weekly: true, lang: langOf(state, cid, msg) }
     const T = L(state.subs[cid].lang), app = appButton(state.info, state.subs[cid].lang)
-    return reply(T.welcome, [[cb(T.bBuys, "b"), cb(T.bTop, "t")], ...(app ? [[app]] : [])])
+    return reply(T.welcome, [...menuButtons(T), ...(app ? [[app]] : [])])
   }
   if (!subbed) return null
   const lang = langOf(state, cid, msg), T = L(lang)
@@ -580,10 +683,11 @@ export function portfolioText(book, info, lang = "en", fresh = null) {
     const p = newer && newer[p0.symbol] ? { ...p0, ...newer[p0.symbol] } : p0
     const now = stocks[p.symbol], last = now && now.d >= (newer ? fresh.date : book.date || "") ? now.c : p.last
     worth += last * p.shares
-    const move = last / p.avg - 1
+    // like your broker's (and the website's): against what you paid with the buy fees; selling fees once you sell
+    const cost = p.avg * p.shares + (p.fees || 0), pnl = last * p.shares - cost
     const flag = p.stop != null && last <= p.stop ? T.atStop : p.target != null && last >= p.target ? T.atTarget : ""
     return `<b>${esc(p.symbol)}</b> ${p.shares.toLocaleString("en-US")} × ${px(p.avg)} → ${px(last)} ` +
-      `(${pct(move, true)}, ${move >= 0 ? "+" : "-"}${egp(Math.abs((last - p.avg) * p.shares))} EGP)${flag}\n` +
+      `(${pct(pnl / cost, true)}, ${pnl >= 0 ? "+" : "-"}${egp(Math.abs(pnl))} EGP)${flag}\n` +
       `   ${esc(T.status(p.status || ""))}${p.stop != null ? ` · ${T.stopW} ${px(p.stop)}` : ""}` +
       `${p.target != null ? ` · ${T.targetW} ${px(p.target)}` : ""}` +
       (p.status && p.status !== "HOLD" && p.reason ? `\n   ${esc(T.note(p.reason))}` : "")
@@ -594,6 +698,38 @@ export function portfolioText(book, info, lang = "en", fresh = null) {
     `${book.closed.total >= 0 ? "+" : "-"}${egp(Math.abs(book.closed.total))}`))
   return head.join("\n") + (lines.length ? "\n\n" + lines.join("\n") : "") +
     (newer ? T.fresh(T.day(fresh.date)) : T.foot(T.day(book.sent), T.day(info && info.scan)))
+}
+
+// A broker screenshot (parseHoldings) against the linked portfolio. Each stock is checked by what you paid, fees in:
+// the picture's market value − profit/loss (exact, whatever the price did since), or its average × shares (Thndr shows
+// the average to 2 decimals, so within half a piastre a share); the website's average × shares + buy fees.
+export function shotText(holdings, book, info, lang = "en") {
+  const T = L(lang), known = { stocks: (info && info.stocks) || {} }
+  if (!holdings.length) return T.shotNone
+  const mine = Object.fromEntries((book.positions || []).map(p => [p.symbol, p]))
+  const signed = v => `${v >= 0 ? "+" : "−"}${egp(Math.abs(v))}`
+  const seen = new Set(), lines = [T.shotHead]
+  let missing = 0
+  for (const h of holdings) {
+    const found = h.symbol && (known.stocks[h.symbol] || mine[h.symbol]) ? [h.symbol] : search(known, h.name || h.symbol || "")
+    const sym = found.length === 1 ? found[0] : h.symbol || h.name, p = mine[sym]
+    if (!p) {
+      missing += 1
+      lines.push(T.shotMissing(esc(sym), h.value ? egp(h.value) : "–", h.pnl != null ? signed(h.pnl) : "–"))
+      continue
+    }
+    seen.add(sym)
+    const site = p.avg * p.shares + (p.fees || 0), exact = h.value && h.pnl != null && h.value - h.pnl > 0
+    const paid = exact ? h.value - h.pnl : h.avg_price && (h.shares || p.shares) ? h.avg_price * (h.shares || p.shares) : null
+    const near = exact ? Math.max(3, site * 1e-4) : 0.005 * p.shares + 3
+    if (h.shares && h.shares !== p.shares) lines.push(T.shotShares(esc(sym), egp(h.shares), egp(p.shares)))
+    else if (paid == null) lines.push(T.shotSameShares(esc(sym), egp(p.shares)))
+    else if (Math.abs(paid - site) <= near) lines.push(T.shotSame(esc(sym), egp(site)))
+    else lines.push(T.shotDiff(esc(sym), egp(paid), egp(site)))
+  }
+  const only = Object.keys(mine).filter(s => !seen.has(s))
+  if (holdings.length > 1 && only.length) lines.push(T.shotOnly(only.map(esc).join(", ")))
+  return lines.join("\n") + "\n\n" + T.shotFoot(missing > 0)
 }
 
 export function watchlistText(book, info, lang = "en") {
@@ -613,26 +749,33 @@ export function watchlistText(book, info, lang = "en") {
 const READ_MODEL = "@cf/mistralai/mistral-small-3.1-24b-instruct"
 const MAX_IMAGE = 4_000_000                         // the picture as a data: URL, about 3 MB
 const READS_A_DAY = 20
+// Thndr's list of stocks shows each one's market value and profit/loss only (no share count or price): the website
+// works out the rest from them. Tested on Thndr's list and stock screens (2026-10).
 const READ_PROMPT = "This is a screenshot of a stock broker app on the Egyptian Exchange (for example Thndr). List " +
-  "every stock holding it shows. Answer with JSON only: {\"holdings\": [{\"symbol\": the ticker as shown or null, " +
-  "\"name\": the company name as shown or null, \"shares\": the number of shares, \"avg_price\": the average buy " +
-  "price or null, \"last\": the current price or null}]}. Plain numbers, without commas or currency. If it shows " +
-  "no holdings, answer {\"holdings\": []}."
+  "every stock holding it shows: there may be several. Answer with JSON only: {\"holdings\": [{\"symbol\": the " +
+  "ticker as shown or null, \"name\": the company name as shown or null, \"shares\": the number of shares (units) " +
+  "or null, \"avg_price\": the average buy price or null, \"last\": the price of one share now or null, \"value\": " +
+  "the holding's market value (its total worth now) or null, \"pnl\": its profit or loss in money, negative for a " +
+  "loss (red, a down arrow or a minus sign), or null}]}. In Thndr's list of stocks, the large amount beside each " +
+  "stock is its market value and the amount under it is its profit or loss; that list shows no share count or " +
+  "price, so give null for those. Plain numbers, without commas, currency or %. Not holdings: totals such as net " +
+  "worth, wallet, cash, stocks total or clouds. If it shows no holdings, answer {\"holdings\": []}."
 
-// The model's answer, checked: at most 40 rows, each with a share count; anything odd becomes null.
+// The model's answer, checked: at most 40 rows, each with a share count or a market value; anything odd becomes null.
 export function parseHoldings(text) {
   const m = /\{[\s\S]*\}/.exec(String(text || ""))
   let got
   try { got = JSON.parse(m ? m[0] : "") } catch { return [] }
-  const num = v => {
-    const x = typeof v === "string" ? Number(v.replace(/[,\s]|EGP|ج\.?م/gi, "")) : v
-    return typeof x === "number" && Number.isFinite(x) && x > 0 ? x : null
+  const signed = v => {
+    const x = typeof v === "string" && v.trim() ? Number(v.replace(/[,\s]|EGP|ج\.?م/gi, "").replace(/^[−–]/, "-")) : v
+    return typeof x === "number" && Number.isFinite(x) ? x : null
   }
+  const num = v => (signed(v) > 0 ? signed(v) : null)
   return (Array.isArray(got && got.holdings) ? got.holdings : []).slice(0, 40).map(h => ({
     symbol: typeof h.symbol === "string" && /^[A-Za-z0-9]{2,12}$/.test(h.symbol.trim()) ? h.symbol.trim().toUpperCase() : null,
     name: typeof h.name === "string" ? h.name.trim().slice(0, 80) : null,
-    shares: num(h.shares), avg_price: num(h.avg_price), last: num(h.last),
-  })).filter(h => h.shares && (h.symbol || h.name))
+    shares: num(h.shares), avg_price: num(h.avg_price), last: num(h.last), value: num(h.value), pnl: signed(h.pnl),
+  })).filter(h => (h.shares || h.value) && (h.symbol || h.name))
 }
 
 // ------------------------------------------------------------------ on-time scans
@@ -722,20 +865,21 @@ async function telegram(env, method, params) {
 // The bot's menu, in English and Arabic (Telegram shows the one matching each person's app language).
 const COMMANDS = {
   en: [["stock", "A stock's price, signal and chances"], ["buys", "Today's BUY signals"],
-       ["top", "Best chances to reach the target"], ["portfolio", "Your positions and what to do"],
+       ["week", "Next week's best chances"], ["top", "Best chances to reach the target"], ["egx30", "EGX30 in brief"], ["portfolio", "Your positions and what to do"],
        ["watchlist", "The stocks you starred"], ["watch", "Alert me about a stock"], ["unwatch", "Stop a stock's alerts"],
        ["why", "Why a stock is or isn't a BUY"], ["list", "My alerts"],
        ["quiet", "Only message me when there's something to do"], ["morning", "The 9:30 reminder on or off"],
        ["weekly", "The Thursday summary on or off"], ["lang", "العربية / English"], ["link", "Link your website portfolio"],
        ["unlink", "Unlink it"], ["help", "What I can do"], ["stop", "Stop all messages"]],
-  ar: [["stock", "سعر السهم وإشارته وفرصه"], ["buys", "إشارات الشراء اليوم"], ["top", "أفضل فرص الوصول للهدف"],
+  ar: [["stock", "سعر السهم وإشارته وفرصه"], ["buys", "إشارات الشراء اليوم"], ["week", "أفضل فرص الأسبوع القادم"],
+       ["top", "أفضل فرص الوصول للهدف"], ["egx30", "مؤشر EGX30 باختصار"],
        ["portfolio", "مراكزك وما تفعله"], ["watchlist", "الأسهم المميزة بنجمة"], ["watch", "نبّهني بخصوص سهم"],
        ["unwatch", "أوقف تنبيهات سهم"], ["why", "لماذا السهم إشارة شراء أو لا"], ["list", "تنبيهاتي"],
        ["quiet", "راسلني فقط عندما يوجد ما أفعله"], ["morning", "تذكير 9:30 تشغيل أو إيقاف"],
        ["weekly", "ملخص الخميس تشغيل أو إيقاف"], ["lang", "English / العربية"], ["link", "اربط محفظتك على الموقع"],
        ["unlink", "فك الربط"], ["help", "ما يمكنني فعله"], ["stop", "أوقف كل الرسائل"]],
 }
-const COMMANDS_VERSION = "2026-10-01"
+const COMMANDS_VERSION = "2026-10-04"
 
 // One Durable Object holds the data, so messages are handled one at a time, in order.
 export class Bot {
@@ -845,6 +989,7 @@ export class Bot {
     const msg = update.message || {}, chat = msg.chat || {}, text = (msg.text || "").trim(), cid = String(chat.id)
     if (chat.type !== "private" || !(cid in state.subs)) return null
     const store = this.ctx.storage, lang = langOf(state, cid, msg), T = L(lang)
+    if (msg.photo || /^image\/(png|jpeg|webp)$/.test((msg.document || {}).mime_type || "")) return this.shot(cid, msg, state, lang)
     if (LINK_RE.test(text)) {
       const bytes = crypto.getRandomValues(new Uint8Array(8))
       const code = [...bytes].map(b => CODE_CHARS[b % CODE_CHARS.length]).join("")
@@ -914,26 +1059,58 @@ export class Bot {
     if (raw.length > MAX_IMAGE) return json({ error: "That picture is too big. Try a plain screenshot." }, 413)
     let body
     try { body = JSON.parse(raw) } catch { return json({ error: "Bad request" }, 400) }
-    const cid = await this.owner(body.token), store = this.ctx.storage
+    const cid = await this.owner(body.token)
     if (!cid) return json({ error: "Not linked" }, 401)
     if (!this.env.AI) return json({ error: "The bot can't read pictures yet." }, 503)
     const image = String(body.image || "")
     if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(image)) {
       return json({ error: "Send a PNG or JPEG screenshot." }, 400)
     }
-    const day = new Date().toISOString().slice(0, 10), used = await store.get("reads:" + cid)
+    const got = await this.readImage(cid, image)
+    return got.error ? json({ error: got.error }, got.status) : json({ holdings: got.holdings })
+  }
+
+  // The day's limit (shared by the website and pictures sent here), then Cloudflare's AI: {holdings} or {error, status}.
+  async readImage(cid, image) {
+    const store = this.ctx.storage, day = new Date().toISOString().slice(0, 10), used = await store.get("reads:" + cid)
     const n = used && used.day === day ? used.n : 0
-    if (n >= READS_A_DAY) return json({ error: `That's ${READS_A_DAY} pictures today. Try again tomorrow.` }, 429)
+    if (n >= READS_A_DAY) return { error: `That's ${READS_A_DAY} pictures today. Try again tomorrow.`, status: 429 }
     await store.put("reads:" + cid, { day, n: n + 1 })
     let out
     try {
       out = await this.env.AI.run(READ_MODEL, { messages: [{ role: "user", content: [{ type: "text", text: READ_PROMPT },
         { type: "image_url", image_url: { url: image } }] }], max_tokens: 1500, temperature: 0 })
     } catch {
-      return json({ error: "The picture reader didn't answer. Try again in a minute." }, 502)
+      return { error: "The picture reader didn't answer. Try again in a minute.", status: 502 }
     }
     const text = out && (out.response ?? (out.choices && out.choices[0] && out.choices[0].message.content))
-    return json({ holdings: parseHoldings(text) })
+    return { holdings: parseHoldings(text) }
+  }
+
+  // A screenshot of your broker's holdings sent to the bot: read like the website's import, then checked against your
+  // linked portfolio (shotText). The picture isn't kept.
+  async shot(cid, msg, state, lang) {
+    const T = L(lang), book = await this.ctx.storage.get("book:" + cid)
+    if (!book) return reply(T.notLinked)
+    if (!this.env.AI) return reply(T.shotFail)
+    const doc = msg.photo ? msg.photo[msg.photo.length - 1] : msg.document
+    const mime = msg.photo ? "image/jpeg" : doc.mime_type
+    if (!doc.file_id || doc.file_size > MAX_IMAGE * 0.7) return reply(T.shotNone)
+    await this.send(cid, reply(T.shotReading))
+    let got
+    try {
+      const f = await telegram(this.env, "getFile", { file_id: doc.file_id })
+      const r = await fetch(`https://api.telegram.org/file/bot${this.env.BOT_TOKEN}/${f.result.file_path}`)
+      const bytes = new Uint8Array(await r.arrayBuffer())
+      let bin = ""
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+      got = await this.readImage(cid, `data:${mime};base64,${btoa(bin)}`)
+    } catch {
+      return reply(T.shotFail)
+    }
+    if (got.error) return reply(got.status === 429 ? T.shotLimit(READS_A_DAY) : T.shotFail)
+    const app = appButton(state.info, lang, "portfolio")
+    return reply(shotText(got.holdings, book, state.info, lang), app ? [[app]] : null)
   }
 
   async restore(body) {

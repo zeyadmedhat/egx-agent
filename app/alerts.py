@@ -362,6 +362,8 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
         names, more = [_e(r["symbol"]) for r in near[:3]], len(near) - 3
         lines.append(f"قريبة من الشراء: {'، '.join(names)}" + (f" و{more} أخرى" if more > 0 else "") + "." if ar else
                      f"Close to a BUY: {', '.join(names)}" + (f" and {more} more" if more > 0 else "") + ".")
+    if week := _week_line(d, lang):
+        lines.append(week)
     if personal:
         lines += personal
     if ar:
@@ -378,6 +380,20 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
                   "<i>Rules-based signals, not investment advice.</i> Send /stop to stop these messages."]
     text = "\n".join(lines)
     return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + ("\n…المزيد على الموقع." if ar else "\n…more on the site.")
+
+
+def _week_line(d: views.Data, lang: str = "en") -> str | None:
+    """Next week's three best chances (the site's Predictions → Next week), or, in a weak market, to skip short trades."""
+    wk, lt = predict.WEEK, predict.latest(d.conn)
+    if lt.empty or f"p{wk}" not in lt or lt[f"p{wk}"].isna().all():
+        return None
+    ar = lang == "ar"
+    if "level" in lt and (lt["level"] == "weak").any():
+        return ("الأسبوع القادم: السوق ضعيف، الأفضل تجنب الصفقات القصيرة (/week)." if ar else
+                "Next week: weak market, better to skip short trades (/week).")
+    best = lt.dropna(subset=[f"p{wk}"]).sort_values(f"rank{wk}").head(3)
+    names = ("، " if ar else ", ").join(f"{_e(s)} {r[f'p{wk}']:.0%}" for s, r in best.iterrows())
+    return f"أفضل فرص الأسبوع القادم: {names} (/week)." if ar else f"Next week's best chances: {names} (/week)."
 
 
 def _buy_line(r: dict, lang: str = "en") -> str:
@@ -787,6 +803,7 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
     preds = views.predictions(d)
     firms = views.company_brief(d)
     names = dict(conn.execute("SELECT symbol, name_ar FROM stocks").fetchall())
+    wk = predict.WEEK
     stocks = {}
     for sym, last in d.last_two().items():
         s = {"n": names.get(sym) or "", "c": last["close"], "d": last["date"],
@@ -798,6 +815,8 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
         for hz in (10, 20):
             if p.get(f"p{hz}") is not None:
                 s.update({f"p{hz}": _r(p[f"p{hz}"]), f"r{hz}": p.get(f"rank{hz}"), f"x{hz}": _r(p.get(f"exp{hz}"), 4)})
+        if p.get(f"p{wk}") is not None and p.get(f"move{wk}") is not None:   # next week: chance, rank, ± move, state
+            s.update(w=_r(p[f"p{wk}"]), wr=p.get(f"rank{wk}"), wm=_r(p[f"move{wk}"], 4), wl=p.get("level"))
         g = (preds["by_symbol"].get(sym) or {}).get("rating")
         if g is not None:
             s["g"] = g
@@ -820,11 +839,25 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
                      sup=_r(plan["supports"][0]["price"]) if plan["supports"] else None,
                      res=_r(plan["resistances"][0]["price"]) if plan["resistances"] else None)
         stocks[sym] = s
+    # /week: how its strong picks and the average stock did in the tests, how many are its top 10%, a weak market
+    test = (((predict.load_meta(predict.model_dir(conn)) or {}).get("horizons") or {}).get(str(wk)) or {}).get("week")
+    week = {"strong": _r(test["strong"]["hit"], 4), "all": _r(test["all"]["hit"], 4), "top": preds.get("top_n"),
+            "weak": any(s.get("wl") == "weak" for s in stocks.values())} if test else None
+    # /egx30: the index in brief (views.index_view, the website's EGX30 page)
+    x = views.index_view(d)
+    x30 = None
+    if x.get("has_data"):
+        per = {p["key"]: p for p in x["periods"]}
+        x30 = {"d": x["date"], "c": _r(x["close"], 2), "ch": _r(x["change"], 4), "e50": _r(x["ema50"], 2),
+               "r": {k: _r((per.get(k) or {}).get("egp"), 4) for k in ("1W", "1M", "YTD", "1Y")},
+               "u": {k: _r((per.get(k) or {}).get("usd"), 4) for k in ("YTD", "1Y")},
+               "ath": _r(x["from_ath"], 4), "hi": _r(x["high52"], 2), "lo": _r(x["low52"], 2),
+               "off": x["close"] < x["ema50"], "blk": bool(cfg.get("riskoff_block_buys")), "b50": _r(x["above50"], 3)}
     # final: False while the scan is one taken during the session (the Worker then still asks for the one after it)
     return {"scan": scan_date, "final": scan.scan_is_final(conn), "pred": db.get_meta(conn, "prediction_date"),
             "stocks": stocks, "bands": [[b["from"], b["to"], _r(b["hit"], 4), _r(b["ret"], 4)] for b in preds.get("bands") or []],
             "base10": _r((preds.get("base") or {}).get("10"), 4), "rated": preds.get("count") or 0,
-            "min_value": cfg["min_avg_value_egp"]}
+            "min_value": cfg["min_avg_value_egp"], "week": week, "x30": x30}
 
 
 def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None, extra: dict | None = None) -> dict:
