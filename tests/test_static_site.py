@@ -532,6 +532,22 @@ def test_editing_a_transaction_rebuilds_the_trade_as_if_logged_right():
     assert not oversold["ok"] and "you held 200" in oversold["error"]
 
 
+def test_a_price_with_the_fees_in_it_adds_no_fees_and_keeps_that_when_edited():
+    """Thndr's average cost has its fees in it: logged as such (the screenshot import does it), the site adds none,
+    so the loss matches Thndr's (KORA: 12,299 at an exact average of 6.43298, now 6.18: Thndr says −3,111.38)."""
+    cfg = {**config.DEFAULTS, "broker": "thndr_trader"}
+    buy = {"op": "buy", "symbol": "AAA", "sector": "Banks", "stop": None, "notes": "", "atr": 0.3, "date": "2026-01-04",
+           "shares": 12_299, "price": 6.43298, "fees_in": True}
+    a, b = run_js({"op": "real", "args": {"cfg": cfg, "events": [], "steps": [{**buy, "closes": {"AAA": 6.18}}]}},
+                  {"op": "real", "args": {"cfg": cfg, "events": [], "steps": [
+                      buy, {"op": "edit", "fill": 0, "set": {"price": 6.43}, "atr": 0.3}]}})
+    assert a["trades"][0]["fees"] == 0 and a["fills"][0]["fees_in"] is True
+    assert b["trades"][0]["fees"] == 0 and b["trades"][0]["entry_price"] == 6.43       # edited: still no fees added
+    assert a["summary"]["unrealized"] == pytest.approx(-3_111.38, abs=0.5)
+    plain, = run_js({"op": "real", "args": {"cfg": cfg, "events": [], "steps": [{**buy, "fees_in": False}]}})
+    assert plain["trades"][0]["fees"] == pytest.approx(config.order_fee(6.43298 * 12_299, cfg))
+
+
 def test_thndr_fees_match_on_the_site_and_the_mac():
     from app import views
     thndr = {**config.DEFAULTS, "broker": "thndr"}

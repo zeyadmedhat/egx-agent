@@ -67,6 +67,7 @@ class BuyIn(BaseModel):
     shares: int = Field(ge=1)
     stop: float | None = Field(default=None, ge=0)
     notes: str = Field(default="", max_length=500)
+    fees_in: bool = False          # the price is your broker's average cost, fees already in it
 
 
 class SellIn(BaseModel):
@@ -516,6 +517,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def market(d: views.Data = Depends(get_data)):
         return JSON(views.market_view(d))
 
+    @app.get("/api/egx30")
+    def egx30(d: views.Data = Depends(get_data)):
+        return JSON(views.index_view(d))
+
     @app.put("/api/orders/check")
     def order_check(body: CheckIn, conn=Depends(get_conn)):
         if body.done:
@@ -546,7 +551,7 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
         had = portfolio.open_position(d.conn, "real", sym) is not None
         portfolio.add_real_buy(d.conn, d.cfg, sym, str(body.date), body.price, body.shares, atr,
                                sector=d.info(sym).get("sector") or "", stop=body.stop or None,
-                               notes=body.notes.strip(), chart=chart)
+                               notes=body.notes.strip(), chart=chart, fees_in=body.fees_in)
         pos = portfolio.open_position(d.conn, "real", sym)
         if had:
             msg = (f"Added {body.shares:,} {sym} to your position: now {pos['shares']:,} shares at an average of "

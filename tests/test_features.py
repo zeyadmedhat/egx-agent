@@ -90,6 +90,19 @@ def test_paper_trades_follow_bonus_shares_by_themselves(tmp_path):
     assert corporate.apply_paper(conn) == 0      # only once
 
 
+def test_open_pnl_is_counted_like_the_broker(client):  # noqa: F811
+    """Like Thndr: market value minus what you paid with the buy fees, no selling fee until you sell. A price copied
+    from the broker's average cost (fees_in) already has the fees in it, so none are added."""
+    client.post("/api/portfolio/buy", headers=H, json={"symbol": "AAA", "date": "2025-02-02", "price": 12, "shares": 100})
+    p = client.get("/api/portfolio").json()["positions"][0]
+    assert p["fees"] > 0 and p["pnl"] == pytest.approx((p["last"] - 12) * 100 - p["fees"])
+    assert p["pnl_pct"] == pytest.approx(p["pnl"] / (1200 + p["fees"]))
+    client.post("/api/portfolio/buy", headers=H, json={"symbol": "BBB", "date": "2025-02-02", "price": 20, "shares": 50,
+                                                      "fees_in": True})
+    q = next(x for x in client.get("/api/portfolio").json()["positions"] if x["symbol"] == "BBB")
+    assert q["fees"] == 0 and q["pnl"] == pytest.approx((q["last"] - 20) * 50)
+
+
 # ------------------------------------------------------------------ dividends
 
 def test_dividends_count_in_pnl_and_can_be_removed(client):  # noqa: F811

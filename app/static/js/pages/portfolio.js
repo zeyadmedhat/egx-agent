@@ -6,7 +6,7 @@ import {
 } from '../lib.js';
 import {
   Icon, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, Field,
-  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard,
+  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard, Switch,
 } from '../ui.js';
 import { t, tn, tp } from '../i18n.js';
 import { LineChart } from '../charts.js';
@@ -30,7 +30,7 @@ export function PortfolioPage({ route }) {
   if (!data) return html`<${PageLoading} error=${error} />`;
   const s = data.summary;
   const openClosed = data.closed.find(r => r.id === closedId) || null;
-  const list = data.positions.map(p => livePosition(p, q, data.fee_pct));
+  const list = data.positions.map(p => livePosition(p, q));
   const live = list.some(p => p.live);
   const openPnl = list.reduce((a, p) => a + p.pnl, 0);
   const equity = s.equity + list.reduce((a, p) => a + (p.price - p.last) * p.shares, 0);
@@ -59,7 +59,7 @@ export function PortfolioPage({ route }) {
         sub=${`${fmt.pct(equity / s.start - 1)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
         subClass=${s.cash < 0 ? 'warn' : tone(equity / s.start - 1)} />
       <${Kpi} label="Open profit / loss" value=${fmt.signed(openPnl)} valueClass=${tone(openPnl)}
-        sub=${live ? 'EGP after fees, live (~15 min late)' : 'EGP after fees, at the last close'} />
+        sub=${live ? 'EGP after buy fees, live (~15 min late)' : 'EGP after buy fees, at the last close'} />
       <${Kpi} label="Closed profit / loss" value=${fmt.signed(s.realized)} valueClass=${tone(s.realized)}
         sub=${s.dividends ? t('EGP after fees · incl. {n} dividends', { n: fmt.int(s.dividends) }) : 'EGP after fees'} />
       <${Kpi} label="Loss if all stops hit" value=${fmt.short(s.open_risk)}
@@ -98,7 +98,7 @@ export function PortfolioPage({ route }) {
       ${openClosed && html`<${ClosedDetail} r=${openClosed} data=${data} onClose=${() => setClosedId(null)} />`}
       <p class="faint" style="font-size:12.5px;margin-top:10px">${t('Starting capital {v}', { v: fmt.egp(s.start) })}${' '}
         (<a href="#/settings">${t('change it in Settings')}</a>). ${data.fee_cfg.broker === 'other' ? t('Profit and loss include {fee}% fees each way.', { fee: data.fee_pct })
-          : t("Profit and loss include Thndr's fees each way.")}</p>
+          : t("Profit and loss include Thndr's fees each way.")} ${t('Open positions count the buy fees only, like your broker: the selling fees count once you sell.')}</p>
     </section>`}`;
 }
 
@@ -403,10 +403,17 @@ function Fills({ fills, tradeId, data, onRemoveDividend }) {
 const SIDES = [{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }];
 
 // Add a buy or sale to a trade, or edit one (fill).
+// The price is your broker's average cost (Thndr's has its fees in it): then the site adds none, or they'd count twice.
+function FeesIn({ on, onChange }) {
+  return html`<div class="fees-in"><${Switch} checked=${on} onChange=${onChange}
+    label=${t("The price is my broker's average cost (fees already in it)")} />
+    <div class="f-help">${t("Thndr's average cost already includes its fees. Switch this on when you copy it from there, so they aren't counted twice. For its exact average: (Market value − Profit/Loss) ÷ Units.")}</div></div>`;
+}
+
 function FillForm({ fill, tradeId, data, onClose }) {
   const [form, setForm] = useState(fill
-    ? { side: fill.side, date: fill.date, shares: String(fill.shares), price: String(fill.price), note: fill.note || '' }
-    : { side: 'buy', date: todayISO(), shares: '', price: '', note: '' });
+    ? { side: fill.side, date: fill.date, shares: String(fill.shares), price: String(fill.price), note: fill.note || '', feesIn: !!fill.fees_in }
+    : { side: 'buy', date: todayISO(), shares: '', price: '', note: '', feesIn: false });
   const [busy, setBusy] = useState(false);
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
   const shares = parseInt(form.shares, 10) || 0, price = parseFloat(form.price) || 0;
@@ -417,7 +424,8 @@ function FillForm({ fill, tradeId, data, onClose }) {
     e.preventDefault();
     if (!valid) return;
     setBusy(true);
-    const body = { side: form.side, date: form.date, shares, price, note: sell ? (form.note || data.sell_reasons[0]) : form.note };
+    const body = { side: form.side, date: form.date, shares, price, note: sell ? (form.note || data.sell_reasons[0]) : form.note,
+      fees_in: !sell && form.feesIn };
     try {
       const r = fill ? await api(`/portfolio/fills/${fill.id}`, { method: 'PUT', body })
         : await api(`/portfolio/${tradeId}/fills`, { method: 'POST', body });
@@ -441,8 +449,10 @@ function FillForm({ fill, tradeId, data, onClose }) {
       ${sell && html`<${Field} label="Reason"><select class="input" value=${form.note || data.sell_reasons[0]} onChange=${set('note')}>
         ${reasons.map(r => html`<option value=${r}>${tn(r)}</option>`)}</select><//>`}
     </div>
+    ${!sell && html`<${FeesIn} on=${form.feesIn} onChange=${v => setForm(f => ({ ...f, feesIn: v }))} />`}
     <div class="form-foot">
-      <span class="preview">${valid ? html`${t('Fees')} <b>${fmt.egp(orderFee(price * shares, data.fee_cfg), 2)}</b>` : t('Enter the shares and price.')}</span>
+      <span class="preview">${!valid ? t('Enter the shares and price.') : !sell && form.feesIn ? t('(fees already in the price)')
+        : html`${t('Fees')} <b>${fmt.egp(orderFee(price * shares, data.fee_cfg), 2)}</b>`}</span>
       <span class="row" style="gap:8px">
         <button class="btn ghost" type="button" onClick=${onClose}>${t('Cancel')}</button>
         <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="check" />${t('Save')}</button></span>
@@ -552,7 +562,7 @@ function DividendForm({ p, onClose }) {
 
 function BuyForm({ data, query }) {
   const stocks = useStore(s => s.stocks);
-  const blank = { symbol: '', date: todayISO(), price: '', shares: '', stop: '', notes: '' };
+  const blank = { symbol: '', date: todayISO(), price: '', shares: '', stop: '', notes: '', feesIn: false };
   const [form, setForm] = useState(() => ({ ...blank, symbol: query.buy || '', price: query.price || '', shares: query.shares || '' }));
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -576,9 +586,9 @@ function BuyForm({ data, query }) {
 
   let preview = null;
   if (valid) {
-    const cost = price * shares, fees = orderFee(cost, data.fee_cfg);
+    const cost = price * shares, fees = form.feesIn ? 0 : orderFee(cost, data.fee_cfg);
     preview = html`<div class="preview-box">
-      <span>Cost <b>${fmt.egp(cost)}</b> + fees <b>${fmt.egp(fees, 2)}</b> · cash after <b class=${data.summary.cash - cost - fees < 0 ? 'down' : ''}>${fmt.egp(data.summary.cash - cost - fees)}</b></span>
+      <span>Cost <b>${fmt.egp(cost)}</b> ${form.feesIn ? t('(fees already in the price)') : html`+ fees <b>${fmt.egp(fees, 2)}</b>`} · cash after <b class=${data.summary.cash - cost - fees < 0 ? 'down' : ''}>${fmt.egp(data.summary.cash - cost - fees)}</b></span>
       <span>${held
         ? html`Joins your ${held.symbol} position: ${fmt.int(held.shares)} → <b>${fmt.int(held.shares + shares)}</b> shares at a new average of
             <b>${fmt.price((held.avg_price * held.shares + cost) / (held.shares + shares))}</b>. Stop and target are recalculated from the average${stop ? ' (using your stop)' : ''}.`
@@ -592,7 +602,7 @@ function BuyForm({ data, query }) {
     setBusy(true);
     try {
       const r = await api('/portfolio/buy', { method: 'POST', body: {
-        symbol: form.symbol, date: form.date, price, shares, stop: stop || null, notes: form.notes } });
+        symbol: form.symbol, date: form.date, price, shares, stop: stop || null, notes: form.notes, fees_in: form.feesIn } });
       toast(r.message);
       setForm(blank);
       if (query.buy) go('#/portfolio');
@@ -609,7 +619,7 @@ function BuyForm({ data, query }) {
       <${Field} label="Stock"><${StockPicker} value=${form.symbol} onChange=${pick} starred=${signals}
         placeholder=${t('Search symbol or name…')} /><//>
       <${Field} label="Buy date"><input class="input" type="date" value=${form.date} onInput=${set('date')} required /><//>
-      <${Field} label="Price paid"><input class="input" type="number" min="0.01" step="0.01" value=${form.price}
+      <${Field} label="Price paid"><input class="input" type="number" min="0.001" step="any" value=${form.price}
         onInput=${set('price')} placeholder="0.00" required /><//>
       <${Field} label="Shares"><input class="input" type="number" min="1" step="1" value=${form.shares}
         onInput=${set('shares')} placeholder="0" required /><//>
@@ -620,6 +630,7 @@ function BuyForm({ data, query }) {
         step="0.01" value=${form.stop} onInput=${set('stop')} placeholder=${t('automatic')} /><//>
       <${Field} label="Notes (optional)"><input class="input" value=${form.notes} onInput=${set('notes')} maxlength="500" /><//>
     </div>
+    <${FeesIn} on=${form.feesIn} onChange=${v => setForm(f => ({ ...f, feesIn: v }))} />
     <div class="form-foot">
       <div style="flex:1;min-width:260px">${preview || html`<span class="faint" style="font-size:12.5px">${t("⭐ = today's BUY signals. Buying more of a stock you already hold adds the shares to that position at the average price, and the 1-month limit keeps counting from your first buy.")}</span>`}</div>
       <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="plus" />${t('Save buy')}</button>
@@ -708,7 +719,7 @@ function ImportPanel({ data }) {
     for (const r of chosen) {
       try {
         await api('/portfolio/buy', { method: 'POST', body: { symbol: r.symbol, date, price: parseFloat(r.price),
-          shares: parseInt(r.shares, 10), stop: null, notes: t('Added from a screenshot') } });
+          shares: parseInt(r.shares, 10), stop: null, notes: t('Added from a screenshot'), fees_in: !r.guessed } });
         done += 1;
         setRows(rs => rs.filter(x => x.id !== r.id));
       } catch (err) {

@@ -107,7 +107,7 @@ async function openPositions(c, symbol = null) {
     const fees = r.fees || 0;
     const div = divs[r.id] || 0;
     const fills = E.fillsOf(book, r.id).map(f => ({ id: f.id, date: f.date, side: f.side, shares: f.shares,
-      price: f.price, fees: f.fees, note: f.note }));
+      price: f.price, fees: f.fees, note: f.note, fees_in: !!f.fees_in }));
     for (const x of book.dividends.filter(d => d.trade_id === r.id).sort((a, b2) => (a.date < b2.date ? -1 : 1))) {
       fills.push({ id: null, dividend_id: x.id, date: x.date, side: 'dividend', shares: x.shares,
         price: x.shares ? x.amount / x.shares : null, fees: 0, amount: x.amount, note: x.note || '' });
@@ -117,8 +117,9 @@ async function openPositions(c, symbol = null) {
     return {
       id: r.id, symbol: r.symbol, info: info(c, r.symbol), status: stt.status, reason: stt.reason,
       first_buy: r.entry_date, avg_price: r.entry_price, shares: r.shares, last, value: worth * r.shares,
-      pnl_pct: worth / r.entry_price - 1,
-      pnl: (worth - r.entry_price) * r.shares - fees - E.orderFee(worth * r.shares, cfg) + div,
+      // like your broker: against what you paid with the buy fees; selling fees count once you sell
+      pnl_pct: ((worth - r.entry_price) * r.shares - fees) / (r.entry_price * r.shares + fees),
+      pnl: (worth - r.entry_price) * r.shares - fees + div,
       stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target,
       stop_src: r.stop_src || null, target_src: r.target_src || null, day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
       notes: r.notes || '', fills, adjust: ev || null, n_buys: fills.filter(f => f.side === 'buy').length || 1,
@@ -476,7 +477,7 @@ async function buy(c, body) {
   const had = !!E.openPosition(c.book, 'real', sym);
   const { chart } = marketAt(bars, c.cfg)(date);
   E.addRealBuy(c.book, c.cfg, sym, date, price, shares, atr, info(c, sym).sector || '', stop || null,
-    String(body.notes || '').trim().slice(0, 500), chart);
+    String(body.notes || '').trim().slice(0, 500), chart, !!body.fees_in);
   saveBook(c.book);
   const pos = E.openPosition(c.book, 'real', sym);
   const message = had
@@ -597,7 +598,11 @@ async function editFill(c, fid, body) {
   const f = c.book.fills.find(x => x.id === fid);
   if (!f || !['buy', 'sell'].includes(f.side)) fail(404, 'This transaction no longer exists. Refresh the page.');
   const v = fillBody({ note: f.note, ...body }, f.side);
-  const { symbol, trade } = await changeTrade(c, f.trade_id, () => Object.assign(f, v, { fees: E.orderFee(v.price * v.shares, c.cfg) }));
+  const feesIn = f.side === 'buy' && (body.fees_in ?? !!f.fees_in);   // the price already has the fees in it
+  const { symbol, trade } = await changeTrade(c, f.trade_id, () => {
+    Object.assign(f, v, { fees: feesIn ? 0 : E.orderFee(v.price * v.shares, c.cfg) });
+    if (feesIn) f.fees_in = true; else delete f.fees_in;
+  });
   return { message: changedMsg(symbol, trade) };
 }
 
@@ -613,8 +618,9 @@ async function addFillTo(c, id, body) {
   const v = fillBody(body, side);
   const t = c.book.trades.find(x => x.id === id && x.account === 'real');
   if (!t) fail(404, 'This trade no longer exists. Refresh the page.');
+  const feesIn = side === 'buy' && !!body.fees_in;
   const { symbol, trade } = await changeTrade(c, id, () => c.book.fills.push({ id: E.nextId(c.book), trade_id: id,
-    symbol: t.symbol, side, ...v, fees: E.orderFee(v.price * v.shares, c.cfg) }));
+    symbol: t.symbol, side, ...v, fees: feesIn ? 0 : E.orderFee(v.price * v.shares, c.cfg), ...(feesIn ? { fees_in: true } : {}) }));
   return { message: changedMsg(symbol, trade) };
 }
 
@@ -840,6 +846,7 @@ async function route(path, { method = 'GET', body } = {}) {
       case 'news': return newsView(c);
       case 'watchlist': return { symbols: c.book.watchlist || [] };
       case 'market': return load('market');
+      case 'egx30': return load('egx30');
       case 'predict': return predictView(c);
       case 'quotes': return quotes(c, path);
       case 'settings': return settingsView(c);

@@ -145,7 +145,7 @@ function MarketCard({ m, spark, blocked, b }) {
 // Your positions as cards: what to do, the price and profit/loss (live during the session), stop to target.
 function Positions({ positions, cfg, alerts }) {
   const q = useQuotes(positions.map(p => p.symbol));
-  const list = positions.map(p => livePosition(p, q, cfg.fee_pct_per_side || 0));
+  const list = positions.map(p => livePosition(p, q));
   const total = list.reduce((s, p) => s + p.pnl, 0);
   return html`<section class="section">
     <${SectionHead} title="Your open positions" count=${positions.length}

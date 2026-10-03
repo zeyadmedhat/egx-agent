@@ -276,8 +276,9 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
             "id": int(r.id), "symbol": r.symbol, "info": d.info(r.symbol), "status": stt["status"],
             "reason": stt["reason"], "first_buy": r.entry_date, "avg_price": float(r.entry_price),
             "shares": int(r.shares), "last": last, "value": worth * int(r.shares),
-            "pnl_pct": worth / float(r.entry_price) - 1,
-            "pnl": (worth - r.entry_price) * r.shares - fees - config.order_fee(worth * r.shares, d.cfg) + div,
+            # like your broker: against what you paid with the buy fees; selling fees count once you sell
+            "pnl_pct": ((worth - r.entry_price) * r.shares - fees) / (r.entry_price * r.shares + fees),
+            "pnl": (worth - r.entry_price) * r.shares - fees + div,
             "stop": stt["stop"], "prev_stop": stt.get("prev_stop"), "initial_stop": float(r.initial_stop),
             "target": float(r.target), "day": int(stt["days_held"]),
             "sell_by": sessions_after(r.entry_date, d.cfg["max_hold_days"] - 1),
@@ -1027,6 +1028,72 @@ def market_view(d: Data) -> dict:
         return {"breadth": None, "market": m or None, "results": results_calendar(d)}
     return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("risk_off") if m else None), "market": m or None,
                   "results": results_calendar(d), **movers(d)})
+
+
+INDEX_PERIODS = (("1W", 5), ("1M", 21), ("3M", 63), ("6M", 126), ("1Y", 250), ("3Y", 750), ("5Y", 1250))
+
+
+def index_view(d: Data) -> dict:
+    """The EGX30 page: its chart with its averages, where it stands against them and its 1-year range, its returns
+    over each period and each calendar year in pounds and in dollars (and EGX70's beside it), how jumpy it is, and
+    the agent's own rule about it (no new BUYs while it is under its 50-day average)."""
+    def build():
+        df = db.load_prices(d.conn, prices.INDEX_SYMBOL)
+        if len(df) < 60:
+            return {"has_data": False}
+        ind = add_indicators(df)
+        c = ind["close"]
+        ema200 = c.ewm(span=200, adjust=False).mean()
+        last, year = ind.iloc[-1], ind.tail(250)
+        daily = c.pct_change(fill_method=None).tail(250).dropna()
+        raw = db.load_macro(d.conn)
+        def on_days(name):     # a macro series on the index's days (the last value known each day), or None
+            if raw.empty or name not in raw or raw[name].dropna().empty:
+                return None
+            v = raw[name].dropna()
+            return v.reindex(v.index.union(c.index)).ffill().reindex(c.index)
+        usd, e70 = on_days("usdegp"), on_days("egx70")
+        in_usd = c / usd if usd is not None else None
+
+        def ret(s, n):
+            s = s.dropna() if s is not None else None
+            return float(s.iloc[-1] / s.iloc[-1 - n] - 1) if s is not None and len(s) > n else None
+
+        start = c[c.index.year < c.index[-1].year]    # this year so far: from last year's final close
+        periods = [{"key": k, "egp": ret(c, n), "usd": ret(in_usd, n), "egx70": ret(e70, n)} for k, n in INDEX_PERIODS]
+        if len(start):
+            ytd = lambda s: float(s.iloc[-1] / s.loc[:start.index[-1]].dropna().iloc[-1] - 1) \
+                if s is not None and s.loc[:start.index[-1]].notna().any() else None  # noqa: E731
+            periods.insert(4, {"key": "YTD", "egp": ytd(c), "usd": ytd(in_usd), "egx70": ytd(e70)})
+        years = []
+        ends = c.groupby(c.index.year).tail(1)            # each year's last close
+        for i in range(1, len(ends)):
+            a, b = ends.index[i - 1], ends.index[i]
+            yr = {"year": int(b.year), "egp": float(ends.iloc[i] / ends.iloc[i - 1] - 1), "partial": b == c.index[-1]}
+            if in_usd is not None and pd.notna(in_usd.get(a)) and pd.notna(in_usd.get(b)):
+                yr["usd"] = float(in_usd[b] / in_usd[a] - 1)
+            years.append(yr)
+        peak = c.cummax()
+        m = market_info(d.conn)
+        b = breadth_data(d)
+        return {
+            "has_data": True, "date": str(ind.index[-1].date()), "close": float(last.close),
+            "change": float(last.close / ind["close"].iloc[-2] - 1), "ema20": float(last.ema20), "ema50": float(last.ema50),
+            "ema200": float(ema200.iloc[-1]), "rsi14": float(last.rsi14), "high52": float(year["high"].max()),
+            "low52": float(year["low"].min()), "ath": float(peak.iloc[-1]), "ath_date": str(c.idxmax().date()),
+            "from_ath": float(c.iloc[-1] / peak.iloc[-1] - 1), "usd_close": float(in_usd.iloc[-1]) if in_usd is not None else None,
+            "volatility": float(daily.std() * np.sqrt(245)), "up_days": float((daily > 0).mean()),
+            "best_day": {"date": str(daily.idxmax().date()), "ret": float(daily.max())},
+            "worst_day": {"date": str(daily.idxmin().date()), "ret": float(daily.min())},
+            "drop_1y": float((year["close"] / year["close"].cummax() - 1).min()),
+            "periods": periods, "years": years[-10:][::-1], "risk_off": bool(m.get("risk_off")) if m else None,
+            "above50": b["above50"] if b else None,
+            "series": {"time": [str(t.date()) for t in ind.index], **{k: column(ind[k]) for k in SERIES_COLS}},
+            # weekly points, counted back from the last close so the chart ends on it
+            "usd_line": [{"time": str(t.date()), "value": round(float(v), 2)} for t, v in in_usd.dropna().iloc[::-5][::-1].items()]
+            if in_usd is not None else [],
+        }
+    return clean(d.cache.get(d.version, "egx30", build))
 
 
 def predictions(d: Data) -> dict:

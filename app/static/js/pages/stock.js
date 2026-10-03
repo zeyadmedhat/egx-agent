@@ -109,8 +109,7 @@ export function StockPage({ route }) {
         <aside class="stack">
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
-          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes}
-            fee=${data.fee_pct} />`}
+          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes} />`}
           ${data.signal && html`<${SignalPanel} data=${data} />`}
           ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} />`}
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
@@ -388,11 +387,11 @@ const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower
 
 // Your position: the same card as Today and My Portfolio (live price, P&L, stop to target), and where the stop and
 // target come from. The stop rises to each new support under the price (egx_agent/engine.py); the target stays.
-function PositionPanel({ p, hold, c, atr, quotes, fee }) {
+function PositionPanel({ p, hold, c, atr, quotes }) {
   const next = p.stop != null && c ? nextTarget(p, c, atr) : null;
   const sw = p.stop != null ? stopWhy(p, c, atr) : '';
   const tw = targetWhy(p, c, atr);
-  return html`<${PositionCard} p=${livePosition(p, quotes, fee)} hold=${hold}>
+  return html`<${PositionCard} p=${livePosition(p, quotes)} hold=${hold}>
     ${(sw || tw || next) && html`<${More} label="Where the stop and target come from"><ul class="level-why">
       ${sw && html`<li><b class="down">${t('Stop')}</b> ${sw}</li>`}
       ${tw && html`<li><b class="up">${t('Target')}</b> ${tw}</li>`}

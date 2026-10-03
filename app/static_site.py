@@ -142,7 +142,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "money": views.money_rates(conn),
         "company": views.company_brief(d),     # each company's results in brief: the BUY cards and Close to a BUY
     }
-    out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
+    out: dict[str, object] = {"core": core, "market": views.market_view(d), "egx30": views.index_view(d),
+                              "predict": views.predict_public(d),
                               "screener": views.screener(d), "history": views.history_data(d),
                               "dividends": views.dividend_calendar(d), "news": views.news_feed(d)}
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}

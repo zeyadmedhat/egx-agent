@@ -23,7 +23,7 @@ const OPS = {
     const book = emptyBook();
     const out = [];
     for (const s of steps) {
-      if (s.op === 'buy') out.push(E.addRealBuy(book, cfg, s.symbol, s.date, s.price, s.shares, s.atr, s.sector, s.stop, s.notes));
+      if (s.op === 'buy') out.push(E.addRealBuy(book, cfg, s.symbol, s.date, s.price, s.shares, s.atr, s.sector, s.stop, s.notes, null, !!s.fees_in));
       if (s.op === 'sell') out.push(E.sellReal(book, cfg, s.trade_id, s.date, s.price, s.shares, s.reason));
       if (s.op === 'dividend') out.push(E.addDividend(book, s.trade_id, s.date, s.amount, s.note).per_share);
       if (s.op === 'pending') out.push(E.pending(book, events, 'real'));
@@ -33,7 +33,7 @@ const OPS = {
       if (s.op === 'edit') {
         const f = book.fills[s.fill];
         Object.assign(f, s.set);
-        f.fees = E.orderFee(f.price * f.shares, cfg);
+        f.fees = f.fees_in ? 0 : E.orderFee(f.price * f.shares, cfg);   // a price with the fees in it keeps none
         out.push(E.rebuildTrade(book, cfg, f.trade_id, at) && 'ok');
       }
       if (s.op === 'delfill') {

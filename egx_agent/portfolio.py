@@ -88,10 +88,11 @@ def _merge_buy(conn: sqlite3.Connection, cfg: dict, pos: sqlite3.Row, date: str,
 
 def add_real_buy(conn: sqlite3.Connection, cfg: dict, symbol: str, date: str, price: float, shares: int,
                  atr: float, sector: str = "", stop: float | None = None, notes: str = "",
-                 chart: dict | None = None) -> int:
+                 chart: dict | None = None, fees_in: bool = False) -> int:
     """Log a buy. If you already hold this stock, the shares join that position at the average price. chart: the
-    stock's chart levels on the buy date (levels.plan_at), for the automatic stop and target."""
-    fee = config.order_fee(price * shares, cfg)
+    stock's chart levels on the buy date (levels.plan_at), for the automatic stop and target. fees_in: the price is
+    your broker's average cost, which already has the fees in it (Thndr's does), so none are added."""
+    fee = 0.0 if fees_in else config.order_fee(price * shares, cfg)
     pos = open_position(conn, "real", symbol)
     if pos is None:
         new_stop, target = _levels(price, atr, cfg, stop, chart)

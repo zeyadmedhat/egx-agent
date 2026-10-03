@@ -12,6 +12,7 @@ import { AdminPage } from './pages/admin.js';
 import { TodayPage, SignalsPage } from './pages/today.js';
 import { MarketPage } from './pages/market.js';
 import { HeatmapPage } from './pages/heatmap.js';
+import { Egx30Page } from './pages/egx30.js';
 import { PredictPage } from './pages/predict.js';
 import { StockPage } from './pages/stock.js';
 import { CalcPage } from './pages/calc.js';
@@ -47,7 +48,7 @@ const TELEGRAM = (() => {
 
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
 const PAGES = Object.fromEntries(Object.entries({
-  today: TodayPage, signals: SignalsPage, news: NewsPage, market: MarketPage, heatmap: HeatmapPage, predict: PredictPage, dividends: DividendsPage,
+  today: TodayPage, signals: SignalsPage, news: NewsPage, market: MarketPage, egx30: Egx30Page, heatmap: HeatmapPage, predict: PredictPage, dividends: DividendsPage,
   stock: StockPage, screener: ScreenerPage, watchlist: WatchlistPage, portfolio: PortfolioPage, paper: PaperPage,
   calc: CalcPage, backtest: BacktestPage, settings: SettingsPage, admin: AdminPage,
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
@@ -57,7 +58,7 @@ const PAGES = Object.fromEntries(Object.entries({
 const SECTIONS = [
   { id: 'today', label: 'Today', icon: 'activity', tabs: [['today', 'Summary'], ['signals', 'Signals'], ['news', 'News']] },
   { id: 'market', label: 'Market', icon: 'bars',
-    tabs: [['market', 'Overview'], ['heatmap', 'Heatmap'], ['predict', 'Predictions'], ['dividends', 'Dividends & results']] },
+    tabs: [['market', 'Overview'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['predict', 'Predictions'], ['dividends', 'Dividends & results']] },
   { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist']] },
   { id: 'portfolio', label: 'Portfolio', icon: 'briefcase',
     tabs: [['portfolio', 'My portfolio'], ['paper', 'Practice'], ['calc', 'Calculator'], ['backtest', 'Rules test']] },
@@ -105,7 +106,7 @@ function TopBar({ page, onMenu, menuOpen }) {
 function IndexChip() {
   const m = useStore(s => s.status && s.status.market);
   if (!m || m.egx30_close == null) return null;
-  return html`<a class="index-chip" href="#/market" title=${t('Data: {date} close', { date: fmt.date(m.date) })}>
+  return html`<a class="index-chip" href="#/egx30" title=${t('Data: {date} close', { date: fmt.date(m.date) })}>
     <span class=${cls('dot', m.risk_off ? 'warn' : 'up')} title=${t(m.risk_off ? 'Weak market' : 'Market OK')}></span>
     <span class="faint">EGX30</span><b class="num">${fmt.int(m.egx30_close)}</b><${Change} value=${m.egx30_change} /></a>`;
 }

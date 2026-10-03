@@ -189,12 +189,13 @@ export function useQuotes(symbols) {
 // A position at the newest price when there is one: price, P&L after fees (the selling fee on the new value) and
 // whether it has already crossed its stop or target. Live only while the session is open; otherwise the quote is the
 // last close. p: views.open_positions / local/api.js openPositions.
-export function livePosition(p, q, feePct) {
+export function livePosition(p, q) {
   const quote = q && q[p.symbol];
   if (!quote || p.adjust) return { ...p, price: p.last, live: false, day_change: null };
   const price = quote.price;
-  const pnl = p.pnl + (price - p.last) * p.shares * (1 - feePct / 100);
-  return { ...p, price, live: sessionState().state === 'open', day_change: quote.change, pnl, pnl_pct: price / p.avg_price - 1,
+  const pnl = p.pnl + (price - p.last) * p.shares;          // like the broker's: selling fees count once you sell
+  const cost = p.avg_price * p.shares + (p.fees || 0);
+  return { ...p, price, live: sessionState().state === 'open', day_change: quote.change, pnl, pnl_pct: (price * p.shares - cost) / cost,
     hit_stop: p.stop != null && price <= p.stop, hit_target: price >= p.target };
 }
 

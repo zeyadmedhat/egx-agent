@@ -354,9 +354,9 @@ export function nextId(book) {
 export const trades = (book, account, statuses) => book.trades
   .filter(t => t.account === account && (!statuses || statuses.includes(t.status))).sort(byId);
 
-function addFill(book, tradeId, symbol, date, side, shares, price, fees, note = '') {
+function addFill(book, tradeId, symbol, date, side, shares, price, fees, note = '', feesIn = false) {
   book.fills.push({ id: nextId(book), trade_id: tradeId, symbol, date, side, shares: Math.trunc(shares), price: +price,
-    fees: +fees, note });
+    fees: +fees, note, ...(feesIn ? { fees_in: true } : {}) });
 }
 
 export const fillsOf = (book, tradeId) => book.fills.filter(f => f.trade_id === tradeId)
@@ -381,9 +381,11 @@ function levels(price, atr, cfg, stop, chart = null) {
     { stop_src: stop ? 'yours' : fromChart ? 'chart' : 'formula', target_src: chartTarget ? 'chart' : 'formula' }];
 }
 
-// Log a buy. If you already hold this stock, the shares join that position at the average price.
-export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector = '', stop = null, notes = '', chart = null) {
-  const fee = orderFee(price * shares, cfg);
+// Log a buy. If you already hold this stock, the shares join that position at the average price. feesIn: the price
+// is your broker's average cost, which already has the fees in it (Thndr's does), so none are added.
+export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector = '', stop = null, notes = '', chart = null,
+  feesIn = false) {
+  const fee = feesIn ? 0 : orderFee(price * shares, cfg);
   const pos = openPosition(book, 'real', symbol);
   let id;
   if (!pos) {
@@ -402,7 +404,7 @@ export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector =
       initial_stop: s, stop: s, target, highest_close: avg, fees: (pos.fees || 0) + fee,
       notes: [pos.notes, notes].filter(Boolean).join('; '), ...src });
   }
-  addFill(book, id, symbol, date, 'buy', shares, price, fee, notes);
+  addFill(book, id, symbol, date, 'buy', shares, price, fee, notes, feesIn);
   return id;
 }
 

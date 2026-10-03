@@ -275,6 +275,10 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
         assert saved["symbols"] == ["S01", "S02"] and c.get("/api/watchlist").json()["symbols"] == ["S01", "S02"]
         assert c.put("/api/watchlist", json={"symbols": []}).status_code == 403     # only the dashboard can change it
         market = c.get("/api/market").json()
+        idx = c.get("/api/egx30").json()     # the EGX30 page: its returns come from its own closes
+        close, per = idx["series"]["close"], {r["key"]: r for r in idx["periods"]}
+        assert idx["has_data"] and idx["years"][0]["partial"] and per["1Y"]["usd"] is None
+        assert per["1Y"]["egp"] == pytest.approx(close[-1] / close[-251] - 1, rel=1e-6)
         assert len(market["movers"]["ret5"]["up"]) <= 6
 
 
