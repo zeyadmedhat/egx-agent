@@ -6,7 +6,7 @@ import {
 } from '../lib.js';
 import {
   Icon, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, Field,
-  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard, Switch,
+  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard, More,
 } from '../ui.js';
 import { t, tn, tp } from '../i18n.js';
 import { LineChart } from '../charts.js';
@@ -403,29 +403,63 @@ function Fills({ fills, tradeId, data, onRemoveDividend }) {
 const SIDES = [{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }];
 
 // Add a buy or sale to a trade, or edit one (fill).
-// The price is your broker's average cost (Thndr's has its fees in it): then the site adds none, or they'd count twice.
-function FeesIn({ on, onChange }) {
-  return html`<div class="fees-in"><${Switch} checked=${on} onChange=${onChange}
-    label=${t("The price is my broker's average cost (fees already in it)")} />
-    <div class="f-help">${t("Thndr's average cost already includes its fees. Switch this on when you copy it from there, so they aren't counted twice. For its exact average: (Market value − Profit/Loss) ÷ Units.")}</div></div>`;
+// What you type for a buy: the order's price (the site adds the fees), or your broker's average cost or purchase
+// value, which already have the fees in them (Thndr's do), so none are added. A purchase value is divided by the
+// shares. Thndr rounds the purchase value it shows (KORA: 79,082.57 against the 79,119.20 its profit/loss uses), so
+// "Exact from Thndr" works it out from the same screen's market value and profit/loss.
+const BASES = [{ value: 'price', label: 'Price paid' }, { value: 'avg', label: 'Average cost' }, { value: 'value', label: 'Purchase value' }];
+const BASIS_HELP = {
+  price: "The order's price: the site adds your broker's fees.",
+  avg: "Your broker's average cost: it already has the fees in it (Thndr's does), so none are added.",
+  value: "What the shares cost in all, fees in (Thndr: Purchase value). Thndr rounds it a little: Exact from Thndr gives its exact figure.",
+};
+const typedPrice = (f, shares) => (f.basis === 'value' ? parseFloat(f.value) / shares : parseFloat(f.price));
+
+function AmountField({ form, setForm }) {
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  return form.basis === 'value'
+    ? html`<${Field} label="Purchase value (EGP)"><input class="input" type="number" min="0.01" step="any" value=${form.value}
+        onInput=${set('value')} placeholder="0.00" required /><//>`
+    : html`<${Field} label=${form.basis === 'avg' ? 'Average cost' : 'Price paid'}><input class="input" type="number" min="0.001"
+        step="any" value=${form.price} onInput=${set('price')} placeholder="0.00" required /><//>`;
+}
+
+function BasisPick({ form, setForm }) {
+  const exact = k => e => setForm(f => {
+    const n = { ...f, [k]: e.target.value };
+    const mv = parseFloat(n.mv), pl = parseFloat(n.pl);
+    return Number.isFinite(mv) && Number.isFinite(pl) ? { ...n, value: (mv - pl).toFixed(2) } : n;
+  });
+  return html`<div class="buy-basis">
+    <${Seg} options=${BASES} value=${form.basis} onChange=${v => setForm(f => ({ ...f, basis: v }))} />
+    <div class="f-help">${t(BASIS_HELP[form.basis])}</div>
+    ${form.basis === 'value' && html`<${More} label="Exact from Thndr">
+      <p class="muted" style="font-size:12.5px;margin-bottom:8px">${t("From the stock's My position screen in Thndr. Type the profit/loss with its minus sign when it's a loss: the purchase value is Market value − Profit/Loss.")}</p>
+      <div class="form-grid">
+        <${Field} label="Market value"><input class="input" type="number" step="any" value=${form.mv} onInput=${exact('mv')} placeholder="0.00" /><//>
+        <${Field} label="Profit / loss"><input class="input" type="number" step="any" value=${form.pl} onInput=${exact('pl')} placeholder="-0.00" /><//>
+      </div><//>`}
+  </div>`;
 }
 
 function FillForm({ fill, tradeId, data, onClose }) {
   const [form, setForm] = useState(fill
-    ? { side: fill.side, date: fill.date, shares: String(fill.shares), price: String(fill.price), note: fill.note || '', feesIn: !!fill.fees_in }
-    : { side: 'buy', date: todayISO(), shares: '', price: '', note: '', feesIn: false });
+    ? { side: fill.side, date: fill.date, shares: String(fill.shares), price: String(fill.price), note: fill.note || '',
+      basis: fill.fees_in ? 'avg' : 'price', value: '', mv: '', pl: '' }
+    : { side: 'buy', date: todayISO(), shares: '', price: '', note: '', basis: 'price', value: '', mv: '', pl: '' });
   const [busy, setBusy] = useState(false);
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const shares = parseInt(form.shares, 10) || 0, price = parseFloat(form.price) || 0;
-  const valid = shares >= 1 && price > 0 && !!form.date;
   const sell = form.side === 'sell';
+  const shares = parseInt(form.shares, 10) || 0, price = (sell ? parseFloat(form.price) : typedPrice(form, shares)) || 0;
+  const valid = shares >= 1 && price > 0 && !!form.date;
+  const feesIn = !sell && form.basis !== 'price';
   const reasons = data.sell_reasons.includes(form.note) || !form.note ? data.sell_reasons : [form.note, ...data.sell_reasons];
   const submit = async e => {
     e.preventDefault();
     if (!valid) return;
     setBusy(true);
     const body = { side: form.side, date: form.date, shares, price, note: sell ? (form.note || data.sell_reasons[0]) : form.note,
-      fees_in: !sell && form.feesIn };
+      fees_in: feesIn };
     try {
       const r = fill ? await api(`/portfolio/fills/${fill.id}`, { method: 'PUT', body })
         : await api(`/portfolio/${tradeId}/fills`, { method: 'POST', body });
@@ -444,14 +478,14 @@ function FillForm({ fill, tradeId, data, onClose }) {
     <div class="form-grid" style="margin-top:10px">
       <${Field} label="Date"><input class="input" type="date" max=${todayISO()} value=${form.date} onInput=${set('date')} required /><//>
       <${Field} label="Shares"><input class="input" type="number" min="1" step="1" value=${form.shares} onInput=${set('shares')} required /><//>
-      <${Field} label=${sell ? 'Sell price' : 'Price paid'}><input class="input" type="number" min="0.001" step="0.001" value=${form.price}
-        onInput=${set('price')} required /><//>
+      ${sell ? html`<${Field} label="Sell price"><input class="input" type="number" min="0.001" step="any" value=${form.price}
+        onInput=${set('price')} required /><//>` : html`<${AmountField} form=${form} setForm=${setForm} />`}
       ${sell && html`<${Field} label="Reason"><select class="input" value=${form.note || data.sell_reasons[0]} onChange=${set('note')}>
         ${reasons.map(r => html`<option value=${r}>${tn(r)}</option>`)}</select><//>`}
     </div>
-    ${!sell && html`<${FeesIn} on=${form.feesIn} onChange=${v => setForm(f => ({ ...f, feesIn: v }))} />`}
+    ${!sell && html`<${BasisPick} form=${form} setForm=${setForm} />`}
     <div class="form-foot">
-      <span class="preview">${!valid ? t('Enter the shares and price.') : !sell && form.feesIn ? t('(fees already in the price)')
+      <span class="preview">${!valid ? t('Enter the shares and price.') : feesIn ? html`${fmt.price(price)} · ${t('(fees already in the price)')}`
         : html`${t('Fees')} <b>${fmt.egp(orderFee(price * shares, data.fee_cfg), 2)}</b>`}</span>
       <span class="row" style="gap:8px">
         <button class="btn ghost" type="button" onClick=${onClose}>${t('Cancel')}</button>
@@ -562,7 +596,7 @@ function DividendForm({ p, onClose }) {
 
 function BuyForm({ data, query }) {
   const stocks = useStore(s => s.stocks);
-  const blank = { symbol: '', date: todayISO(), price: '', shares: '', stop: '', notes: '', feesIn: false };
+  const blank = { symbol: '', date: todayISO(), price: '', shares: '', stop: '', notes: '', basis: 'price', value: '', mv: '', pl: '' };
   const [form, setForm] = useState(() => ({ ...blank, symbol: query.buy || '', price: query.price || '', shares: query.shares || '' }));
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -576,8 +610,9 @@ function BuyForm({ data, query }) {
     const st = stocks && stocks.find(x => x.symbol === sym);
     setForm(f => ({ ...f, symbol: sym, price: st && st.close != null ? String(st.close) : f.price }));
   };
-  const price = parseFloat(form.price);
   const shares = parseInt(form.shares, 10);
+  const price = typedPrice(form, shares);
+  const feesIn = form.basis !== 'price';
   const stop = parseFloat(form.stop) || 0;
   const badStop = stop > 0 && price > 0 && stop >= price;
   const valid = !!form.symbol && price > 0 && shares >= 1 && !!form.date && !badStop;
@@ -586,9 +621,9 @@ function BuyForm({ data, query }) {
 
   let preview = null;
   if (valid) {
-    const cost = price * shares, fees = form.feesIn ? 0 : orderFee(cost, data.fee_cfg);
+    const cost = price * shares, fees = feesIn ? 0 : orderFee(cost, data.fee_cfg);
     preview = html`<div class="preview-box">
-      <span>Cost <b>${fmt.egp(cost)}</b> ${form.feesIn ? t('(fees already in the price)') : html`+ fees <b>${fmt.egp(fees, 2)}</b>`} · cash after <b class=${data.summary.cash - cost - fees < 0 ? 'down' : ''}>${fmt.egp(data.summary.cash - cost - fees)}</b></span>
+      <span>Cost <b>${fmt.egp(cost, feesIn ? 2 : 0)}</b> ${feesIn ? html`(${fmt.price(price)} ${t('a share')}) ${t('(fees already in the price)')}` : html`+ fees <b>${fmt.egp(fees, 2)}</b>`} · cash after <b class=${data.summary.cash - cost - fees < 0 ? 'down' : ''}>${fmt.egp(data.summary.cash - cost - fees)}</b></span>
       <span>${held
         ? html`Joins your ${held.symbol} position: ${fmt.int(held.shares)} → <b>${fmt.int(held.shares + shares)}</b> shares at a new average of
             <b>${fmt.price((held.avg_price * held.shares + cost) / (held.shares + shares))}</b>. Stop and target are recalculated from the average${stop ? ' (using your stop)' : ''}.`
@@ -602,7 +637,7 @@ function BuyForm({ data, query }) {
     setBusy(true);
     try {
       const r = await api('/portfolio/buy', { method: 'POST', body: {
-        symbol: form.symbol, date: form.date, price, shares, stop: stop || null, notes: form.notes, fees_in: form.feesIn } });
+        symbol: form.symbol, date: form.date, price, shares, stop: stop || null, notes: form.notes, fees_in: feesIn } });
       toast(r.message);
       setForm(blank);
       if (query.buy) go('#/portfolio');
@@ -619,18 +654,17 @@ function BuyForm({ data, query }) {
       <${Field} label="Stock"><${StockPicker} value=${form.symbol} onChange=${pick} starred=${signals}
         placeholder=${t('Search symbol or name…')} /><//>
       <${Field} label="Buy date"><input class="input" type="date" value=${form.date} onInput=${set('date')} required /><//>
-      <${Field} label="Price paid"><input class="input" type="number" min="0.001" step="any" value=${form.price}
-        onInput=${set('price')} placeholder="0.00" required /><//>
+      <${AmountField} form=${form} setForm=${setForm} />
       <${Field} label="Shares"><input class="input" type="number" min="1" step="1" value=${form.shares}
         onInput=${set('shares')} placeholder="0" required /><//>
     </div>
+    <${BasisPick} form=${form} setForm=${setForm} />
     <div class="buy-grid-2">
       <${Field} label="Stop-loss (optional)" error=${badStop ? 'Must be below the price you paid' : null}
         help="Leave empty to use the agent's rule."><input class=${cls('input', badStop && 'invalid')} type="number" min="0"
         step="0.01" value=${form.stop} onInput=${set('stop')} placeholder=${t('automatic')} /><//>
       <${Field} label="Notes (optional)"><input class="input" value=${form.notes} onInput=${set('notes')} maxlength="500" /><//>
     </div>
-    <${FeesIn} on=${form.feesIn} onChange=${v => setForm(f => ({ ...f, feesIn: v }))} />
     <div class="form-foot">
       <div style="flex:1;min-width:260px">${preview || html`<span class="faint" style="font-size:12.5px">${t("⭐ = today's BUY signals. Buying more of a stock you already hold adds the shares to that position at the average price, and the 1-month limit keeps counting from your first buy.")}</span>`}</div>
       <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="plus" />${t('Save buy')}</button>
