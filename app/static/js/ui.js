@@ -95,10 +95,10 @@ export function IndexPills({ info }) {
 
 // ------------------------------------------------------------------ chips, tiles, bits
 const STATUS = {
-  ADJUST: 'adjust', EXIT: 'exit', REVIEW: 'review', 'TIGHTEN STOP': 'tighten', HOLD: 'hold', 'NO DATA': 'nodata',
+  ADJUST: 'adjust', EXIT: 'exit', BOUNCE: 'review', REVIEW: 'review', 'TIGHTEN STOP': 'tighten', HOLD: 'hold', 'NO DATA': 'nodata',
   BUY: 'buy', WATCH: 'watch',
 };
-const STATUS_LABEL = { ADJUST: 'UPDATE SHARES', EXIT: 'SELL', 'TIGHTEN STOP': 'RAISE STOP', REVIEW: 'CONSIDER SELLING',
+const STATUS_LABEL = { ADJUST: 'UPDATE SHARES', EXIT: 'SELL', BOUNCE: 'SELL ON A BOUNCE', 'TIGHTEN STOP': 'RAISE STOP', REVIEW: 'CONSIDER SELLING',
   WATCH: 'NEAR A BUY' };
 export function StatusChip({ status }) {
   return html`<span class=${`chip ${STATUS[status] || 'nodata'}`}><span class="dot"></span>${t(STATUS_LABEL[status] || status)}</span>`;
@@ -200,7 +200,7 @@ export function livePosition(p, q) {
 }
 
 // What the agent says to do, in two or three words (the exit rules' status, egx_agent/portfolio.py).
-const DO = { HOLD: 'Hold', EXIT: 'Sell at the open', REVIEW: 'Consider selling', 'TIGHTEN STOP': 'Raise your stop',
+const DO = { HOLD: 'Hold', EXIT: 'Sell at the open', BOUNCE: 'Sell on a bounce', REVIEW: 'Consider selling', 'TIGHTEN STOP': 'Raise your stop',
   ADJUST: 'Update your shares', 'NO DATA': 'No price yet' };
 
 // Where the price sits between your stop and your target, with your buy price marked.
@@ -219,7 +219,8 @@ function PlanBar({ p }) {
 
 // One open position: what to do, the price and P&L (live during the session), stop to target, days held.
 export function PositionCard({ p, hold, children, onOpen, open }) {
-  const urgent = p.hit_stop ? { tone: 'exit', text: 'At or under your stop now: sell' }
+  // selling on a bounce (a big loss): the stop and target bar means nothing now, its reason says when to sell
+  const urgent = p.hit_stop && p.status !== 'BOUNCE' ? { tone: 'exit', text: 'At or under your stop now: sell' }
     : p.hit_target ? { tone: 'hold', text: 'At your target now: take the profit' } : null;
   return html`<article class=${cls('card pos-card', p.status !== 'HOLD' && 'act', open && 'open')} id=${`pos-${p.id}`}>
     <div class="pos-head">
@@ -236,7 +237,7 @@ export function PositionCard({ p, hold, children, onOpen, open }) {
         <div class=${cls('v', tone(p.pnl))}>${fmt.pct(p.pnl_pct, 1)}</div>
         <div class=${cls('s', tone(p.pnl))}>${fmt.signed(p.pnl)} ${t('EGP')}</div></div>
     </div>
-    <${PlanBar} p=${p} />
+    ${p.status !== 'BOUNCE' && html`<${PlanBar} p=${p} />`}
     ${urgent && html`<div class=${cls('pos-urgent', urgent.tone)}><${Icon} name="alert" size=${14} />${t(urgent.text)}</div>`}
     ${p.status !== 'HOLD' && html`<p class="pos-reason" dir="auto">${tn(p.reason)}</p>`}
     ${p.cautions && p.cautions.length > 0 && html`<div style="margin-bottom:8px"><${Cautions} items=${p.cautions} compact /></div>`}

@@ -323,6 +323,17 @@ and better every year, in a weak market its top picks 32%; when it said 54% it h
 week with the market switch: +26% a year, worst drop −20%; with 0.5% more cost a trade, +7%. Not signals: it's on
 the Predict page only.
 
+**Big losses (Oct 2026).** A position 30%+ under its average price that the rules say to sell is sold on the first
+bounce instead: at its first close back above its 20-day average, or after 20 sessions without one (*Sell on a
+bounce*, `portfolio.on_bounce` / `engine.js onBounce`). On 2016–2026, for stocks 30–50% under their 3-month high and
+under their 20-day average, that beat selling at once 68% of the time (median +3.6%, mean +1.3%); 50%+ under it 64%
+(+5.7%, +4.3%). For 10–30% falls the mean gain was about nothing, so normal stops stay. *Sell or edit* on such a position
+shows a *Big loss plan*: how far it must rise, how often stocks that fell as far got back (30–50%: 9% within 3 months,
+25% within 6; 50%+: 3% and 8%) and how often they fell another 20% (28%, 43%), the sell rule, and averaging down worked
+out, offered only when the stock earns a buy on its own (a BUY signal or the model's top 10%) and isn't at half its
+3-month high or less: after such crashes the model's top 10% did worse than the rest (median 6 months −14% against −9%,
+52% fell another 20%), and the stock page says so next to its rating.
+
 **Tested and not used (Sep 2026):** other exits (trailing sooner or later, wider or tighter, no trend exit, partial
 profits, other time limits; none was better in both halves), Bollinger/volume/company-size measures (no gain),
 ChatGPT's 3-group 5-day target (worse than the agent's own), and companies that left the exchange (TradingView has no

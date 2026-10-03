@@ -212,6 +212,39 @@ def delete_trade(conn: sqlite3.Connection, trade_id: int) -> None:
     conn.commit()
 
 
+BIG_LOSS = 0.30      # a position this far under its average price at the last close, when the rules say sell…
+BOUNCE_DAYS = 20     # …is sold at its first close back above its 20-day average, or after this many sessions without one
+# Walk-forward 2016–2026 (2026-10), stocks 30–50% under their 60-day high and under their 20-day average: waiting for
+# the first close back above it (at most 20 sessions) beat selling at once 68% of the time (median +3.6%, mean +1.3%);
+# 50%+ under it: 64%, +5.7%, +4.3%. For 10–30% falls the mean gain was about nothing (+0.3%): normal stops stay.
+SESSION = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
+
+
+def on_bounce(row: pd.Series, ind: pd.DataFrame, st: dict) -> dict:
+    """The rules say sell a position 30%+ under its average price: sell it on the first bounce instead (BOUNCE)."""
+    entry = float(row["entry_price"])
+    deep = entry * (1 - BIG_LOSS)
+    close = ind["close"]
+    if st["status"] != "EXIT" or close.iloc[-1] > deep:
+        return st
+    loss = close.iloc[-1] / entry - 1
+    # the plan starts at the first close after the buy 30%+ under it (the last close, for an old buy logged later)
+    hit = ((ind.index > pd.Timestamp(row["entry_date"])) & (close <= deep).to_numpy()).nonzero()[0]
+    start = int(hit[0]) if len(hit) else len(ind) - 1
+    tail = ind.iloc[start:]
+    up = tail.index[tail["close"] > tail["ema20"]]
+    if len(up):
+        return {**st, "reason": f"Big loss ({loss:.1%}): back above its 20-day average on {up[0].date()}: "
+                                "sell at the next open"}
+    if len(ind) - 1 - start >= BOUNCE_DAYS:
+        return {**st, "reason": f"Big loss ({loss:.1%}): no close above its 20-day average in {BOUNCE_DAYS} sessions: "
+                                "sell at the next open"}
+    level, by = float(ind["ema20"].iloc[-1]), str((ind.index[start] + BOUNCE_DAYS * SESSION).date())
+    return {**st, "status": "BOUNCE", "bounce_level": level, "bounce_by": by,
+            "reason": f"Big loss ({loss:.1%}): sell at the first close above its 20-day average ({level:.2f} now), "
+                      f"by {by} at the latest"}
+
+
 def real_status(row: pd.Series, ind: pd.DataFrame | None, cfg: dict) -> dict:
     """What the exit rules say about one open real trade today."""
     if ind is None or ind.empty:
@@ -222,7 +255,7 @@ def real_status(row: pd.Series, ind: pd.DataFrame | None, cfg: dict) -> dict:
         shares=int(row["shares"]), initial_stop=float(row["initial_stop"]), stop=float(row["initial_stop"]),
         target=float(row["target"]), highest_close=float(row["entry_price"]), sector=row.get("sector") or "",
     )
-    st = engine.replay_status(pos, levels.with_support(ind, cfg, row["entry_date"]), cfg)
+    st = on_bounce(row, ind, engine.replay_status(pos, levels.with_support(ind, cfg, row["entry_date"]), cfg))
     st["last_close"] = float(ind["close"].iloc[-1])
     return st
 

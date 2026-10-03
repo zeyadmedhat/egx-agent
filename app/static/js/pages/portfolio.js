@@ -266,6 +266,62 @@ function JournalTab({ data }) {
       <div class="card flush"><${DataTable} columns=${tradeCols} rows=${j.trades} rowKey=${r => r.id} /></div></section>`;
 }
 
+// A position 30%+ under its average price: what the tests say, the sell rule (sell on the first bounce, engine.js
+// onBounce) and averaging down worked out. Tests 2016–2026 (2026-10): stocks that fell this far under their 60-day
+// high, the share that got back to it within 3 and 6 months, fell another 20% within 3, and the median 6 months later
+// (every stock: +7.4%); and how often selling on the first bounce beat selling at once.
+const BIG_LOSS = 0.30;
+// Averaging down: an option only when the stock earns a buy on its own. After a 50%+ fall from its 3-month high the
+// model's top 10% did worse than the rest (median 6 months −14% against −9%, 52% fell another 20%), so not then.
+const LOSS_BANDS = [
+  { from: 0.30, back3: 0.09, back6: 0.25, worse: 0.28, med6: 0.096, bounce: 0.68 },
+  { from: 0.50, back3: 0.03, back6: 0.08, worse: 0.43, med6: -0.109, bounce: 0.64 },
+];
+
+function BigLossPlan({ p, data }) {
+  const [add, setAdd] = useState({ shares: String(p.shares), price: String(p.last) });
+  const loss = p.last / p.avg_price - 1;
+  const fall = Math.min(loss, p.from_high ?? 0);              // the deeper of: under your price, under its 3-month high
+  const crash = (p.from_high ?? 0) <= -0.5;                  // at half its 3-month high or less
+  const band = [...LOSS_BANDS].reverse().find(b => -fall >= b.from);
+  const n = parseInt(add.shares, 10) || 0, price = parseFloat(add.price) || 0;
+  const cost = p.avg_price * p.shares + p.fees, more = n * price + orderFee(n * price, data.fee_cfg);
+  const avg = n > 0 && price > 0 ? (cost + more) / (p.shares + n) : null;
+  const earns = (p.buy_signal || p.top_pick) && !crash;
+  return html`<div class="big-loss">
+    <h4><${Icon} name="alert" size=${15} /> ${t('Big loss plan')}</h4>
+    <p>${tp('Down {loss} ({egp}). To get back to your {avg} it must rise {need}.', {
+      loss: html`<b class="down">${fmt.pct(-loss, 1, false)}</b>`, egp: fmt.egp(p.pnl), avg: fmt.price(p.avg_price),
+      need: html`<b>${fmt.pct(p.avg_price / p.last - 1, 0)}</b>` })}</p>
+    <p class="muted">${t('Stocks that fell {pct} or more from a high, 2016–2026: {b3} got back to it within 3 months and {b6} within 6; {w} fell another 20% or more within 3 months. Their typical next 6 months: {m} (every stock: +7%).', {
+      pct: fmt.pct(band.from, 0, false), b3: fmt.pct(band.back3, 0, false), b6: fmt.pct(band.back6, 0, false),
+      w: fmt.pct(band.worse, 0, false), m: fmt.pct(band.med6, 0) })}</p>
+    <div class="big-loss-step"><b>${t('1. Selling')}</b>
+      <span>${p.status === 'BOUNCE'
+        ? t('Sell at its first close above its 20-day average ({level} now), or by {date} at the latest.', { level: fmt.price(p.bounce_level), date: fmt.date(p.bounce_by) })
+        : p.status === 'EXIT' ? t('The rules say sell at the next open: {why}', { why: tn(p.reason) })
+          : t('Your own stop ({stop}) is still above the price, so the rules keep holding it.', { stop: fmt.price(p.stop) })}
+        ${' '}<span class="faint">${t('Waiting for that first bounce beat selling at once {pct} of the time in the tests.', { pct: fmt.pct(band.bounce, 0, false) })}</span></span></div>
+    <div class="big-loss-step"><b>${t('2. Averaging down')}</b>
+      <span>${earns
+        ? t('{sym} earns a buy on its own today ({why}), so buying more is an option: size it as a new trade with its own stop.', {
+          sym: p.symbol, why: t(p.buy_signal ? 'a BUY signal' : "the model's top 10%") })
+        : crash ? t("Not now: {sym} is at half its 3-month high or less. After crashes like that, even the model's top-rated stocks usually kept falling in the tests (typical next 6 months −14%).", { sym: p.symbol })
+          : t("Not now: {sym} has no BUY signal and isn't in the model's top 10%. Buying more only lowers the average; it doesn't make the stock a better buy.", { sym: p.symbol })}</span>
+      <div class="form-grid" style="margin-top:8px">
+        <${Field} label="Buy more: shares"><input class="input" type="number" min="1" step="1" value=${add.shares}
+          onInput=${e => setAdd(a => ({ ...a, shares: e.target.value }))} /><//>
+        <${Field} label="At price"><input class="input" type="number" min="0.001" step="any" value=${add.price}
+          onInput=${e => setAdd(a => ({ ...a, price: e.target.value }))} /><//>
+      </div>
+      ${avg && html`<p style="margin-top:8px">${tp('New average {avg}: it must rise {need} to break even (now {now}). Money in {sym}: {total}; another 20% fall would cost {drop} more.', {
+        avg: html`<b>${fmt.price(avg)}</b>`, need: html`<b>${fmt.pct(avg / p.last - 1, 0)}</b>`, now: fmt.pct(p.avg_price / p.last - 1, 0),
+        sym: p.symbol, total: fmt.egp(cost + more), drop: html`<b class="down">${fmt.egp(0.2 * p.last * (p.shares + n))}</b>` })}</p>`}
+    </div>
+    <p class="faint" style="font-size:12px">${t('Tested rules and numbers, not advice: the decision is yours.')}</p>
+  </div>`;
+}
+
 function PositionDetail({ p, data, onDone, onClose }) {
   const [form, setForm] = useState({ date: todayISO(), shares: String(p.shares), price: String(p.price ?? p.last), reason: data.sell_reasons[0] });
   const [busy, setBusy] = useState(false);
@@ -340,6 +396,7 @@ function PositionDetail({ p, data, onDone, onClose }) {
     </form>`;
 
   return html`<div class="pos-detail">
+    ${!p.adjust && p.last / p.avg_price - 1 <= -BIG_LOSS && html`<${BigLossPlan} p=${p} data=${data} />`}
     ${p.adjust ? html`<${AdjustPanel} p=${p} onDone=${onDone} />` : sellForm}
     <div>
       <h4>${t('Transactions in this position')}${p.n_buys > 1 ? ` · ${t('{n} buys combined at the average price', { n: p.n_buys })}` : ''}</h4>

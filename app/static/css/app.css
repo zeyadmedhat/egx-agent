@@ -562,6 +562,10 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .pos-detail { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; padding-top: 6px; }
 /* In a table wider than the screen, keep the expanded panel on screen instead of scrolling away with the columns. */
 .table tr.detail .pos-detail { position: sticky; inset-inline-start: 16px; width: min(calc(100vw - 92px), 1350px); }
+.big-loss { grid-column: 1 / -1; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: var(--r);
+  padding: 14px 16px; background: color-mix(in srgb, var(--warn) 6%, transparent); display: grid; gap: 10px; font-size: 13.5px; }
+.big-loss h4 { color: var(--warn); display: flex; align-items: center; gap: 6px; margin: 0; }
+.big-loss-step { display: grid; gap: 4px; }
 .pos-detail h4 { font-size: 13px; color: var(--text-2); margin-bottom: 10px; font-weight: 600; }
 .form-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 .buy-grid { display: grid; gap: 12px; grid-template-columns: minmax(240px, 2fr) repeat(3, minmax(120px, 1fr)); }

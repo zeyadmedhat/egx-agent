@@ -9,8 +9,8 @@ export class LocalError extends Error {
 }
 const fail = (status, message, extra) => { throw new LocalError(message, status, { message, ...extra }); };
 
-const STATUS_ORDER = { ADJUST: 0, EXIT: 1, REVIEW: 2, 'TIGHTEN STOP': 3, HOLD: 4, 'NO DATA': 5 };
-const ACTION_STATUSES = ['ADJUST', 'EXIT', 'REVIEW', 'TIGHTEN STOP'];
+const STATUS_ORDER = { ADJUST: 0, EXIT: 1, BOUNCE: 2, REVIEW: 3, 'TIGHTEN STOP': 4, HOLD: 5, 'NO DATA': 6 };
+const ACTION_STATUSES = ['ADJUST', 'EXIT', 'BOUNCE', 'REVIEW', 'TIGHTEN STOP'];
 const KEEP_ON_RESET = ['capital', 'broker', 'fee_pct_per_side'];
 
 const localToday = () => {
@@ -43,7 +43,7 @@ async function barsFor(c, symbols) {
     const divs = s.divs || {};            // cash dividend per share by ex-date
     for (let i = 0; i < s.time.length; i++) {
       bars.push({ date: s.time[i], open: E.num(s.open[i]), high: E.num(s.high[i]), low: E.num(s.low[i]),
-        close: E.num(s.close[i]), atr14: E.num(s.atr14[i]), ema50: E.num(s.ema50[i]), div: divs[s.time[i]] || 0,
+        close: E.num(s.close[i]), atr14: E.num(s.atr14[i]), ema20: E.num(s.ema20[i]), ema50: E.num(s.ema50[i]), div: divs[s.time[i]] || 0,
         sup: E.num((s.sup || [])[i]), ptgt: E.num((s.ptgt || [])[i]) });   // the chart's stop and target that day
     }
     c.bars[sym] = bars;
@@ -88,6 +88,9 @@ async function openPositions(c, symbol = null) {
   const divs = E.dividendsByTrade(book, 'real');
   const open = E.trades(book, 'real', ['open']).filter(t => !symbol || t.symbol === symbol);
   const bars = await barsFor(c, open.map(t => t.symbol));
+  // a big loss's averaging-down rule: only when the stock earns a buy on its own (a BUY signal or a top-10% rating)
+  const buys = new Set(signals(c)[1].filter(x => x.action === 'BUY').map(x => x.symbol));
+  const preds = (core.predictions && core.predictions.by_symbol) || {};
   const out = open.map(r => {
     const b = bars[r.symbol] || [];
     const ev = pend[r.id];
@@ -121,6 +124,10 @@ async function openPositions(c, symbol = null) {
       pnl_pct: ((worth - r.entry_price) * r.shares - fees) / (r.entry_price * r.shares + fees),
       pnl: (worth - r.entry_price) * r.shares - fees + div,
       stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target,
+      bounce_level: stt.bounce_level ?? null, bounce_by: stt.bounce_by ?? null,
+      buy_signal: buys.has(r.symbol), top_pick: !!(preds[r.symbol] && preds[r.symbol].top10),
+      // how far under its 3-month high: after a 50%+ fall even the model's top ratings did worse (2026-10)
+      from_high: b.length ? last / Math.max(...b.slice(-60).map(x => x.close)) - 1 : null,
       stop_src: r.stop_src || null, target_src: r.target_src || null, day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
       notes: r.notes || '', fills, adjust: ev || null, n_buys: fills.filter(f => f.side === 'buy').length || 1,
     };
@@ -160,6 +167,9 @@ function orders(c, positions) {
     } else if (st === 'EXIT') {
       items.push({ ...base, key: `sell:${sym}`, kind: 'sell', title: `Sell all ${E.int(p.shares)} ${sym} at the open`,
         detail: p.reason });
+    } else if (st === 'BOUNCE') {        // a big loss: sold on the first bounce (engine.js onBounce)
+      items.push({ ...base, key: `bounce:${sym}`, kind: 'review', level: p.bounce_level,
+        title: `Sell ${sym} on a bounce: at its first close above ${E.px(p.bounce_level)}`, detail: p.reason });
     } else if (st === 'TIGHTEN STOP') {
       items.push({ ...base, key: `stop:${sym}`, kind: 'stop', from: p.prev_stop, to: p.stop,
         title: `Move your ${sym} stop up to ${E.px(p.stop)}`,

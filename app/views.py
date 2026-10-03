@@ -15,8 +15,8 @@ from egx_agent.data import dividends, fundamentals, macro, news, prices, shariah
 from egx_agent.indicators import add_indicators
 
 EGX_DAY = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
-STATUS_ORDER = {"ADJUST": 0, "EXIT": 1, "REVIEW": 2, "TIGHTEN STOP": 3, "HOLD": 4, "NO DATA": 5}
-ACTION_STATUSES = ("ADJUST", "EXIT", "REVIEW", "TIGHTEN STOP")
+STATUS_ORDER = {"ADJUST": 0, "EXIT": 1, "BOUNCE": 2, "REVIEW": 3, "TIGHTEN STOP": 4, "HOLD": 5, "NO DATA": 6}
+ACTION_STATUSES = ("ADJUST", "EXIT", "BOUNCE", "REVIEW", "TIGHTEN STOP")
 SELL_REASONS = ["Stop-loss", "Target reached", "Time limit", "Trend break", "Taking partial profit",
                 "Other / my decision"]
 INFO_FIELDS = ("symbol", "name_ar", "sector", "egx30", "egx70", "egx33", "kashif_status", "kashif_label", "purity",
@@ -245,6 +245,9 @@ def signal_order(r: dict) -> tuple:
 def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
     pending = corporate.pending(d.conn, "real")
     dividends = corporate.dividends_by_trade(d.conn, "real")
+    # a big loss's averaging-down rule: only when the stock earns a buy on its own (a BUY signal or a top-10% rating)
+    buys = {x["symbol"] for x in signals(d)[1] if x["action"] == "BUY"}
+    preds = predictions(d)["by_symbol"]
     out = []
     for _, r in portfolio.trades_df(d.conn, "real", ("open",)).iterrows():
         if symbol and r.symbol != symbol:
@@ -280,6 +283,10 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
             "pnl_pct": ((worth - r.entry_price) * r.shares - fees) / (r.entry_price * r.shares + fees),
             "pnl": (worth - r.entry_price) * r.shares - fees + div,
             "stop": stt["stop"], "prev_stop": stt.get("prev_stop"), "initial_stop": float(r.initial_stop),
+            "bounce_level": stt.get("bounce_level"), "bounce_by": stt.get("bounce_by"),
+            "buy_signal": r.symbol in buys, "top_pick": bool((preds.get(r.symbol) or {}).get("top10")),
+            # how far under its 3-month high: after a 50%+ fall even the model's top ratings did worse (2026-10)
+            "from_high": last / float(ind["close"].tail(60).max()) - 1 if len(ind) else None,
             "target": float(r.target), "day": int(stt["days_held"]),
             "sell_by": sessions_after(r.entry_date, d.cfg["max_hold_days"] - 1),
             "fees": fees, "dividends": div, "notes": r.notes or "", "fills": fills, "adjust": ev,
@@ -909,6 +916,10 @@ def orders(d: Data, positions: list[dict] | None = None) -> dict | None:
         elif st == "EXIT":
             items.append({**base, "key": f"sell:{sym}", "kind": "sell",
                           "title": f"Sell all {p['shares']:,} {sym} at the open", "detail": p["reason"]})
+        elif st == "BOUNCE":      # a big loss: sold on the first bounce (portfolio.on_bounce)
+            items.append({**base, "key": f"bounce:{sym}", "kind": "review", "level": p["bounce_level"],
+                          "title": f"Sell {sym} on a bounce: at its first close above {px(p['bounce_level'])}",
+                          "detail": p["reason"]})
         elif st == "TIGHTEN STOP":
             items.append({**base, "key": f"stop:{sym}", "kind": "stop", "from": p["prev_stop"], "to": p["stop"],
                           "title": f"Move your {sym} stop up to {px(p['stop'])}",

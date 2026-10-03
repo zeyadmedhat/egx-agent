@@ -55,7 +55,7 @@ def bars_of(ind: pd.DataFrame) -> list[dict]:
     ind = levels.with_support(ind, config.DEFAULTS)
     num = lambda v: None if pd.isna(v) else float(v)  # noqa: E731
     return [{"date": str(t.date()), "open": float(r.open), "high": float(r.high), "low": float(r.low),
-             "close": float(r.close), "atr14": num(r.atr14), "ema50": num(r.ema50),
+             "close": float(r.close), "atr14": num(r.atr14), "ema20": num(r.ema20), "ema50": num(r.ema50),
              "sup": num(r["sup"]) if "sup" in ind else None,
              "div": float(r["div"]) if "div" in ind and r["div"] > 0 else 0} for t, r in ind.iterrows()]
 
@@ -96,18 +96,29 @@ def test_exit_rules_match(cfg):
 
 
 @needs_node
-def test_an_old_buy_logged_today_under_its_stop_says_sell(cfg):
+def test_an_old_buy_logged_today_under_its_stop_says_sell_and_a_big_loss_waits_for_a_bounce(cfg):
     """A buy dated after the last close (an old position logged today at its old price) has no day to replay: if
-    the last close is under its stop the rules say sell, not hold (AMES: bought at 80, logged on 3 Oct, at 46.60)."""
+    the last close is under its stop the rules say sell, not hold (AMES: bought at 80, logged on 3 Oct, at 46.60).
+    30%+ under its price, they say sell on the first close back above the 20-day average instead, within 20 sessions;
+    once that close came, sell."""
     frame = market()["S0"]
     last = float(frame.close.iloc[-1])
-    entry = last * 1.7
-    row = pd.Series({"symbol": "S0", "entry_date": "2099-01-01", "entry_price": entry, "shares": 100,
-                     "initial_stop": entry * 0.88, "stop": entry * 0.88, "target": entry * 1.24, "sector": "A"})
-    py = portfolio.real_status(row, frame, cfg)
-    js, = run_js({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(frame), "cfg": cfg}})
-    assert py["status"] == "EXIT" and "under your stop" in py["reason"]
-    assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "last_close"))
+    def case(entry, entry_date="2099-01-01", f=frame):
+        row = pd.Series({"symbol": "S0", "entry_date": entry_date, "entry_price": entry, "shares": 100,
+                         "initial_stop": entry * 0.88, "stop": entry * 0.88, "target": entry * 1.24, "sector": "A"})
+        py = portfolio.real_status(row, f, cfg)
+        js, = run_js({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(f), "cfg": cfg}})
+        assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "last_close", "bounce_by"))
+        return py
+    small = case(last * 1.15)
+    assert small["status"] == "EXIT" and "under your stop" in small["reason"]
+    under = frame.iloc[:int((frame.close < frame.ema20).to_numpy().nonzero()[0][-1]) + 1]   # ends under its 20-day average
+    big = case(float(under.close.iloc[-1]) * 1.7, f=under)
+    assert big["status"] == "BOUNCE" and big["bounce_level"] == pytest.approx(float(under.ema20.iloc[-1]))
+    assert case(last * 1.7)["reason"].startswith("Big loss")       # ends above it: the bounce is here, sell
+    # bought 30 sessions before the end far above the price: 20 sessions without a bounce, or the bounce came
+    old = case(float(frame.close.iloc[-31]) * 2, str(frame.index[-31].date()))
+    assert old["status"] == "EXIT" and old["reason"].startswith("Big loss")
 
 
 @needs_node

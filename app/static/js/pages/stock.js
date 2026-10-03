@@ -129,11 +129,16 @@ export function verdictFor(data) {
   const notes = [];
   const modelNote = () => {
     if (!pr) return;
-    if (pr.top10) notes.push(t('The model ranks it in its top 10% (#{rank} of {n}).', { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
+    // half or less of its 3-month high: after crashes like that its top ratings did worse than the rest (2026-10)
+    const closes = ((data.series && data.series.close) || []).slice(-60).filter(v => v != null);
+    const crashed = closes.length > 0 && close <= Math.max(...closes) * 0.5;
+    if (pr.top10 && crashed) notes.push(t("The model ranks it in its top 10% (#{rank} of {n}), but it is at half its 3-month high or less: after crashes like that, its top-rated stocks usually kept falling in the tests.", { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
+    else if (pr.top10) notes.push(t('The model ranks it in its top 10% (#{rank} of {n}).', { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
     else if (pr.rank10 && pr.count && pr.rank10 > pr.count / 2) notes.push(t('The model ranks it in its bottom half (#{rank} of {n}).', { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
   };
   if (pos) {
     if (pos.status === 'EXIT') return { kind: 'sell', label: 'Sell', line: tn(pos.reason), notes };
+    if (pos.status === 'BOUNCE') return { kind: 'sell', label: 'Sell on a bounce', line: tn(pos.reason), notes };
     const line = t('{a} above your stop ({stop}), {b} to your target ({target}).', {
       a: fmt.pct(close / pos.stop - 1, 1, false), stop: fmt.price(pos.stop),
       b: fmt.pct(pos.target / close - 1, 1, false), target: fmt.price(pos.target) });

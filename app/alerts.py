@@ -161,6 +161,11 @@ NOTES_AR = [
     (r"^Max hold reached \((\d+) trading days\)", r"انتهت مدة الاحتفاظ (\1 جلسة)"),
     (r"^Trailing stop", "الوقف المتحرك"), (r"^Breakeven stop", "وقف التعادل"), (r"^Stop-loss", "وقف الخسارة"),
     (r": closed at ([\d.]+), under your stop \(([\d.]+)\)", r": أغلق عند \1، تحت وقفك (\2)"),
+    (r"^Big loss \(([-−]?[\d.]+%)\): back above its 20-day average on ([\d-]+)", r"خسارة كبيرة (\1): عاد فوق متوسط 20 يومًا يوم \2"),
+    (r"^Big loss \(([-−]?[\d.]+%)\): no close above its 20-day average in (\d+) sessions",
+     r"خسارة كبيرة (\1): لم يغلق فوق متوسط 20 يومًا خلال \2 جلسة"),
+    (r"^Big loss \(([-−]?[\d.]+%)\): sell at the first close above its 20-day average \(([\d.]+) now\), by ([\d-]+) at the latest",
+     r"خسارة كبيرة (\1): بع عند أول إغلاق فوق متوسط 20 يومًا (الآن \2)، وفي موعد أقصاه \3"),
     (r"^Target reached", "تم الوصول للهدف"), (r": sell at the next open", ": بع عند الافتتاح القادم"),
     (r": sell at the open \(flagged before ([\d-]+)\)", r": بع عند الافتتاح (ظهرت قبل \1)"),
     (r" \(gap down\)", " (فجوة هبوط)"), (r" \(gap up\)", " (فجوة صعود)"), (r" on ([\d-]+) at ([\d.]+)", r" يوم \1 عند \2"),
@@ -447,6 +452,8 @@ def _order_items(o: dict, positions: list[dict], lang: str) -> list[tuple[str, s
             title = f"اخفض وقف {sym} إلى {views.px(it['to'])} قبل الافتتاح"
             detail = (f"{sym} يصرف توزيعًا نقديًا: يفتح السعر أقل بحوالي {amount:g} جنيه وتحصل على {amount:g} جنيه "
                       "للسهم. يخفض الوكيل الوقف والهدف بنفس القيمة حتى لا يبيع الهبوط وحده.")
+        elif it["key"].startswith("bounce:"):
+            title, detail = f"بع {sym} عند الارتداد: عند أول إغلاق فوق {views.px(it['level'])}", note_ar(it["detail"])
         elif it["kind"] == "stop":
             title = f"ارفع وقف {sym} إلى {views.px(it['to'])}"
             detail = f"كان {views.px(it['from'])}. بع إذا هبط السعر إلى {views.px(it['to'])}."

@@ -181,13 +181,34 @@ export function replayStatus(p, bars, cfg) {
     days_held: p.days_held, event_date: last };
 }
 
+// The rules say sell a position 30%+ under its average price: sell it on the first bounce instead (portfolio.on_bounce,
+// where the tests behind it are).
+export const BIG_LOSS = 0.30, BOUNCE_DAYS = 20;
+function onBounce(t, bars, st) {
+  const deep = t.entry_price * (1 - BIG_LOSS);
+  const last = bars[bars.length - 1];
+  if (st.status !== 'EXIT' || last.close > deep) return st;
+  const loss = `${((last.close / t.entry_price - 1) * 100).toFixed(1)}%`;
+  // the plan starts at the first close after the buy 30%+ under it (the last close, for an old buy logged later)
+  let start = bars.findIndex(b => b.date > t.entry_date && b.close <= deep);
+  if (start < 0) start = bars.length - 1;
+  const up = bars.slice(start).find(b => b.ema20 != null && b.close > b.ema20);
+  if (up) return { ...st, reason: `Big loss (${loss}): back above its 20-day average on ${up.date}: sell at the next open` };
+  if (bars.length - 1 - start >= BOUNCE_DAYS) {
+    return { ...st, reason: `Big loss (${loss}): no close above its 20-day average in ${BOUNCE_DAYS} sessions: sell at the next open` };
+  }
+  const by = sessionsAfter(bars[start].date, BOUNCE_DAYS);
+  return { ...st, status: 'BOUNCE', bounce_level: last.ema20, bounce_by: by,
+    reason: `Big loss (${loss}): sell at the first close above its 20-day average (${f2(last.ema20)} now), by ${by} at the latest` };
+}
+
 // What the exit rules say about one open real trade today (portfolio.real_status).
 export function realStatus(t, bars, cfg) {
   if (!bars || !bars.length) {
     return { status: 'NO DATA', reason: 'No price data for this symbol', stop: t.stop, days_held: 0, last_close: null };
   }
   const p = position({ ...t, stop: t.initial_stop, highest_close: t.entry_price, days_held: 0, exit_next_open: null });
-  const st = replayStatus(p, bars, cfg);
+  const st = onBounce(t, bars, replayStatus(p, bars, cfg));
   st.last_close = bars[bars.length - 1].close;
   return st;
 }
