@@ -1,4 +1,4 @@
-/* EGX Trading Agent: Sand & Nile. Warm paper by default, Nile night below. Nile blue is the accent: links, the chosen
+/* EGX Trading Agent: Sand & Nile. Warm paper by default; dark is the Nile at night (blue-slate, sand text). Nile blue is the accent: links, the chosen
    tab, the main button. Green and red are only for up and down. The font is Cairo (English and Arabic), kept on the
    site itself (fonts/, SIL Open Font License) because the page may load nothing from elsewhere. */
 @font-face {
@@ -53,34 +53,34 @@
   color-scheme: light;
 }
 [data-theme="dark"] {
-  --bg: #12110e;
-  --bg-2: #16140f;
-  --panel: #1c1a15;
-  --panel-2: #24211b;
-  --panel-3: #2d2a22;
-  --border: #2c2820;
-  --border-2: #3a352b;
+  --bg: #0d161b;
+  --bg-2: #101b21;
+  --panel: #14212a;
+  --panel-2: #1a2a34;
+  --panel-3: #21343f;
+  --border: #213039;
+  --border-2: #2d404b;
   --text: #efe9dd;
-  --text-2: #bdb4a3;
-  --text-3: #978e7d;
-  --accent: #5fb0d6;
-  --accent-2: #84c4e2;
-  --accent-soft: rgba(95, 176, 214, .14);
-  --on-accent: #04222f;
+  --text-2: #c4bcaa;
+  --text-3: #9b9584;
+  --accent: #62b6dd;
+  --accent-2: #8ccbe8;
+  --accent-soft: rgba(98, 182, 221, .15);
+  --on-accent: #062230;
   --up: #4cc38a;
   --up-soft: rgba(76, 195, 138, .13);
   --on-up: #06140d;
   --down: #ef5f55;
   --down-soft: rgba(239, 95, 85, .13);
-  --warn: #f0913a;
-  --warn-soft: rgba(240, 145, 58, .14);
-  --on-warn: #1c1000;
-  --info: #7aa7e0;
-  --info-soft: rgba(122, 167, 224, .13);
+  --warn: #d4b48c;
+  --warn-soft: rgba(212, 180, 140, .13);
+  --on-warn: #1c1407;
+  --info: #8fb8e8;
+  --info-soft: rgba(143, 184, 232, .13);
   --violet: #b8a1e3;
-  --muted-soft: rgba(160, 150, 130, .11);
+  --muted-soft: rgba(160, 175, 185, .1);
   --grid: rgba(255, 255, 255, 0.045);
-  --shadow: 0 12px 32px rgba(0, 0, 0, .4);
+  --shadow: 0 12px 32px rgba(0, 0, 0, .45);
   color-scheme: dark;
 }
 
@@ -133,7 +133,7 @@ p { margin: 0; }
 }
 .sections a svg.icon { width: 16px; height: 16px; }
 .sections a:hover { background: var(--panel-2); color: var(--text); }
-.sections a.active { color: var(--text); background: var(--panel-2); }
+.sections a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .sections a.active svg.icon { color: var(--accent); }
 .count {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 700;
@@ -157,10 +157,11 @@ p { margin: 0; }
 .subnav::-webkit-scrollbar { display: none; }
 .subnav a {
   display: flex; align-items: center; gap: 7px; height: 42px; padding: 0 14px; color: var(--text-2); font-weight: 500;
-  border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
+  position: relative; white-space: nowrap;
 }
 .subnav a:hover { color: var(--text); }
-.subnav a.on { color: var(--text); border-bottom-color: var(--accent); }
+.subnav a.on { color: var(--accent); font-weight: 600; }
+.subnav a.on::after { content: ""; position: absolute; inset-inline: 8px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--accent); }
 
 .content { flex: 1; padding: 22px 24px 40px; max-width: 1440px; width: 100%; margin: 0 auto; }
 .bottombar { display: none; }
@@ -426,7 +427,8 @@ ul.reasons li::before { content: ""; position: absolute; inset-inline-start: 3px
 .rank-move.up { color: var(--up); } .rank-move.down { color: var(--down); }
 .recent-line { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--text-2); }
 /* the stock page in one line (pages/stock.js Verdict) */
-.card.verdict { margin-top: 14px; padding: 14px 18px; border-inline-start: 4px solid var(--c, var(--text-3)); background: linear-gradient(90deg, var(--soft, var(--muted-soft)), transparent 70%), var(--panel); }
+.card.verdict { margin-top: 14px; padding: 14px 18px; background: color-mix(in srgb, var(--c, var(--text-3)) 6%, var(--panel));
+  border-color: color-mix(in srgb, var(--c, var(--text-3)) 30%, var(--border)); }
 .verdict.buy, .verdict.hold { --c: var(--up); --soft: var(--up-soft); }
 .verdict.sell, .verdict.avoid { --c: var(--down); --soft: var(--down-soft); }
 .verdict.wait { --c: var(--warn); --soft: var(--warn-soft); }
@@ -542,8 +544,8 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 
 /* ------------------------------------------------------------------ watchlist star */
 .star-btn { background: none; border: 0; padding: 2px 4px; cursor: pointer; font-size: 18px; line-height: 1; color: var(--text-3); }
-.star-btn:hover { color: var(--warn); }
-.star-btn.on { color: var(--warn); }
+.star-btn:hover { color: var(--accent); }
+.star-btn.on { color: var(--accent); }
 .star-btn.labelled { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-2);
   border-radius: 999px; padding: 4px 11px; font-size: 14px; }
 .star-btn.labelled span { font-size: 13px; font-weight: 600; color: var(--text-2); }
@@ -792,10 +794,11 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0;
     background: none; color: var(--text-3); font-size: 11px; font-weight: 500; cursor: pointer; min-width: 0;
   }
-  .bottombar .active { color: var(--accent); }
-  .bottombar .bb-icon { position: relative; display: grid; place-items: center; }
+  .bottombar .active { color: var(--accent); font-weight: 700; }
+  .bottombar .bb-icon { position: relative; display: grid; place-items: center; width: 52px; height: 28px; border-radius: 999px; }
+  .bottombar .active .bb-icon { background: var(--accent-soft); }
   .bottombar .bb-icon svg.icon { width: 22px; height: 22px; }
-  .bottombar .count { position: absolute; top: -6px; inset-inline-start: 14px; }
+  .bottombar .count { position: absolute; top: -5px; inset-inline-start: 29px; }
   .menu {
     top: auto; bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom) + 8px); inset-inline: 12px; width: auto;
   }
@@ -954,7 +957,7 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .session.warn .dot { background: var(--warn); }
 
 /* Today in one minute. */
-.brief { padding: 18px 20px; border-inline-start: 3px solid var(--accent); }
+.brief { padding: 18px 20px; }
 .brief-head { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-bottom: 10px; }
 .brief ul { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 5px; color: var(--text); font-size: 16px; line-height: 1.55; }
 .brief-go { margin-top: 14px; }
@@ -1155,10 +1158,10 @@ ul.checkup li span { color: var(--text-2); font-size: 13px; }
 .import-date { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 
 /* ------------------------------------------------------------------ Picks (pages/picks.js) */
-.light { border-inline-start: 4px solid var(--border-2); }
-.light.ok { border-inline-start-color: var(--up); }
-.light.warn { border-inline-start-color: var(--warn); }
-.light.bad { border-inline-start-color: var(--down); }
+.light { --c: var(--text-3); background: color-mix(in srgb, var(--c) 7%, var(--panel)); border-color: color-mix(in srgb, var(--c) 30%, var(--border)); }
+.light.ok { --c: var(--up); }
+.light.warn { --c: var(--warn); }
+.light.bad { --c: var(--down); }
 .light-head { display: flex; align-items: center; gap: 10px; font-size: 16px; }
 .light-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--border-2); flex: none; }
 .light.ok .light-dot { background: var(--up); }
