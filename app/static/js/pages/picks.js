@@ -39,7 +39,7 @@ export function PicksPage() {
       <${SectionHead} title=${html`<${Term} k="watchlist">${t('Getting close')}<//>`} count=${data.watch.length}
         hint="Strong uptrends waiting to break out. A close above the breakout price can make them a BUY.">
         <${ShariahNote} mode=${data.cfg.shariah_filter} /><//>
-      <${NearRows} rows=${data.watch} rated=${!!data.model} tg=${data.telegram} />
+      <${NearBoxes} rows=${data.watch} rated=${!!data.model} tg=${data.telegram} />
     </section>
     ${model && model.week && html`<section class="section"><${WeekPicks} p=${model} /></section>`}
     <section class="section"><${Trust} rec=${data.record} p=${model} /></section>
@@ -184,7 +184,7 @@ function PickCard({ s, m, wk, odds, fee, model }) {
 // BUY needs the close above it, so that isn't a signal yet.
 const SHOW = 8;
 const GAP = 0.2;        // ponytail: the bar starts 20% under the breakout price; farther ones show an empty bar
-function NearRows({ rows, rated, tg }) {
+function NearBoxes({ rows, rated, tg }) {
   const [all, setAll] = useState(false);
   const q = useQuotes(rows.map(r => r.symbol));
   if (!rows.length) return html`<div class="card"><${Empty} icon="eye" title="Nothing close to a BUY" text="No strong uptrend is waiting to break out at the last close." /></div>`;
@@ -192,29 +192,32 @@ function NearRows({ rows, rated, tg }) {
   const rate = r => (r.pred && r.pred.rating != null ? r.pred.rating : -1);
   const sorted = [...rows].sort(rated ? (a, b) => rate(b) - rate(a) : (a, b) => b.score - a.score);
   const shown = all ? sorted : sorted.slice(0, SHOW);
-  return html`<div class="card flush near-list">${shown.map(r => {
+  return html`<div class="near-grid">${shown.map(r => {
     const quote = live && q[r.symbol];
     const now = quote ? quote.price : r.close;
     const away = r.trigger ? r.trigger / now - 1 : null;
     const over = quote && away != null && away <= 0;
-    return html`<div class="near" key=${r.symbol} onClick=${() => go(stockHref(r.symbol))}>
-      <div class="near-top">
-        <span class="near-who"><a class="sym" href=${stockHref(r.symbol)}>${r.symbol}</a>
-          <span class="faint" dir="rtl">${r.info && r.info.name_ar}</span></span>
+    const near = away != null && away <= 0.05;      // within 5%: one good session can do it
+    return html`<article class=${cls('card near-box', over && 'over')} key=${r.symbol} onClick=${() => go(stockHref(r.symbol))}>
+      <div class="nb-head">
+        <div class="nb-who"><a class="sym" href=${stockHref(r.symbol)}>${r.symbol}</a>
+          <div class="faint nb-name" dir="rtl">${r.info && r.info.name_ar}</div></div>
         ${rated && html`<${Rating} v=${r.pred && r.pred.rating} />`}
-        ${over ? html`<span class="near-over" title=${t('A BUY needs the close above the breakout price')}>${t('Above it now: wait for the close')}</span>`
-          : away != null && html`<span class="near-away">${t('{pct} to go', { pct: fmt.pct(away, 1) })}</span>`}
         <${Bell} sym=${r.symbol} tg=${tg} />
       </div>
-      <div class="near-bar"><span class="faint">${fmt.price(now)}${quote ? html` <span class="live-dot" title=${t('Live, about 15 minutes late')}></span>` : ''}</span>
-        <div class=${cls('bar', over ? '' : 'up')} style="flex:1"><span style=${`width:${away == null ? 0 : Math.max(4, Math.min(100, (1 - away / GAP) * 100))}%`}></span></div>
-        <span title=${t('Breakout price: the 20-day high')}><b>${fmt.price(r.trigger)}</b></span></div>
-      ${rated && r.pred && r.pred.why10 && html`<div class="near-why"><${Reason} items=${r.pred.why10} /></div>`}
-    </div>`;
-  })}
-    ${sorted.length > SHOW && html`<button class="btn sm ghost near-more" onClick=${() => setAll(!all)}>${
-      all ? t('Show fewer') : t('Show all {n}', { n: sorted.length })}</button>`}
-  </div>`;
+      ${over ? html`<div class="nb-over" title=${t('A BUY needs the close above the breakout price')}>${t('Above it now: wait for the close')}</div>`
+        : away != null && html`<div class="nb-away"><b class=${near ? 'up' : ''}>${fmt.pct(away, 1)}</b> <span class="faint">${t('to break out')}</span></div>`}
+      <div class=${cls('bar', over ? '' : 'up')}><span style=${`width:${away == null ? 0 : Math.max(4, Math.min(100, (1 - away / GAP) * 100))}%`}></span></div>
+      <div class="nb-prices">
+        <span><b>${fmt.price(now)}</b>${quote ? html` <span class="live-dot" title=${t('Live, about 15 minutes late')}></span>` : ''}
+          <span class="faint">${t(quote ? 'now' : 'last close')}</span></span>
+        <span class="r" title=${t('Breakout price: the 20-day high')}><b>${fmt.price(r.trigger)}</b>
+          <span class="faint">${t('breakout')}</span></span></div>
+      ${rated && r.pred && r.pred.why10 && html`<div class="nb-why"><${Reason} items=${r.pred.why10} stacked /></div>`}
+    </article>`;
+  })}</div>
+  ${sorted.length > SHOW && html`<button class="btn sm ghost near-more" onClick=${() => setAll(!all)}>${
+    all ? t('Show fewer') : t('Show all {n}', { n: sorted.length })}</button>`}`;
 }
 
 // A Telegram message when the stock gets a BUY: the bot's /watch, set with one tap (t.me/<bot>?start=watch-SYMBOL;

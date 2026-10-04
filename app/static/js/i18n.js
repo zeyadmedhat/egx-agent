@@ -1727,8 +1727,10 @@ export const AR = {
   "Won {win}, tests {test}": "ربح {win}، والاختبارات {test}",
   "next week {pct}": "الأسبوع القادم {pct}",
   "score {n}": "الدرجة {n}",
-  "{pct} to go": "باقي {pct}",
   "No new BUYs while EGX30 is below its 50-day average. Sitting in cash is a valid decision. Below: what is close to a BUY once the market recovers.": "لا شراء جديد ما دام EGX30 تحت متوسط 50 يومًا. البقاء بالكاش قرار سليم. بالأسفل: ما هو قريب من الشراء حين يتعافى السوق.",
   "No stock met all the entry rules at the last close. Sitting in cash is a valid decision. Below: what is close to a BUY.": "لم يستوفِ أي سهم كل قواعد الدخول عند آخر إغلاق. البقاء بالكاش قرار سليم. بالأسفل: ما هو قريب من الشراء.",
   "Stocks without usable prices": "أسهم بلا أسعار صالحة",
+  "to break out": "حتى الاختراق",
+  "now": "الآن",
+  "breakout": "الاختراق",
 };
