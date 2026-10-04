@@ -185,8 +185,8 @@ def index_html(worker: str | None = None, version: str = "") -> str:
     """The Mac's index.html with relative paths (the site lives under /<repository>/), marked as the static site.
     `worker`: the Telegram bot's Worker, the one other address the page may send to (your portfolio, if you link it)."""
     page = (STATIC / "index.html").read_text(encoding="utf-8")
-    page = page.replace('"/static/', f'"./static/{version + "/" if version else ""}').replace('<html lang="en" data-theme="dark">',
-                                                           '<html lang="en" data-theme="dark" data-mode="static">')
+    page = page.replace('"/static/', f'"./static/{version + "/" if version else ""}').replace('<html lang="en" data-theme="light">',
+                                                           '<html lang="en" data-theme="light" data-mode="static">')
     extra = ('  <meta name="robots" content="noindex, nofollow">\n'
              '  <meta name="referrer" content="no-referrer">\n'
              '  <meta name="apple-mobile-web-app-capable" content="yes">\n'
@@ -223,7 +223,7 @@ def service_worker(version: str, out: Path) -> str:
 
 
 MANIFEST = {"name": "EGX Trading Agent", "short_name": "EGX Agent", "start_url": "./", "scope": "./",
-            "display": "standalone", "background_color": "#0f1115", "theme_color": "#0f1115",
+            "display": "standalone", "background_color": "#f3ece0", "theme_color": "#f3ece0",
             "icons": [{"src": "static/favicon.svg", "sizes": "any", "type": "image/svg+xml"}]}
 
 

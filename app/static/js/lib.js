@@ -63,7 +63,7 @@ export const store = {
   watchlist: null,   // the stocks you starred (kept with your portfolio)
   toasts: [],
   offline: false,
-  theme: document.documentElement.dataset.theme || 'dark',
+  theme: document.documentElement.dataset.theme || 'light',
   lang: document.documentElement.lang === 'ar' ? 'ar' : 'en',   // set before start from localStorage (index.html)
   me: null,          // /api/me: { multi_user, user } (on your Mac: you, as admin, no login)
   auth: null,        // the website only: 'login' or 'terms' while that screen is needed
@@ -300,7 +300,7 @@ export function setLang(lang) {
 // ------------------------------------------------------------------ theme
 export function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  try { localStorage.setItem('egx-theme', theme); } catch { /* private mode */ }
+  try { localStorage.setItem('egx-look', theme); } catch { /* private mode */ }
   setStore({ theme });
 }
 export function cssVar(name) {
