@@ -394,7 +394,7 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     assert [c for c, _ in bot.sent] == ["111", "111"]
     assert "Connected" in bot.sent[0][1]
     daily = bot.sent[1][1]
-    assert "AAA" in daily and "buy up to" in daily and "https://me.github.io/egx/" in daily and "/stop" in daily
+    assert "AAA" in daily and "Buy up to" in daily and "https://me.github.io/egx/" in daily and "/stop" in daily
     assert "shares" not in daily.lower() and "MY PRIVATE NOTE" not in daily
     # The link is only inside the encrypted data; nothing about who connected is published or logged.
     key = static_site.derive_key(PASSWORD, static_site.salt_for("me/egx"))
@@ -681,7 +681,7 @@ def test_friends_set_alerts_in_telegram_and_get_them_after_a_close(tmp_path, mon
 
     bot.sent.clear()
     assert alerts.fire_watch_alerts(conn, "123:abc", last) == 1     # AAA is a BUY at this close
-    assert "AAA</b> got a BUY signal" in bot.sent[0][1]
+    assert "AAA</b> · BUY signal" in bot.sent[0][1]
     assert alerts.fire_watch_alerts(conn, "123:abc", last) == 0     # once per close
     conn.execute("UPDATE prices SET close=0.5 WHERE symbol='BBB' AND date=?", (last,))
     assert alerts.fire_watch_alerts(conn, "123:abc", last) == 1     # BBB closed below 1: sent, and done

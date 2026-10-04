@@ -16,7 +16,7 @@ assert.match(await say("/watch COMI 90"), /closes above 90.00 \(last close 80.50
 assert.match(await say("/watch COMI levels"), /support/)
 assert.match(await say("/watch NEWS 5"), /no prices/)
 assert.match(await say("/watch XXXX"), /don't know XXXX/)
-assert.match(await say("/list"), /COMI: a close above 90.00\nCOMI: a BUY signal\nCOMI: near support/)
+assert.match(await say("/list"), /• COMI: a close above 90.00\n• COMI: a BUY signal\n• COMI: near support/)
 assert.match(await say("/unwatch COMI"), /Removed 3 alerts/)
 assert.match(await say("/weekly off"), /no weekly summary/)
 assert.equal(state.subs["7"].weekly, false)
@@ -39,9 +39,9 @@ assert.match(await ask("comi"), /<b>COMI<\/b> · CIB\n💰 <b>128.01<\/b>  ▼ -
 assert.match(await ask("/stock abuk"), /🟢 <b>BUY<\/b>\nBuy up to <b>50.50<\/b> · stop 47.00 · target 56.00/)
 assert.match(await ask("/s XXXX"), /don't know XXXX/)
 assert.match(await ask("hello there"), /didn't find “hello there”/)       // a hint, not silence
-assert.match(await ask("/top"), /1\. <b>ABUK<\/b> 40.0%.*\n2\. <b>COMI<\/b>/)
-assert.match(await ask("/top 20"), /in 20 days.*\n1\. <b>COMI<\/b> 25.0% · expected \+2.1%/)
-assert.match(await ask("/buys"), /ABUK<\/b> up to 50.50/)
+assert.match(await ask("/top"), /1\. <b>ABUK<\/b> · 40.0%.*\n2\. <b>COMI<\/b>/)
+assert.match(await ask("/top 20"), /in 20 days[\s\S]*\n1\. <b>COMI<\/b> · 25.0% · expected \+2.1%/)
+assert.match(await ask("/buys"), /ABUK<\/b> · Abu Qir\nBuy up to <b>50.50<\/b>/)
 assert.match(await ask("/help"), /\/top/)
 assert.match(await ask("/unwatch all"), /Removed all your alerts \(1\)/)
 assert.deepEqual(st.alerts[9], [])
@@ -71,17 +71,17 @@ const book = { date: "2026-09-28", start: 100000, cash: 20000, closed: { count: 
   positions: [{ symbol: "COMI", shares: 100, avg: 120, last: 127, stop: 115.8, target: 151.56, status: "HOLD", reason: "" },
               { symbol: "ABUK", shares: 10, avg: 55, last: 51, stop: 51, target: 60, status: "EXIT", reason: "Closed under the stop" }] }
 const pt = portfolioText({ ...book, sent: "2026-09-29" }, st.info)
-assert.match(pt, /Your portfolio<\/b>: 33,301 EGP \(-66.7% since the start\)/)      // 20000 + 100×128.01 + 10×50
-assert.match(pt, /COMI<\/b> 100 × 120.00 → 128.01 \(\+6.7%, \+801 EGP\)\n   Hold · stop 115.80/)
-assert.match(pt, /ABUK<\/b> 10 × 55.00 → 50.00 \(-9.1%, -50 EGP\) ⚠️ at or under your stop\n   Sell .*\n   Closed under the stop/)
+assert.match(pt, /Your portfolio<\/b>\n<b>33,301 EGP<\/b> · -66.7% since the start/)      // 20000 + 100×128.01 + 10×50
+assert.match(pt, /COMI<\/b> · Hold\n100 × 120.00 → 128.01 · <b>\+6.7%<\/b> \(\+801 EGP\)\nStop 115.80/)
+assert.match(pt, /ABUK<\/b> · Sell ⚠️ at or under your stop\n10 × 55.00 → 50.00 · <b>-9.1%<\/b> \(-50 EGP\)\n.*\n<i>Closed under the stop<\/i>/)
 // like Thndr's: the buy fees count in what you paid (12,000 + 21.5), no selling fee until you sell
 const withFees = portfolioText({ ...book, positions: [{ ...book.positions[0], fees: 21.5 }], sent: "2026-09-29" }, st.info)
-assert.match(withFees, /\(\+6.5%, \+780 EGP\)/)
+assert.match(withFees, /<b>\+6.5%<\/b> \(\+780 EGP\)/)
 assert.match(portfolioText({ ...book, positions: [{ ...book.positions[1], status: "BOUNCE",
   reason: "Big loss (-35.0%): sell at the first close above its 20-day average (59.77 now), by 2026-10-29 at the latest" }],
-  sent: "2026-09-29" }, st.info), /Sell on a bounce · stop 51.00[\s\S]*Big loss \(-35.0%\)/)
-assert.match(pt, /Closed trades: 2, 50.0% won, \+1,500 EGP/)
-assert.match(watchlistText(book, st.info), /COMI<\/b> 128.01 \(-0.4%\) · 13.4% chance in 10 days\n<b>ZZZZ<\/b>/)
+  sent: "2026-09-29" }, st.info), /· Sell on a bounce[\s\S]*Stop 51.00[\s\S]*Big loss \(-35.0%\)/)
+assert.match(pt, /Closed trades: 2 · 50.0% won · \+1,500 EGP/)
+assert.match(watchlistText(book, st.info), /COMI<\/b> 128.01  ▼ -0.4% · 13.4% chance in 10 days\n<b>ZZZZ<\/b>/)
 console.log("portfolio ok")
 
 // The whole link, on a stand-in for Cloudflare's storage and Telegram
@@ -117,7 +117,7 @@ assert.equal((await post("/pair", { code })).status, 400)                       
 assert.equal((await post("/book", { token: "x".repeat(48), book })).status, 401)
 assert.equal((await post("/book", { token, book })).status, 200)
 await tg("/portfolio")
-assert.match(sentMsgs.at(-1), /COMI<\/b> 100 × 120.00/)
+assert.match(sentMsgs.at(-1), /COMI<\/b> · Hold\n100 × 120.00/)
 await tg("/watchlist")
 assert.match(sentMsgs.at(-1), /Your watchlist/)
 // The website's bell: on and off from the linked browser without opening Telegram, kept for the website's run
@@ -271,8 +271,8 @@ st.info.bands = [[91, 100, 0.2116, 0.0093], [71, 90, 0.1654, 0.0053], [51, 70, 0
 Object.assign(st.info, { base10: 0.1338, rated: 147, min_value: 5e6 })
 Object.assign(st.info.stocks.COMI, { g: 71, k: "11001", h20: 131.2, vr: 1.08, adx: 31.6, co: [0.28, 0.12, 0.35, 6.1, 5.0] })
 const why = await handle(st, u("/why comi"))
-assert.match(why, /Rating 71\/100<\/b>: where the model's 2-week chance puts it among the 147 liquid stocks/)
-assert.match(why, /Company: profit \+28.0% in a year · sales \+12.0% · P\/E 6.1 \(sector 5.0\)/)
+assert.match(why, /Rating 71\/100<\/b>\nWhere the model's 2-week chance puts it among the 147 liquid stocks/)
+assert.match(why, /Company<\/b>\nprofit \+28.0% in a year · sales \+12.0% · P\/E 6.1 \(sector 5.0\)/)
 assert.match(why, /stocks rated 71–90 reached the target before the stop 16.5% of the time \(the average stock 13.4%\), \+0.5% a trade/)
 assert.match(why, /Not a BUY today[\s\S]*✅ Liquid: at least 5M EGP[\s\S]*❌ Breakout: a close above its 20-day high \(131.20\)/)
 assert.match(why, /❌ Volume at least 1.5× normal \(last session 1.1×\)\n✅ Trend strength ADX above 20 \(now 32\)/)
@@ -281,7 +281,7 @@ assert.equal((await respond(st, u("comi"))).kb[1][0].callback_data, "y:COMI")   
 assert.match(await handle(st, u("/why")), /Which stock\?/)
 assert.match(await handle(st, u("abuk")), /No rating[\s\S]*BUY<\/b>\nBuy up to <b>50.50/)     // the answer to "which stock?"
 assert.match(await handle(st, arMsg("/lang ar")), /بالعربية/)
-assert.match(await handle(st, arMsg("/why COMI")), /التقييم 71\/100[\s\S]*الشركة: الأرباح \+28.0% خلال سنة[\s\S]*❌ اختراق: إغلاق فوق أعلى سعر في 20 يومًا/)
+assert.match(await handle(st, arMsg("/why COMI")), /التقييم 71\/100[\s\S]*الشركة<\/b>\nالأرباح \+28.0% خلال سنة[\s\S]*❌ اختراق: إغلاق فوق أعلى سعر في 20 يومًا/)
 assert.match(await handle(st, arMsg("/morning off")), /بدون تذكير صباحي/)
 assert.equal(st.subs[9].morning, false)
 assert.match(await handle(st, arMsg("/lang en")), /English/)
@@ -375,13 +375,13 @@ console.log("why, morning, screenshots ok")
               ABUK: { ...st.info.stocks.ABUK, w: 0.48, wr: 1, wm: 0.06, wl: "good" } } }
   const s2 = { ...st, info }, q = text => handle(s2, u(text))
   const wk = await q("/week")
-  assert.match(wk, /Next week's best chances<\/b> \(from the 29 Sep close\)\n1\. <b>ABUK<\/b> 48.0% · target 53.00 \(\+6.0%\) · stop 47.00 · 💪 Strong\n2\. <b>COMI<\/b> 42.0% · target 134.41 \(\+5.0%\) · stop 121.61\n/)
+  assert.match(wk, /Next week's best chances<\/b> · from the 29 Sep close\n\n1\. <b>ABUK<\/b> · 48.0% · 💪 Strong\n      target 53.00 \(\+6.0%\) · stop 47.00\n2\. <b>COMI<\/b> · 42.0%\n      target 134.41 \(\+5.0%\) · stop 121.61\n/)
   assert.match(wk, /strong picks .* got there first 48.1% of the time, the average stock 31.1%/)
   assert.doesNotMatch(wk, /Weak market/)
   info.week.weak = true
-  assert.match(await q("/week"), /close\)\n⚠️ <b>Weak market<\/b>/)
+  assert.match(await q("/week"), /close\n\n⚠️ <b>Weak market<\/b>/)
   assert.match(await q("/stock comi"), /No signal today<\/b>\n\n📅 <b>Next week<\/b>\n42.0% chance to reach 134.41 before 121.61 · rank 2\n\n🎲 <b>Chance to reach/)
-  assert.match(await q("/egx30"), /<b>EGX30<\/b> 53,055 \(\+2.2%\) · 1 Oct\nWeek -1.3% · month -4.7% · this year \+26.8% · a year \+50.7%\nIn dollars: this year \+15.6% · a year \+38.8%\n1-year range 35,208 – 56,937 · 6.4% under its record\n🔴 Under its 50-day average \(54,220\): the agent makes no new BUYs\n32.4% of stocks/)
+  assert.match(await q("/egx30"), /📈 <b>EGX30<\/b> · 1 Oct\n💰 <b>53,055<\/b>  ▲ \+2.2%\n\n📊 <b>Returns<\/b>\nWeek -1.3% · month -4.7%\nThis year \+26.8% · a year \+50.7%\nIn dollars: this year \+15.6% · a year \+38.8%\n\n📏 <b>1-year range<\/b>\n35,208 – 56,937 · 6.4% under its record\n\n🔴 <b>Under its 50-day average<\/b> \(54,220\)\nThe agent makes no new BUYs.\n32.4% of stocks/)
   assert.equal(callbackText("k"), "/week")
   assert.equal(callbackText("e"), "/egx30")
   assert.match(await q("/help"), /\/week[\s\S]*\/egx30[\s\S]*📷 Send a screenshot/)

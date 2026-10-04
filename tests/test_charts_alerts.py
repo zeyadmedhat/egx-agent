@@ -69,7 +69,7 @@ def test_a_levels_alert_fires_near_support_once(tmp_path, monkeypatch):
     db.set_meta(conn, "site_subscribers", json.dumps({"111": {}}))
     sent = []
     monkeypatch.setattr(alerts, "send", lambda token, chat, text: sent.append(text))
-    assert alerts.fire_watch_alerts(conn, "123:abc", last, CFG) == 1 and "VVV</b> closed at" in sent[0]
+    assert alerts.fire_watch_alerts(conn, "123:abc", last, CFG) == 1 and "VVV</b> · near support\nClosed at" in sent[0]
     assert alerts.fire_watch_alerts(conn, "123:abc", last, CFG) == 0          # the same touch isn't sent twice
     assert conn.execute("SELECT kind FROM watch_alerts").fetchone()[0] == "levels"   # it stays
 

@@ -247,11 +247,11 @@ def build_message(d: views.Data) -> tuple[str, bool]:
     o = views.orders(d)
     if not m or not o:
         return "<b>EGX Agent</b>\nNo scan yet. Open the dashboard and press Run scan.", False
-    head = [f"<b>EGX Agent · {views.nice_date(o['scan_date'], True)} close</b>"]
+    head = [f"📊 <b>EGX Agent · {views.nice_date(o['scan_date'], True)} close</b>"]
     mood = "🔴 Risk-off" if m.get("risk_off") else "🟢 Market OK"
     if o["blocked"]:
         mood += ": no new buys"
-    head.append(f"EGX30 {m['egx30_close']:,.0f} ({m['egx30_change']:+.1%}) · {mood}")
+    head.append(f"EGX30 {m['egx30_close']:,.0f}  {'▼' if m['egx30_change'] < 0 else '▲'} {m['egx30_change']:+.1%} · {mood}")
     b = views.breadth_data(d)
     if b:
         v = breadth.verdict(b, m.get("risk_off"))
@@ -261,21 +261,22 @@ def build_message(d: views.Data) -> tuple[str, bool]:
 
     preds = views.predictions(d)
     warn = views.cautions_map(d)
-    body = ["", f"<b>Orders for {views.nice_date(o['session'], True)}</b>"]
+    body = ["", f"📋 <b>Orders for {views.nice_date(o['session'], True)}</b>"]
     for it in o["items"]:
+        body.append("")
         body.append(f"{ICON[it['kind']]} <b>{_e(it['title'])}</b>")
-        body.append(f"      {_e(it['detail'])}")
+        body.append(_e(it["detail"]))
         if it["kind"] == "buy":
             if it.get("source") == "model":
-                body.append("      🎯 A prediction-model pick (its top picks that pass the checks are BUYs too)")
-            body.append(f"      {_shariah(it['info'])}")
-            body += _caution_lines(warn.get(it["symbol"]))
+                body.append("🎯 A prediction-model pick (its top picks that pass the checks are BUYs too)")
+            body.append(_shariah(it["info"]))
+            body += _caution_lines(warn.get(it["symbol"]), "")
             pr = preds["by_symbol"].get(it["symbol"])
             if pr and pr.get("p10") is not None and preds["base"].get(10):
                 rank = f"#{pr['rank10']:.0f} of {preds['count']}, " if pr.get("rank10") else ""
-                body.append(f"      Model: {rank}{pr['p10']:.0%} chance of target before stop in 2 weeks "
+                body.append(f"Model: {rank}{pr['p10']:.0%} chance of target before stop in 2 weeks "
                             f"(average stock {preds['base'][10]:.0%})" if pr.get("top10") else
-                            f"      Model: {rank}not one of its top picks today")
+                            f"Model: {rank}not one of its top picks today")
     if any(it["kind"] == "buy" for it in o["items"]):
         body += _cold_lines(d)
     if not o["items"]:
@@ -292,10 +293,10 @@ def build_message(d: views.Data) -> tuple[str, bool]:
     since = (datetime.fromisoformat(o["scan_date"]) - pd.Timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
     held_news = _held_news(d, held, since)
     if held_warn or held_news:
-        tail += ["", "<b>Your stocks</b>"] + held_warn + held_news
+        tail += ["", "💼 <b>Your stocks</b>"] + held_warn + held_news
     paper = portfolio.account_summary(d.conn, "paper", d.cfg, d.closes())
     if paper["open_count"] or paper["realized"]:
-        tail.append(f"Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%})")
+        tail.append(f"🧪 Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%})")
     tail = ([""] + tail if tail else []) + ["", "<i>Rules-based signals, not investment advice.</i>"]
 
     text = "\n".join(head + body + tail)
@@ -320,11 +321,11 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
     blocked = m.get("risk_off") and d.cfg.get("riskoff_block_buys")
     if ar:
         mood = ("🔴 تجنب المخاطر" + (": لا مشتريات جديدة" if blocked else "")) if m.get("risk_off") else "🟢 السوق جيد"
-        lines = [f"<b>EGX Agent · إغلاق {_date(scan_date, lang, True)}</b>"]
+        lines = [f"📊 <b>EGX Agent · إغلاق {_date(scan_date, lang, True)}</b>"]
     else:
         mood = ("🔴 Risk-off" + (": no new buys" if blocked else "")) if m.get("risk_off") else "🟢 Market OK"
-        lines = [f"<b>EGX Agent · {views.nice_date(scan_date, True)} close</b>"]
-    lines.append(f"EGX30 {m['egx30_close']:,.0f} ({m['egx30_change']:+.1%}) · {mood}")
+        lines = [f"📊 <b>EGX Agent · {views.nice_date(scan_date, True)} close</b>"]
+    lines.append(f"EGX30 {m['egx30_close']:,.0f}  {'▼' if m['egx30_change'] < 0 else '▲'} {m['egx30_change']:+.1%} · {mood}")
     b = views.breadth_data(d)
     if b:
         v = breadth.verdict(b, m.get("risk_off"))
@@ -338,13 +339,13 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
     preds = views.predictions(d)
     warn = views.cautions_map(d)
     if ar:
-        lines += ["", f"<b>إشارات الشراء لجلسة {_date(session, lang, True)}</b>" if buys
-                  else "<b>لا توجد إشارات شراء</b> عند هذا الإغلاق."]
+        lines += ["", f"🟢 <b>إشارات الشراء لجلسة {_date(session, lang, True)}</b>" if buys
+                  else "⚪ <b>لا توجد إشارات شراء</b> عند هذا الإغلاق."]
     else:
-        lines += ["", f"<b>BUY signals for {views.nice_date(session, True)}</b>" if buys
-                  else "<b>No BUY signals</b> at this close."]
+        lines += ["", f"🟢 <b>BUY signals for {views.nice_date(session, True)}</b>" if buys
+                  else "⚪ <b>No BUY signals</b> at this close."]
     for r in sorted(buys, key=views.signal_order):      # the order money goes in: the model's rank first
-        lines.append(_buy_line(r, lang))
+        lines += ["", _buy_line(r, lang)]
         extra = [f"{'التقييم' if ar else 'score'} {r['score']:.0f}", _shariah(d.info(r["symbol"]))]
         pr = preds["by_symbol"].get(r["symbol"])
         if pr and pr.get("p10") is not None and preds["base"].get(10):
@@ -354,31 +355,31 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
             else:
                 extra.append(f"model top pick {pr['p10']:.0%} (avg {preds['base'][10]:.0%})" if pr.get("top10")
                              else "not a model top pick")
-        lines.append("      " + " · ".join(extra))
-        lines += _caution_lines(warn.get(r["symbol"]), lang=lang)
+        lines.append(" · ".join(extra))
+        lines += _caution_lines(warn.get(r["symbol"]), "", lang=lang)
     if buys:
         lines += _cold_lines(d, lang)
     near = sorted((r for r in rows if r["action"] != "BUY"), key=views.signal_order)
     if near:              # the site's "Close to a BUY" list: the first few by the same order
         names, more = [_e(r["symbol"]) for r in near[:3]], len(near) - 3
-        lines.append(f"قريبة من الشراء: {'، '.join(names)}" + (f" و{more} أخرى" if more > 0 else "") + "." if ar else
-                     f"Close to a BUY: {', '.join(names)}" + (f" and {more} more" if more > 0 else "") + ".")
+        lines += ["", f"👀 <b>قريبة من الشراء</b>: {'، '.join(names)}" + (f" و{more} أخرى" if more > 0 else "") + "." if ar else
+                  f"👀 <b>Close to a BUY</b>: {', '.join(names)}" + (f" and {more} more" if more > 0 else "") + "."]
     if week := _week_line(d, lang):
-        lines.append(week)
+        lines.append(("" if near else "\n") + "📅 " + week)
     if personal:
         lines += personal
     if ar:
         foot = ("عدد الأسهم لكل صفقة وفلتر الشريعة على الموقع." if personal is not None else
                 "افتح الموقع لعدد الأسهم وفلتر الشريعة وما تفعله في مراكزك، أو اربط محفظتك (الإعدادات ← ربط تيليجرام) "
                 "لتصلك أوامرك هنا.")
-        lines += ["", foot + (f"\n{site_url}" if site_url else ""), "",
-                  "<i>إشارات مبنية على قواعد، وليست نصيحة استثمارية.</i> أرسل /stop لإيقاف هذه الرسائل."]
+        lines += ["", f"<i>{foot}</i>" + (f"\n{site_url}" if site_url else ""), "",
+                  "<i>إشارات مبنية على قواعد، وليست نصيحة استثمارية. أرسل /stop لإيقاف هذه الرسائل.</i>"]
     else:
         foot = ("Your share counts and Shariah filter are on the site." if personal is not None else
                 "Open the site for your share counts, your Shariah filter and what to do with your own positions, "
                 "or link your portfolio (Settings → Connect Telegram) to get your orders here.")
-        lines += ["", foot + (f"\n{site_url}" if site_url else ""), "",
-                  "<i>Rules-based signals, not investment advice.</i> Send /stop to stop these messages."]
+        lines += ["", f"<i>{foot}</i>" + (f"\n{site_url}" if site_url else ""), "",
+                  "<i>Rules-based signals, not investment advice. Send /stop to stop these messages.</i>"]
     text = "\n".join(lines)
     return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + ("\n…المزيد على الموقع." if ar else "\n…more on the site.")
 
@@ -401,9 +402,9 @@ def _buy_line(r: dict, lang: str = "en") -> str:
     lv = (views.px(r["entry_high"]), views.px(r["stop"]), views.px(r["target"]))
     if lang == "ar":
         pick = " (اختيار النموذج)" if r.get("source") == "model" else ""
-        return f"🟢 <b>{_e(r['symbol'])}</b>{pick}: اشترِ حتى {lv[0]} · الوقف {lv[1]} · الهدف {lv[2]}"
+        return f"🟢 <b>{_e(r['symbol'])}</b>{pick}\nاشترِ حتى <b>{lv[0]}</b> · الوقف {lv[1]} · الهدف {lv[2]}"
     pick = " (model pick)" if r.get("source") == "model" else ""
-    return f"🟢 <b>{_e(r['symbol'])}</b>{pick}: buy up to {lv[0]} · stop {lv[1]} · target {lv[2]}"
+    return f"🟢 <b>{_e(r['symbol'])}</b>{pick}\nBuy up to <b>{lv[0]}</b> · stop {lv[1]} · target {lv[2]}"
 
 
 def personal_part(d: views.Data, positions: list[dict], lang: str = "en") -> tuple[list[str], bool]:
@@ -413,9 +414,9 @@ def personal_part(d: views.Data, positions: list[dict], lang: str = "en") -> tup
     if not o:
         return [], False
     items = _order_items(o, positions, lang)
-    lines = ["", "<b>مراكزك</b>" if lang == "ar" else "<b>Your positions</b>"]
+    lines = ["", "💼 <b>مراكزك</b>" if lang == "ar" else "💼 <b>Your positions</b>"]
     for kind, title, detail in items:
-        lines += [f"{ICON[kind]} <b>{title}</b>", f"      {_e(detail)}"]
+        lines += [f"{ICON[kind]} <b>{title}</b>", _e(detail)]
     if o["holds"]:
         ar = lang == "ar"
         lines.append(("تحتفظ بـ: " if ar else "Holding: ") + ("، " if ar else ", ").join(
@@ -436,14 +437,15 @@ def morning_message(d: views.Data, positions: list[dict], lang: str = "en") -> s
     if not items and not buys:
         return None
     ar = lang == "ar"
-    lines = [f"☀️ <b>{'قبل الافتتاح' if ar else 'Before the open'}</b> "
-             f"({'من إغلاق' if ar else 'from the'} {_date(scan_date, lang, True) if ar else views.nice_date(scan_date, True)}"
-             f"{'' if ar else ' close'})"]
-    lines += [f"{ICON[kind]} {title}" for kind, title, _ in items]
-    lines += [_buy_line(r, lang) for r in buys]
-    if buys:
-        lines.append("عدد الأسهم لكل صفقة على الموقع." if ar else "Your share counts are on the site.")
-    lines.append("/morning off يوقف هذا التذكير." if ar else "/morning off stops this reminder.")
+    lines = [f"☀️ <b>{'قبل الافتتاح' if ar else 'Before the open'}</b> · "
+             f"{'من إغلاق' if ar else 'from the'} {_date(scan_date, lang, True) if ar else views.nice_date(scan_date, True)}"
+             f"{'' if ar else ' close'}"]
+    if items:
+        lines += [""] + [f"{ICON[kind]} {title}" for kind, title, _ in items]
+    for r in buys:
+        lines += ["", _buy_line(r, lang)]
+    foot = ("عدد الأسهم لكل صفقة على الموقع. " if ar else "Your share counts are on the site. ") if buys else ""
+    lines += ["", f"<i>{foot}{'/morning off يوقف هذا التذكير.' if ar else '/morning off stops this reminder.'}</i>"]
     text = "\n".join(lines)
     return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + "\n…"
 
@@ -629,23 +631,23 @@ def level_touch(d: views.Data, symbol: str, data_date: str, lang: str = "en") ->
     res = next((z for z in p["resistances"] if z["strength"] >= levels.SOLID), None)
     if lang == "ar" and sup and c <= sup["high"] * (1 + NEAR_SUPPORT):
         return {"key": f"support {sup['price']:.2f}", "text": (
-            f"🔔 <b>{name}</b> أغلق عند {views.px(c)} يوم {_date(data_date, lang)}، قرب الدعم عند {views.px(sup['price'])} "
-            f"({_e(', '.join(sup['sources'][:2]))}). دخل المشترون هناك من قبل؛ وإغلاق أقل منه بوضوح يكسره. "
-            f"وقف الرسم البياني {views.px(p['stop'])}، الهدف {views.px(p['target'])}.")}
+            f"🔔 <b>{name}</b> · قرب الدعم\nأغلق عند {views.px(c)} يوم {_date(data_date, lang)}، قرب الدعم عند "
+            f"<b>{views.px(sup['price'])}</b> ({_e(', '.join(sup['sources'][:2]))}).\nدخل المشترون هناك من قبل؛ وإغلاق أقل "
+            f"منه بوضوح يكسره.\nوقف الرسم البياني {views.px(p['stop'])} · الهدف {views.px(p['target'])}")}
     if lang == "ar" and res and c >= res["low"] * 0.99:
         return {"key": f"resistance {res['price']:.2f}", "text": (
-            f"🔔 <b>{name}</b> أغلق عند {views.px(c)} يوم {_date(data_date, lang)}، عند المقاومة {views.px(res['price'])} "
-            f"({_e(', '.join(res['sources'][:2]))}). دخل البائعون هناك من قبل: مكان لجني بعض الربح، أو انتظر إغلاقًا "
-            "واضحًا فوقها.")}
+            f"🔔 <b>{name}</b> · عند المقاومة\nأغلق عند {views.px(c)} يوم {_date(data_date, lang)}، عند المقاومة "
+            f"<b>{views.px(res['price'])}</b> ({_e(', '.join(res['sources'][:2]))}).\nدخل البائعون هناك من قبل: مكان لجني "
+            "بعض الربح، أو انتظر إغلاقًا واضحًا فوقها.")}
     if sup and c <= sup["high"] * (1 + NEAR_SUPPORT):
         return {"key": f"support {sup['price']:.2f}", "text": (
-            f"🔔 <b>{name}</b> closed at {views.px(c)} on {views.nice_date(data_date)}, near support at "
-            f"{views.px(sup['price'])} ({_e(', '.join(sup['sources'][:2]))}). Buyers stepped in there before; a close "
-            f"well under it would break it. Chart stop {views.px(p['stop'])}, target {views.px(p['target'])}.")}
+            f"🔔 <b>{name}</b> · near support\nClosed at {views.px(c)} on {views.nice_date(data_date)}, near support at "
+            f"<b>{views.px(sup['price'])}</b> ({_e(', '.join(sup['sources'][:2]))}).\nBuyers stepped in there before; a "
+            f"close well under it would break it.\nChart stop {views.px(p['stop'])} · target {views.px(p['target'])}")}
     if res and c >= res["low"] * 0.99:
         return {"key": f"resistance {res['price']:.2f}", "text": (
-            f"🔔 <b>{name}</b> closed at {views.px(c)} on {views.nice_date(data_date)}, at resistance "
-            f"{views.px(res['price'])} ({_e(', '.join(res['sources'][:2]))}). Sellers stepped in there before: "
+            f"🔔 <b>{name}</b> · at resistance\nClosed at {views.px(c)} on {views.nice_date(data_date)}, at resistance "
+            f"<b>{views.px(res['price'])}</b> ({_e(', '.join(res['sources'][:2]))}).\nSellers stepped in there before: "
             "a place to take some profit, or to wait for a clear close above it.")}
     return None
 
@@ -664,28 +666,28 @@ def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str, cfg:
             continue
         text = None
         ar = subs[a["chat_id"]].get("lang") == "ar"
-        stop_these = (f"\n/unwatch {_e(a['symbol'])} لإيقاف هذه التنبيهات." if ar
-                      else f"\n/unwatch {_e(a['symbol'])} to stop these.")
+        stop_these = (f"/unwatch {_e(a['symbol'])} لإيقاف هذه التنبيهات." if ar
+                      else f"/unwatch {_e(a['symbol'])} to stop these.")
         if a["kind"] == "buy":
             b = buys.get(a["symbol"])
             if b and a["fired"] != data_date:
                 lv = (views.px(b["entry_high"]), views.px(b["stop"]), views.px(b["target"]))
-                text = (f"🔔 <b>{_e(a['symbol'])}</b> حصل على إشارة شراء عند إغلاق {_date(data_date, 'ar')}: اشترِ حتى "
-                        f"{lv[0]} · الوقف {lv[1]} · الهدف {lv[2]}.\nعدد الأسهم على الموقع." if ar else
-                        f"🔔 <b>{_e(a['symbol'])}</b> got a BUY signal at the {views.nice_date(data_date)} close: buy up "
-                        f"to {lv[0]} · stop {lv[1]} · target {lv[2]}.\nYour share count is on the website.") + stop_these
+                text = (f"🔔 <b>{_e(a['symbol'])}</b> · إشارة شراء\nعند إغلاق {_date(data_date, 'ar')}: اشترِ حتى "
+                        f"<b>{lv[0]}</b>\nالوقف {lv[1]} · الهدف {lv[2]}\n\n<i>عدد الأسهم على الموقع. {stop_these}</i>" if ar else
+                        f"🔔 <b>{_e(a['symbol'])}</b> · BUY signal\nAt the {views.nice_date(data_date)} close: buy up to "
+                        f"<b>{lv[0]}</b>\nStop {lv[1]} · target {lv[2]}\n\n<i>Your share count is on the website. {stop_these}</i>")
         elif a["kind"] == "levels":
             hit = level_touch(views.Data(conn, cfg or config.DEFAULTS, cache), a["symbol"], data_date,
                               "ar" if ar else "en")
             if hit and a["fired"] != hit["key"]:
-                text = hit["text"] + stop_these
+                text = hit["text"] + f"\n\n<i>{stop_these}</i>"
         else:
             row = conn.execute("SELECT close FROM prices WHERE symbol=? AND date=?", (a["symbol"], data_date)).fetchone()
             if row and (row["close"] >= a["price"] if a["kind"] == "above" else row["close"] <= a["price"]):
-                text = (f"🔔 <b>{_e(a['symbol'])}</b> أغلق عند {views.px(row['close'])} يوم {_date(data_date, 'ar')}: "
-                        f"{'فوق' if a['kind'] == 'above' else 'تحت'} سعرك {views.px(a['price'])}. انتهى هذا التنبيه." if ar else
-                        f"🔔 <b>{_e(a['symbol'])}</b> closed at {views.px(row['close'])} on "
-                        f"{views.nice_date(data_date)}: {a['kind']} your {views.px(a['price'])}. This alert is done.")
+                text = (f"🔔 <b>{_e(a['symbol'])}</b> · {'فوق' if a['kind'] == 'above' else 'تحت'} {views.px(a['price'])}\n"
+                        f"أغلق عند <b>{views.px(row['close'])}</b> يوم {_date(data_date, 'ar')}.\n\n<i>انتهى هذا التنبيه.</i>" if ar else
+                        f"🔔 <b>{_e(a['symbol'])}</b> · {a['kind']} {views.px(a['price'])}\nClosed at "
+                        f"<b>{views.px(row['close'])}</b> on {views.nice_date(data_date)}.\n\n<i>This alert is done.</i>")
         if not text:
             continue
         try:
@@ -990,7 +992,7 @@ def build_weekly(d: views.Data, site_url: str = "", mine: bool = True, lang: str
     first = {}
     for r in week_rows:
         first.setdefault(r["symbol"], r)
-    lines += ["", f"<b>إشارات الشراء هذا الأسبوع: {len(first)}</b>" if ar else f"<b>BUY signals this week: {len(first)}</b>"]
+    lines += ["", f"🟢 <b>إشارات الشراء هذا الأسبوع: {len(first)}</b>" if ar else f"🟢 <b>BUY signals this week: {len(first)}</b>"]
     if first:
         lines.append(("، " if ar else ", ").join(
             f"{_e(s)}{' 🎯' if r['source'] == 'model' else ''} ({_date(r['scan_date'], lang)})" for s, r in first.items()))
@@ -1001,33 +1003,34 @@ def build_weekly(d: views.Data, site_url: str = "", mine: bool = True, lang: str
     moves = [closes[r["symbol"]] / r["close"] - 1 for r in past if r["symbol"] in closes and r["close"]]
     if moves:
         up, avg = sum(x > 0 for x in moves), sum(moves) / len(moves)
-        lines.append(f"إشارات الشراء الـ{len(moves)} في الأسابيع الأربعة السابقة: {avg:+.1%} في المتوسط منذ إغلاق "
+        lines += [""]
+        lines.append(f"📈 إشارات الشراء الـ{len(moves)} في الأسابيع الأربعة السابقة: {avg:+.1%} في المتوسط منذ إغلاق "
                      f"الإشارة، {up} من {len(moves)} صاعدة (قبل الوقف والهدف)." if ar else
-                     f"The {len(moves)} BUY signals of the 4 weeks before: {avg:+.1%} on average "
+                     f"📈 The {len(moves)} BUY signals of the 4 weeks before: {avg:+.1%} on average "
                      f"since their signal close, {up} of {len(moves)} up (before stops and targets).")
 
     if mine:
         positions = views.open_positions(d)
         if positions:
-            lines += ["", f"<b>Your {len(positions)} position{'s' if len(positions) != 1 else ''}</b>"]
+            lines += ["", f"💼 <b>Your {len(positions)} position{'s' if len(positions) != 1 else ''}</b>"]
             for p in positions:
                 lines.append(f"{_e(p['symbol'])} {p['pnl_pct']:+.1%} · {p['status'].lower()}")
     paper = portfolio.account_summary(d.conn, "paper", d.cfg, closes)
     if paper["open_count"] or paper["realized"]:
-        lines += ["", f"الحساب التجريبي {paper['equity']:,.0f} جنيه ({paper['return_pct']:+.1%} منذ بدايته)" if ar else
-                  f"Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%} since it started)"]
+        lines += ["", f"🧪 الحساب التجريبي {paper['equity']:,.0f} جنيه ({paper['return_pct']:+.1%} منذ بدايته)" if ar else
+                  f"🧪 Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%} since it started)"]
     meta = predict.load_meta(predict.model_dir(d.conn))
     if meta:
         h = predict.health(d.conn, meta)
         if h["status"] in HEALTH_WORDS:
-            lines += ["", f"نموذج التوقع: {HEALTH_AR[h['status']]}" if ar else
-                      f"Prediction model: {HEALTH_WORDS[h['status']]}"]
+            lines += ["", f"🤖 <b>نموذج التوقع</b>: {HEALTH_AR[h['status']]}" if ar else
+                      f"🤖 <b>Prediction model</b>: {HEALTH_WORDS[h['status']]}"]
     if ar:
-        lines += ["", (f"{site_url}\n" if site_url else "") + "<i>إشارات مبنية على قواعد، وليست نصيحة استثمارية.</i>"
-                  + ("" if mine else " /weekly off يوقف هذا الملخص.")]
+        lines += ["", (f"{site_url}\n" if site_url else "") + "<i>إشارات مبنية على قواعد، وليست نصيحة استثمارية."
+                  + ("" if mine else " /weekly off يوقف هذا الملخص.") + "</i>"]
     else:
-        lines += ["", (f"{site_url}\n" if site_url else "") + "<i>Rules-based signals, not investment advice.</i>"
-                  + ("" if mine else " /weekly off stops this summary.")]
+        lines += ["", (f"{site_url}\n" if site_url else "") + "<i>Rules-based signals, not investment advice."
+                  + ("" if mine else " /weekly off stops this summary.") + "</i>"]
     text = "\n".join(lines)
     return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + "\n…"
 

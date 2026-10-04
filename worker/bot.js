@@ -45,30 +45,30 @@ const EN = {
   linkedOnly: "🔗 <b>This browser's portfolio is linked.</b> After each close I'll add what to do with your own " +
     "positions. /portfolio any time.",
   stopped: "Stopped. To start again, open the website → Settings → Connect Telegram.",
-  help: "<b>Ask about any stock</b>: send its symbol (COMI) or part of its Arabic name (التجاري).\n" +
-    "/week: next week's best chances: up to the target before the stop, within 5 sessions\n" +
-    "/top: the 10 best chances to reach the target in 10 days (/top 20: in 20 days)\n" +
-    "/buys: today's BUY signals\n" +
-    "/why COMI: why it is or isn't a BUY, its rating and its levels\n" +
-    "/egx30: the index in brief: its returns, in dollars too, and its 50-day average\n" +
-    "📷 Send a screenshot of your broker's holdings: I check it against your website portfolio\n\n" +
-    "<b>Alerts for the stocks you follow</b>, checked after each close:\n" +
-    "/watch COMI: when COMI gets a BUY signal\n" +
-    "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n" +
-    "/watch COMI levels: when COMI closes near a strong support (a place to buy) or reaches resistance " +
-    "(a place to take profit)\n" +
-    "/unwatch COMI: stop COMI's alerts (/unwatch all: every alert)\n" +
-    "/list: your alerts\n\n" +
-    "<b>Your own portfolio</b> (from the website):\n" +
-    "/portfolio: your positions, profit and what the exit rules say\n" +
-    "/watchlist: the stocks you starred\n" +
-    "/link: connect them (once) · /unlink: disconnect\n\n" +
-    "<b>Messages</b>\n" +
-    "/quiet: only message me on days with a BUY or something to do (/quiet off: every close)\n" +
-    "/morning off: no 9:30 reminder before the open (/morning on to have it again)\n" +
-    "/weekly off: no Thursday summary (/weekly on to have it again)\n" +
-    "/lang ar: بالعربية\n" +
-    "/stop: stop all messages",
+  help: "💬 <b>Ask about any stock</b>\nSend its symbol (COMI) or part of its Arabic name (التجاري).\n\n" +
+    "📊 <b>The market</b>\n" +
+    "/week · next week's best chances (target before stop, within 5 sessions)\n" +
+    "/top · the 10 best chances in 10 days (/top 20: in 20 days)\n" +
+    "/buys · today's BUY signals\n" +
+    "/why COMI · why it is or isn't a BUY, its rating and levels\n" +
+    "/egx30 · the index in brief\n" +
+    "📷 Send a screenshot of your broker's holdings to check it against the website\n\n" +
+    "🔔 <b>Alerts</b> (checked after each close)\n" +
+    "/watch COMI · when it gets a BUY signal\n" +
+    "/watch COMI 45 · when it closes above 45 (or below, if 45 is under its price)\n" +
+    "/watch COMI levels · near a strong support or at resistance\n" +
+    "/unwatch COMI · stop its alerts (/unwatch all: every alert)\n" +
+    "/list · your alerts\n\n" +
+    "💼 <b>Your portfolio</b> (from the website)\n" +
+    "/portfolio · your positions, profit and what to do\n" +
+    "/watchlist · the stocks you starred\n" +
+    "/link · connect it (once) · /unlink · disconnect\n\n" +
+    "✉️ <b>Messages</b>\n" +
+    "/quiet · only on days with a BUY or something to do (/quiet off: every close)\n" +
+    "/morning off · no 9:30 reminder (/morning on: back)\n" +
+    "/weekly off · no Thursday summary (/weekly on: back)\n" +
+    "/lang ar · بالعربية\n" +
+    "/stop · stop all messages",
   noData: "The website's data hasn't reached me yet. Try again after its next run.",
   unknown: s => `I don't know ${s}. Use the stock's EGX symbol, like COMI.`,
   notFound: s => `I didn't find “${s}”. Send a stock's symbol (COMI) or part of its Arabic name (التجاري), or /help.`,
@@ -84,15 +84,15 @@ const EN = {
   morningOn: "OK: on session days I'll remind you at 9:30 what to do at the open, when there's something to do.",
   morningOff: "OK: no morning reminder. /morning on to have it again.",
   langSet: "OK: I'll answer in English. /lang ar for Arabic.",
-  rating: (g, n) => `<b>Rating ${g}/100</b>: where the model's 2-week chance puts it among the ${n} liquid stocks it ` +
-    "rates today, from its chart and the company's results (100 = its first)",
-  co: { head: "Company", lost: "lost money over the last year", profit: g => `profit ${g} in a year`,
+  rating: (g, n) => `⭐ <b>Rating ${g}/100</b>\nWhere the model's 2-week chance puts it among the ${n} liquid stocks it ` +
+    "rates today, from its chart and the company's results (100 = its first).",
+  co: { head: "🏢 <b>Company</b>", lost: "lost money over the last year", profit: g => `profit ${g} in a year`,
         sales: g => `sales ${g}`, pe: (pe, sec) => `P/E ${pe}${sec ? ` (sector ${sec})` : ""}` },
   band: (lo, hi, hit, base, ret) => `In its tests, stocks rated ${lo}–${hi} reached the target before the stop ${hit} ` +
     `of the time${base ? ` (the average stock ${base})` : ""}${ret ? `, ${ret} a trade after fees` : ""}.`,
   noRating: "No rating: the model rates only stocks with enough daily trading.",
-  checks: "The BUY rule's checks:",
-  notBuy: "Not a BUY today. The BUY rule's checks:",
+  checks: "✅ <b>The BUY rule's checks</b>",
+  notBuy: "❌ <b>Not a BUY today</b> · the BUY rule's checks",
   check: [m => `Liquid: at least ${m}M EGP traded a day, a year of history`,
           () => "Uptrend: above its 20- and 50-day averages",
           h => `Breakout: a close above its 20-day high (${h})`,
@@ -118,19 +118,19 @@ const EN = {
   hChart: "📊 <b>Chart</b>",
   supRes: (a, b) => `Support ${a} · resistance ${b}`,
   levelsTip: sym => `/watch ${sym} levels: an alert when it nears support or resistance`,
-  top: (hz, d) => `<b>Best chances to reach the target in ${hz} days</b> (${d})`,
+  top: (hz, d) => `🏆 <b>Best chances in ${hz} days</b> · ${d}\n<i>to reach the target before the stop</i>`,
   expected: x => ` · expected ${x}`,
-  topFoot: "Not advice: chances from the website's model. Tap a stock for more.",
+  topFoot: "<i>Chances from the website's model, not advice. Tap a stock for more.</i>",
   noPred: "No predictions yet.",
-  noBuys: d => `No BUY signals at the ${d} close.`,
-  buys: d => `<b>BUY signals at the ${d} close</b>`,
-  buyLine: (sym, e, s, t) => `🟢 <b>${sym}</b> up to ${e} · stop ${s} · target ${t}`,
-  buysFoot: "Your share counts are on the website.",
+  noBuys: d => `⚪ <b>No BUY signals</b> at the ${d} close.`,
+  buys: d => `🟢 <b>BUY signals</b> · ${d} close`,
+  buyLine: (sym, name, e, s, t) => `<b>${sym}</b>${name}\nBuy up to <b>${e}</b> · stop ${s} · target ${t}`,
+  buysFoot: "<i>Your share counts are on the website.</i>",
   alertBuy: s => `${s}: a BUY signal`,
   alertLevels: s => `${s}: near support or resistance`,
   alertPrice: (s, k, p) => `${s}: a close ${k} ${p}`,
   noAlerts: "You have no alerts yet.\n\n",
-  yourAlerts: "<b>Your alerts</b>",
+  yourAlerts: "🔔 <b>Your alerts</b>",
   removedAll: n => n ? `Removed all your alerts (${n}).` : "You have no alerts.",
   removed: (n, s) => n ? `Removed ${n} alert${n !== 1 ? "s" : ""} for ${s}.` : `You have no alert for ${s}.`,
   tooMany: m => `You already have ${m} alerts. Remove some with /unwatch first.`,
@@ -149,55 +149,57 @@ const EN = {
   linkDone: "✅ <b>Your portfolio is linked.</b> Send /portfolio or /watchlist any time.",
   unlinked: "Unlinked: I've deleted the copy of your portfolio. The website keeps it, as before.",
   notLinked: "Your portfolio isn't linked yet. Open the website → Settings → Connect Telegram, or send /link.",
-  worth: (w, since) => `<b>Your portfolio</b>: ${w} EGP${since ? ` (${since} since the start)` : ""}`,
+  worth: (w, since) => `💼 <b>Your portfolio</b>\n<b>${w} EGP</b>${since ? ` · ${since} since the start` : ""}`,
   cash: (c, n) => `Cash ${c} EGP · ${n} open position${n === 1 ? "" : "s"}`,
-  closed: (n, w, t) => `Closed trades: ${n}, ${w} won, ${t} EGP`,
+  closed: (n, w, t) => `Closed trades: ${n} · ${w} won · ${t} EGP`,
   atStop: " ⚠️ at or under your stop", atTarget: " 🎯 at your target",
-  stopW: "stop", targetW: "target",
+  stopW: "Stop", targetW: "target", egpW: "EGP",
   status: s => ({ EXIT: "Sell", BOUNCE: "Sell on a bounce", REVIEW: "Consider selling", "TIGHTEN STOP": "Raise your stop",
                   HOLD: "Hold", ADJUST: "Update your shares", "NO DATA": "No price yet" })[s] || s,
   note: s => s,
-  foot: (sent, scan) => `\n\nSent by your browser on ${sent}; prices from the ${scan} close. ` +
-    "Open the website to update the exit rules.",
-  fresh: scan => `\n\nChecked with the exit rules at the ${scan} close.`,
+  foot: (sent, scan) => `\n\n<i>Sent by your browser on ${sent}; prices from the ${scan} close. ` +
+    "Open the website to update the exit rules.</i>",
+  fresh: scan => `\n\n<i>Checked with the exit rules at the ${scan} close.</i>`,
   wlEmpty: "Your watchlist is empty. Star stocks (☆) on the website.",
-  wl: "<b>Your watchlist</b>",
+  wl: "⭐ <b>Your watchlist</b>",
   wlChance: p => ` · ${p} chance in 10 days`,
-  wlFoot: "/stock SYMBOL for more.",
+  wlFoot: "<i>Tap a stock, or send its symbol, for more.</i>",
   // next week (the website's Predictions → Next week)
   bWeek: "📅 Next week", bX30: "📈 EGX30",
-  week: d => `<b>Next week's best chances</b> (from the ${d} close)`,
-  weekLine: (i, sym, p, tgt, up, stop, strong) => `${i}. <b>${sym}</b> ${p} · target ${tgt} (+${up}) · stop ${stop}` +
-    (strong ? " · 💪 Strong" : ""),
+  week: d => `📅 <b>Next week's best chances</b> · from the ${d} close`,
+  weekLine: (i, sym, p, tgt, up, stop, strong) => `${i}. <b>${sym}</b> · ${p}${strong ? " · 💪 Strong" : ""}\n` +
+    `      target ${tgt} (+${up}) · stop ${stop}`,
   weekWeak: "⚠️ <b>Weak market</b>: fewer than 40% of stocks are above their 50-day average. Better to skip short " +
     "trades this week.",
-  weekFoot: (strong, all) => "Chance: it rises to the target (1.5× its daily range) before it falls as far to the " +
+  weekFoot: (strong, all) => "<i>Chance: it rises to the target (1.5× its daily range) before it falls as far to the " +
     "stop, within 5 sessions." + (strong ? ` In its tests, strong picks (its top 10%, in an uptrend, while the market ` +
-    `is healthy) got there first ${strong} of the time, the average stock ${all}.` : "") + " Always use the stop. Not advice.",
+    `is healthy) got there first ${strong} of the time, the average stock ${all}.` : "") + " Always use the stop. Not advice.</i>",
   // EGX30 (the website's Home → EGX30)
-  x30: (c, ch, d) => `<b>EGX30</b> ${c} (${ch}) · ${d}`,
-  x30Ret: r => `Week ${r["1W"]} · month ${r["1M"]} · this year ${r.YTD} · a year ${r["1Y"]}`,
+  x30: (c, move, d) => `📈 <b>EGX30</b> · ${d}\n💰 <b>${c}</b>${move}`,
+  x30Ret: r => `📊 <b>Returns</b>\nWeek ${r["1W"]} · month ${r["1M"]}\nThis year ${r.YTD} · a year ${r["1Y"]}`,
   x30Usd: (y, yr) => `In dollars: this year ${y} · a year ${yr}`,
-  x30Range: (lo, hi, ath) => `1-year range ${lo} – ${hi} · ${ath ? `${ath} under its record` : "at its record"}`,
-  x30Up: e => `🟢 Above its 50-day average (${e}): the BUY rules are on`,
-  x30Down: (e, blk) => `🔴 Under its 50-day average (${e})` + (blk ? ": the agent makes no new BUYs" : ""),
-  x30Breadth: b => `${b} of stocks are above their own 50-day average`,
+  x30Range: (lo, hi, ath) => `📏 <b>1-year range</b>\n${lo} – ${hi} · ${ath ? `${ath} under its record` : "at its record"}`,
+  x30Up: e => `🟢 <b>Above its 50-day average</b> (${e})\nThe BUY rules are on.`,
+  x30Down: (e, blk) => `🔴 <b>Under its 50-day average</b> (${e})` + (blk ? "\nThe agent makes no new BUYs." : ""),
+  x30Breadth: b => `${b} of stocks are above their own 50-day average.`,
   // a broker screenshot sent here, against the website's portfolio
   shotReading: "📷 Reading your screenshot…",
   shotNone: "I found no holdings on that picture. Send a screenshot of your broker's list of stocks or a stock's screen.",
   shotFail: "I couldn't read that picture just now. Try again in a minute.",
   shotLimit: n => `That's ${n} pictures today. Try again tomorrow.`,
-  shotHead: "<b>Your screenshot against your website portfolio</b>",
+  shotHead: "📷 <b>Your screenshot against your website portfolio</b>\n",
   shotSame: (sym, paid) => `✅ <b>${sym}</b> matches: you paid ${paid} EGP, fees in`,
   shotSameShares: (sym, n) => `✅ <b>${sym}</b>: the same ${n} shares`,
   shotDiff: (sym, them, site) => `⚠️ <b>${sym}</b>: you paid ${them} EGP on the picture, ${site} EGP on the website`,
   shotShares: (sym, them, site) => `⚠️ <b>${sym}</b>: ${them} shares on the picture, ${site} on the website`,
   shotMissing: (sym, v, pl) => `➕ <b>${sym}</b> isn't on the website (${v} worth, ${pl} EGP)`,
   shotOnly: syms => `Only on the website: ${syms}`,
-  shotFoot: missing => (missing ? "To add them: the website → My Portfolio → From a screenshot. " : "") +
+  shotFoot: missing => "<i>" + (missing ? "To add them: the website → My Portfolio → From a screenshot. " : "") +
     "To fix one: the website → My Portfolio → Sell or edit. What you paid is the market value − the profit/loss, so " +
-    "the price moving since doesn't count.",
+    "the price moving since doesn't count.</i>",
 }
+
+const days = n => (n <= 10 ? `${n} أيام` : `${n} يومًا`)     // Arabic: 3–10 take the plural, 11+ the singular
 
 const AR = {
   day: d => d ? `${+d.slice(8, 10)} ${MONTHS_AR[+d.slice(5, 7) - 1]}` : "–",
@@ -206,29 +208,30 @@ const AR = {
   linkedToo: "\n\n🔗 وتم ربط محفظتك على الموقع أيضًا: بعد كل إغلاق سأخبرك بما تفعله في مراكزك. /portfolio في أي وقت.",
   linkedOnly: "🔗 <b>تم ربط محفظة هذا المتصفح.</b> بعد كل إغلاق سأخبرك بما تفعله في مراكزك. /portfolio في أي وقت.",
   stopped: "تم الإيقاف. للبدء من جديد افتح الموقع ← الإعدادات ← ربط تيليجرام.",
-  help: "<b>اسأل عن أي سهم</b>: أرسل رمزه (COMI) أو جزءًا من اسمه (التجاري).\n" +
-    "/week: أفضل فرص الأسبوع القادم: الصعود إلى الهدف قبل الوقف خلال 5 جلسات\n" +
-    "/top: أفضل 10 فرص للوصول إلى الهدف خلال 10 أيام (/top 20: خلال 20 يومًا)\n" +
-    "/buys: إشارات الشراء اليوم\n" +
-    "/why COMI: لماذا هو إشارة شراء أو لا، وتقييمه ومستوياته\n" +
-    "/egx30: المؤشر باختصار: عوائده، وبالدولار أيضًا، ومتوسط 50 يومًا\n" +
-    "📷 أرسل صورة لأسهمك في تطبيق السمسرة: أقارنها بمحفظتك على الموقع\n\n" +
-    "<b>تنبيهات للأسهم التي تتابعها</b>، تُفحص بعد كل إغلاق:\n" +
-    "/watch COMI: عندما يحصل COMI على إشارة شراء\n" +
-    "/watch COMI 45: عندما يغلق COMI فوق 45 (أو تحته إذا كان 45 أقل من سعر اليوم)\n" +
-    "/watch COMI levels: عندما يغلق قرب دعم قوي (مكان للشراء) أو يصل إلى مقاومة (مكان لجني الربح)\n" +
-    "/unwatch COMI: إيقاف تنبيهات COMI (/unwatch all: كل التنبيهات)\n" +
-    "/list: تنبيهاتك\n\n" +
-    "<b>محفظتك</b> (من الموقع):\n" +
-    "/portfolio: مراكزك وأرباحك وما تقوله قواعد الخروج\n" +
-    "/watchlist: الأسهم التي ميّزتها بنجمة\n" +
-    "/link: ربطها (مرة واحدة) · /unlink: فك الربط\n\n" +
-    "<b>الرسائل</b>\n" +
-    "/quiet: راسلني فقط في الأيام التي فيها إشارة شراء أو شيء أفعله (/quiet off: بعد كل إغلاق)\n" +
-    "/morning off: بدون تذكير 9:30 قبل الافتتاح (/morning on لإعادته)\n" +
-    "/weekly off: بدون ملخص الخميس (/weekly on لإعادته)\n" +
-    "/lang en: English\n" +
-    "/stop: إيقاف كل الرسائل",
+  help: "💬 <b>اسأل عن أي سهم</b>\nأرسل رمزه (COMI) أو جزءًا من اسمه (التجاري).\n\n" +
+    "📊 <b>السوق</b>\n" +
+    "/week · أفضل فرص الأسبوع القادم (الهدف قبل الوقف خلال 5 جلسات)\n" +
+    "/top · أفضل 10 فرص خلال 10 أيام (/top 20: خلال 20 يومًا)\n" +
+    "/buys · إشارات الشراء اليوم\n" +
+    "/why COMI · لماذا هو إشارة شراء أو لا، وتقييمه ومستوياته\n" +
+    "/egx30 · المؤشر باختصار\n" +
+    "📷 أرسل صورة لأسهمك في تطبيق السمسرة لأقارنها بالموقع\n\n" +
+    "🔔 <b>التنبيهات</b> (تُفحص بعد كل إغلاق)\n" +
+    "/watch COMI · عندما يحصل على إشارة شراء\n" +
+    "/watch COMI 45 · عندما يغلق فوق 45 (أو تحته إذا كان 45 أقل من سعره)\n" +
+    "/watch COMI levels · قرب دعم قوي أو عند مقاومة\n" +
+    "/unwatch COMI · إيقاف تنبيهاته (/unwatch all: كل التنبيهات)\n" +
+    "/list · تنبيهاتك\n\n" +
+    "💼 <b>محفظتك</b> (من الموقع)\n" +
+    "/portfolio · مراكزك وأرباحك وما تفعله\n" +
+    "/watchlist · الأسهم التي ميّزتها بنجمة\n" +
+    "/link · ربطها (مرة واحدة) · /unlink · فك الربط\n\n" +
+    "✉️ <b>الرسائل</b>\n" +
+    "/quiet · فقط في الأيام التي فيها إشارة شراء أو شيء تفعله (/quiet off: بعد كل إغلاق)\n" +
+    "/morning off · بدون تذكير 9:30 (/morning on: لإعادته)\n" +
+    "/weekly off · بدون ملخص الخميس (/weekly on: لإعادته)\n" +
+    "/lang en · English\n" +
+    "/stop · إيقاف كل الرسائل",
   noData: "بيانات الموقع لم تصلني بعد. حاول بعد تشغيله القادم.",
   unknown: s => `لا أعرف ${s}. استخدم رمز السهم في البورصة المصرية، مثل COMI.`,
   notFound: s => `لم أجد «${s}». أرسل رمز السهم (COMI) أو جزءًا من اسمه (التجاري)، أو /help.`,
@@ -243,14 +246,14 @@ const AR = {
   quietOff: "تم: ستصلك رسالة بعد كل إغلاق مرة أخرى.",
   morningOn: "تم: في أيام الجلسات سأذكّرك الساعة 9:30 بما تفعله عند الافتتاح، إذا كان هناك ما تفعله.",
   morningOff: "تم: بدون تذكير صباحي. /morning on لإعادته.",
-  rating: (g, n) => `<b>التقييم ${g}/100</b>: ترتيب فرصة النموذج خلال أسبوعين بين ${n} سهمًا سائلًا يقيّمها اليوم، من الرسم البياني ونتائج الشركة (100 = الأول)`,
-  co: { head: "الشركة", lost: "خسرت خلال آخر سنة", profit: g => `الأرباح ${g} خلال سنة`,
+  rating: (g, n) => `⭐ <b>التقييم ${g}/100</b>\nترتيب فرصة النموذج خلال أسبوعين بين ${n} سهمًا سائلًا يقيّمها اليوم، من الرسم البياني ونتائج الشركة (100 = الأول).`,
+  co: { head: "🏢 <b>الشركة</b>", lost: "خسرت خلال آخر سنة", profit: g => `الأرباح ${g} خلال سنة`,
         sales: g => `المبيعات ${g}`, pe: (pe, sec) => `مكرر الربحية ${pe}${sec ? ` (القطاع ${sec})` : ""}` },
   band: (lo, hi, hit, base, ret) => `في اختباراته، الأسهم المقيّمة ${lo}–${hi} وصلت إلى الهدف قبل الوقف في ${hit} من المرات` +
     `${base ? ` (متوسط الأسهم ${base})` : ""}${ret ? `، و${ret} للصفقة بعد الرسوم` : ""}.`,
   noRating: "بدون تقييم: يقيّم النموذج الأسهم ذات التداول اليومي الكافي فقط.",
-  checks: "شروط قاعدة الشراء:",
-  notBuy: "ليست إشارة شراء اليوم. شروط قاعدة الشراء:",
+  checks: "✅ <b>شروط قاعدة الشراء</b>",
+  notBuy: "❌ <b>ليست إشارة شراء اليوم</b> · شروط قاعدة الشراء",
   check: [m => `السيولة: تداول ${m} مليون جنيه يوميًا على الأقل، وسنة من التاريخ`,
           () => "اتجاه صاعد: فوق متوسطي 20 و50 يومًا",
           h => `اختراق: إغلاق فوق أعلى سعر في 20 يومًا (${h})`,
@@ -273,23 +276,23 @@ const AR = {
   hWeek: "📅 <b>الأسبوع القادم</b>",
   wkChance: (p, tgt, stop, rank) => `فرصة ${p} للوصول إلى ${tgt} قبل ${stop} · الترتيب ${rank}`,
   hChance: "🎲 <b>فرصة الوصول إلى الهدف</b>",
-  inDays: (hz, p, rank, x) => `${hz} يومًا: ${p} · الترتيب ${rank}${x ? ` · المتوقع ${x}` : ""}`,
+  inDays: (hz, p, rank, x) => `${days(hz)}: ${p} · الترتيب ${rank}${x ? ` · المتوقع ${x}` : ""}`,
   hChart: "📊 <b>الرسم البياني</b>",
   supRes: (a, b) => `الدعم ${a} · المقاومة ${b}`,
   levelsTip: sym => `/watch ${sym} levels: تنبيه عندما يقترب من الدعم أو المقاومة`,
-  top: (hz, d) => `<b>أفضل الفرص للوصول إلى الهدف خلال ${hz} يومًا</b> (${d})`,
+  top: (hz, d) => `🏆 <b>أفضل الفرص خلال ${days(hz)}</b> · ${d}\n<i>للوصول إلى الهدف قبل الوقف</i>`,
   expected: x => ` · المتوقع ${x}`,
-  topFoot: "ليست نصيحة: فرص من نموذج الموقع. اضغط على سهم للمزيد.",
+  topFoot: "<i>فرص من نموذج الموقع، وليست نصيحة. اضغط على سهم للمزيد.</i>",
   noPred: "لا توجد توقعات بعد.",
-  noBuys: d => `لا توجد إشارات شراء عند إغلاق ${d}.`,
-  buys: d => `<b>إشارات الشراء عند إغلاق ${d}</b>`,
-  buyLine: (sym, e, s, t) => `🟢 <b>${sym}</b> حتى ${e} · الوقف ${s} · الهدف ${t}`,
-  buysFoot: "عدد الأسهم لكل صفقة على الموقع.",
+  noBuys: d => `⚪ <b>لا توجد إشارات شراء</b> عند إغلاق ${d}.`,
+  buys: d => `🟢 <b>إشارات الشراء</b> · إغلاق ${d}`,
+  buyLine: (sym, name, e, s, t) => `<b>${sym}</b>${name}\nاشترِ حتى <b>${e}</b> · الوقف ${s} · الهدف ${t}`,
+  buysFoot: "<i>عدد الأسهم لكل صفقة على الموقع.</i>",
   alertBuy: s => `${s}: إشارة شراء`,
   alertLevels: s => `${s}: قرب الدعم أو المقاومة`,
   alertPrice: (s, k, p) => `${s}: إغلاق ${k === "above" ? "فوق" : "تحت"} ${p}`,
   noAlerts: "ليس لديك تنبيهات بعد.\n\n",
-  yourAlerts: "<b>تنبيهاتك</b>",
+  yourAlerts: "🔔 <b>تنبيهاتك</b>",
   removedAll: n => n ? `تم حذف كل تنبيهاتك (${n}).` : "ليس لديك تنبيهات.",
   removed: (n, s) => n ? `تم حذف ${n} تنبيه لـ ${s}.` : `ليس لديك تنبيه لـ ${s}.`,
   tooMany: m => `لديك ${m} تنبيهًا بالفعل. احذف بعضها بـ /unwatch أولًا.`,
@@ -305,48 +308,48 @@ const AR = {
   linkDone: "✅ <b>تم ربط محفظتك.</b> أرسل /portfolio أو /watchlist في أي وقت.",
   unlinked: "تم فك الربط: حذفت نسختي من محفظتك. الموقع يحتفظ بها كما كان.",
   notLinked: "محفظتك غير مربوطة بعد. افتح الموقع ← الإعدادات ← ربط تيليجرام، أو أرسل /link.",
-  worth: (w, since) => `<b>محفظتك</b>: ${w} جنيه${since ? ` (${since} منذ البداية)` : ""}`,
+  worth: (w, since) => `💼 <b>محفظتك</b>\n<b>${w} جنيه</b>${since ? ` · ${since} منذ البداية` : ""}`,
   cash: (c, n) => `النقدية ${c} جنيه · ${n} مركز مفتوح`,
-  closed: (n, w, t) => `صفقات مغلقة: ${n}، الرابحة ${w}، ${t} جنيه`,
+  closed: (n, w, t) => `صفقات مغلقة: ${n} · الرابحة ${w} · ${t} جنيه`,
   atStop: " ⚠️ عند وقف الخسارة أو تحته", atTarget: " 🎯 عند الهدف",
-  stopW: "الوقف", targetW: "الهدف",
+  stopW: "الوقف", targetW: "الهدف", egpW: "جنيه",
   status: s => ({ EXIT: "بيع", BOUNCE: "بع عند الارتداد", REVIEW: "مراجعة", "TIGHTEN STOP": "ارفع الوقف", HOLD: "احتفظ", ADJUST: "حدّث عدد الأسهم",
                   "NO DATA": "لا توجد بيانات" })[s] || s,
   note: s => arNote(s),
-  foot: (sent, scan) => `\n\nأرسلها متصفحك يوم ${sent}؛ الأسعار من إغلاق ${scan}. افتح الموقع لتحديث قواعد الخروج.`,
-  fresh: scan => `\n\nفُحصت بقواعد الخروج عند إغلاق ${scan}.`,
+  foot: (sent, scan) => `\n\n<i>أرسلها متصفحك يوم ${sent}؛ الأسعار من إغلاق ${scan}. افتح الموقع لتحديث قواعد الخروج.</i>`,
+  fresh: scan => `\n\n<i>فُحصت بقواعد الخروج عند إغلاق ${scan}.</i>`,
   wlEmpty: "قائمة متابعتك فارغة. ميّز الأسهم بنجمة (☆) على الموقع.",
-  wl: "<b>قائمة متابعتك</b>",
+  wl: "⭐ <b>قائمة متابعتك</b>",
   wlChance: p => ` · فرصة ${p} خلال 10 أيام`,
-  wlFoot: "/stock ورمز السهم للمزيد.",
+  wlFoot: "<i>اضغط على سهم أو أرسل رمزه للمزيد.</i>",
   bWeek: "📅 الأسبوع القادم", bX30: "📈 EGX30",
-  week: d => `<b>أفضل فرص الأسبوع القادم</b> (من إغلاق ${d})`,
-  weekLine: (i, sym, p, tgt, up, stop, strong) => `${i}. <b>${sym}</b> ${p} · الهدف ${tgt} (+${up}) · الوقف ${stop}` +
-    (strong ? " · 💪 قوي" : ""),
+  week: d => `📅 <b>أفضل فرص الأسبوع القادم</b> · من إغلاق ${d}`,
+  weekLine: (i, sym, p, tgt, up, stop, strong) => `${i}. <b>${sym}</b> · ${p}${strong ? " · 💪 قوي" : ""}\n` +
+    `      الهدف ${tgt} (+${up}) · الوقف ${stop}`,
   weekWeak: "⚠️ <b>سوق ضعيف</b>: أقل من 40% من الأسهم فوق متوسط 50 يومًا. الأفضل تجنب الصفقات القصيرة هذا الأسبوع.",
-  weekFoot: (strong, all) => "الفرصة: أن يصعد إلى الهدف (1.5 ضعف مداه اليومي) قبل أن يهبط بالقدر نفسه إلى الوقف، خلال 5 جلسات." +
+  weekFoot: (strong, all) => "<i>الفرصة: أن يصعد إلى الهدف (1.5 ضعف مداه اليومي) قبل أن يهبط بالقدر نفسه إلى الوقف، خلال 5 جلسات." +
     (strong ? ` في اختباراته، الاختيارات القوية (أفضل 10% لديه، في اتجاه صاعد، والسوق سليم) وصلت أولًا في ${strong} من المرات، ومتوسط الأسهم ${all}.` : "") +
-    " استخدم الوقف دائمًا. ليست نصيحة.",
-  x30: (c, ch, d) => `<b>EGX30</b> ${c} (${ch}) · ${d}`,
-  x30Ret: r => `أسبوع ${r["1W"]} · شهر ${r["1M"]} · هذا العام ${r.YTD} · سنة ${r["1Y"]}`,
+    " استخدم الوقف دائمًا. ليست نصيحة.</i>",
+  x30: (c, move, d) => `📈 <b>EGX30</b> · ${d}\n💰 <b>${c}</b>${move}`,
+  x30Ret: r => `📊 <b>العوائد</b>\nأسبوع ${r["1W"]} · شهر ${r["1M"]}\nهذا العام ${r.YTD} · سنة ${r["1Y"]}`,
   x30Usd: (y, yr) => `بالدولار: هذا العام ${y} · سنة ${yr}`,
-  x30Range: (lo, hi, ath) => `مدى سنة ${lo} – ${hi} · ${ath ? `${ath} تحت قمته التاريخية` : "عند قمته التاريخية"}`,
-  x30Up: e => `🟢 فوق متوسط 50 يومًا (${e}): قواعد الشراء تعمل`,
-  x30Down: (e, blk) => `🔴 تحت متوسط 50 يومًا (${e})` + (blk ? ": لا يشتري الوكيل جديدًا" : ""),
-  x30Breadth: b => `${b} من الأسهم فوق متوسط 50 يومًا الخاص بها`,
+  x30Range: (lo, hi, ath) => `📏 <b>مدى سنة</b>\n${lo} – ${hi} · ${ath ? `${ath} تحت قمته التاريخية` : "عند قمته التاريخية"}`,
+  x30Up: e => `🟢 <b>فوق متوسط 50 يومًا</b> (${e})\nقواعد الشراء تعمل.`,
+  x30Down: (e, blk) => `🔴 <b>تحت متوسط 50 يومًا</b> (${e})` + (blk ? "\nلا يشتري الوكيل جديدًا." : ""),
+  x30Breadth: b => `${b} من الأسهم فوق متوسط 50 يومًا الخاص بها.`,
   shotReading: "📷 أقرأ صورتك…",
   shotNone: "لم أجد أسهمًا في هذه الصورة. أرسل صورة لقائمة أسهمك في تطبيق السمسرة أو لشاشة سهم.",
   shotFail: "لم أستطع قراءة الصورة الآن. حاول بعد دقيقة.",
   shotLimit: n => `هذه ${n} صورة اليوم. حاول غدًا.`,
-  shotHead: "<b>صورتك مقارنة بمحفظتك على الموقع</b>",
+  shotHead: "📷 <b>صورتك مقارنة بمحفظتك على الموقع</b>\n",
   shotSame: (sym, paid) => `✅ <b>${sym}</b> متطابق: دفعت ${paid} جنيه شاملًا الرسوم`,
   shotSameShares: (sym, n) => `✅ <b>${sym}</b>: نفس عدد الأسهم (${n})`,
   shotDiff: (sym, them, site) => `⚠️ <b>${sym}</b>: دفعت ${them} جنيه في الصورة، و${site} جنيه على الموقع`,
   shotShares: (sym, them, site) => `⚠️ <b>${sym}</b>: ${them} سهم في الصورة، و${site} على الموقع`,
   shotMissing: (sym, v, pl) => `➕ <b>${sym}</b> ليس على الموقع (قيمته ${v}، ${pl} جنيه)`,
   shotOnly: syms => `على الموقع فقط: ${syms}`,
-  shotFoot: missing => (missing ? "لإضافتها: الموقع ← محفظتي ← من صورة. " : "") +
-    "لتصحيح سهم: الموقع ← محفظتي ← بيع أو تعديل. ما دفعته = القيمة السوقية − الربح أو الخسارة، فتحرك السعر بعدها لا يُحسب.",
+  shotFoot: missing => "<i>" + (missing ? "لإضافتها: الموقع ← محفظتي ← من صورة. " : "") +
+    "لتصحيح سهم: الموقع ← محفظتي ← بيع أو تعديل. ما دفعته = القيمة السوقية − الربح أو الخسارة، فتحرك السعر بعدها لا يُحسب.</i>",
 }
 
 // The exit rules' notes (egx_agent/engine.py), in Arabic. Anything else stays as written. Kept in step with
@@ -407,9 +410,10 @@ const symbolButtons = syms => rows(syms.map(s => cb(s, `s:${s}`)), 4)
 const menuButtons = T => [[cb(T.bBuys, "b"), cb(T.bWeek, "k")], [cb(T.bTop, "t"), cb(T.bX30, "e")]]
 
 // ------------------------------------------------------------------ asking about the website's data
-// A stock in short sections, each a bold title and a line or two, a blank line between: the price, the signal, the
-// best way in, next week, the chances and the chart.
+// Every reply in the same shape: a bold title with an emoji, short sections with a blank line between them, each
+// stock's symbol in bold with its numbers under it, and the fine print in italics at the end.
 const block = (...lines) => lines.filter(Boolean).join("\n")
+const move = ch => (ch != null ? `  ${ch < 0 ? "▼" : "▲"} ${pct(ch, true)}` : "")
 
 function signalBlock(s, T) {
   const plan = s.e ? T.planNear(px(s.e), px(s.s), px(s.t)) : null
@@ -433,11 +437,10 @@ function chartBlock(s, T) {
 
 function stockCard(state, cid, sym, lang) {
   const T = L(lang), info = state.info, s = info.stocks[sym]
-  const move = s.ch != null ? `  ${s.ch < 0 ? "▼" : "▲"} ${pct(s.ch, true)}` : ""
   const chances = [10, 20].filter(hz => s["p" + hz] != null).map(hz =>
     T.inDays(hz, pct(s["p" + hz]), s["r" + hz], s["x" + hz] != null ? pct(s["x" + hz], true) : null))
   const text = [
-    block(`<b>${esc(sym)}</b>${s.n ? ` · ${esc(s.n)}` : ""}`, T.head(px(s.c), move, T.day(s.d))),
+    block(`<b>${esc(sym)}</b>${s.n ? ` · ${esc(s.n)}` : ""}`, T.head(px(s.c), move(s.ch), T.day(s.d))),
     signalBlock(s, T),
     bestBlock(s, T),
     s.w != null ? block(T.hWeek, T.wkChance(pct(s.w), px(s.c * (1 + s.wm)), px(s.c * (1 - s.wm)), s.wr)) : null,
@@ -456,7 +459,7 @@ function stockCard(state, cid, sym, lang) {
 // rated like it did in the model's tests, the BUY rule's checks passed or not, and the chart's levels.
 function whyCard(info, sym, lang) {
   const T = L(lang), s = info.stocks[sym]
-  const lines = [`<b>${esc(sym)}</b> ${esc(s.n)} · ${px(s.c)}${s.ch != null ? ` (${pct(s.ch, true)})` : ""}`]
+  const lines = [`<b>${esc(sym)}</b>${s.n ? ` · ${esc(s.n)}` : ""}`, T.head(px(s.c), move(s.ch), T.day(s.d)), ""]
   if (s.g != null) {
     lines.push(T.rating(s.g, info.rated))
     const b = (info.bands || []).find(([lo, hi]) => s.g >= lo && s.g <= hi)
@@ -471,7 +474,7 @@ function whyCard(info, sym, lang) {
     else if (g != null) parts.push(T.co.profit(pct(g, true)))
     if (sales != null) parts.push(T.co.sales(pct(sales, true)))
     if (pe != null) parts.push(T.co.pe(pe.toFixed(1), secPe != null ? secPe.toFixed(1) : null))
-    if (parts.length) lines.push(`${T.co.head}: ${parts.join(" · ")}`)
+    if (parts.length) lines.push("", T.co.head, parts.join(" · "))
   }
   lines.push("")
   if (s.a) lines.push(signalBlock(s, T), "")
@@ -492,8 +495,8 @@ function top(info, hz, lang) {
   const list = Object.entries(info.stocks).filter(([, s]) => s["r" + hz] != null)
     .sort((a, b) => a[1]["r" + hz] - b[1]["r" + hz]).slice(0, 10)
   if (!list.length) return reply(T.noPred)
-  return reply(T.top(hz, T.day(info.pred)) + "\n" + list.map(([sym, s], i) =>
-    `${i + 1}. <b>${esc(sym)}</b> ${pct(s["p" + hz])}` + (s["x" + hz] != null ? T.expected(pct(s["x" + hz], true)) : "") +
+  return reply(T.top(hz, T.day(info.pred)) + "\n\n" + list.map(([sym, s], i) =>
+    `${i + 1}. <b>${esc(sym)}</b> · ${pct(s["p" + hz])}` + (s["x" + hz] != null ? T.expected(pct(s["x" + hz], true)) : "") +
     ` · ${px(s.c)}`).join("\n") + "\n\n" + T.topFoot, symbolButtons(list.map(([sym]) => sym)))
 }
 
@@ -505,7 +508,7 @@ function week(info, lang) {
   if (!list.length) return reply(T.noPred)
   const lines = list.map(([sym, s], i) => T.weekLine(i + 1, esc(sym), pct(s.w), px(s.c * (1 + s.wm)), pct(s.wm),
     px(s.c * (1 - s.wm)), s.wl === "good" && w.top != null && s.wr <= w.top))
-  return reply([T.week(T.day(info.pred)), ...(w.weak ? [T.weekWeak] : []), ...lines, "",
+  return reply([T.week(T.day(info.pred)), "", ...(w.weak ? [T.weekWeak, ""] : []), ...lines, "",
                 T.weekFoot(w.strong != null ? pct(w.strong) : null, w.all != null ? pct(w.all) : null)].join("\n"),
                symbolButtons(list.map(([sym]) => sym)))
 }
@@ -514,21 +517,22 @@ function egx30(info, lang) {
   const T = L(lang), x = info.x30
   if (!x) return reply(T.noData)
   const r = Object.fromEntries(Object.entries(x.r).map(([k, v]) => [k, v != null ? pct(v, true) : "–"]))
-  const lines = [T.x30(egp(x.c), pct(x.ch, true), T.day(x.d)), T.x30Ret(r)]
-  if (x.u && x.u.YTD != null) lines.push(T.x30Usd(pct(x.u.YTD, true), x.u["1Y"] != null ? pct(x.u["1Y"], true) : "–"))
-  lines.push(T.x30Range(egp(x.lo), egp(x.hi), x.ath < -0.0005 ? pct(-x.ath) : null),
-             x.off ? T.x30Down(egp(x.e50), x.blk) : T.x30Up(egp(x.e50)))
-  if (x.b50 != null) lines.push(T.x30Breadth(pct(x.b50)))
+  const text = [
+    T.x30(egp(x.c), move(x.ch), T.day(x.d)),
+    block(T.x30Ret(r), x.u && x.u.YTD != null ? T.x30Usd(pct(x.u.YTD, true), x.u["1Y"] != null ? pct(x.u["1Y"], true) : "–") : null),
+    T.x30Range(egp(x.lo), egp(x.hi), x.ath < -0.0005 ? pct(-x.ath) : null),
+    block(x.off ? T.x30Down(egp(x.e50), x.blk) : T.x30Up(egp(x.e50)), x.b50 != null ? T.x30Breadth(pct(x.b50)) : null),
+  ].join("\n\n")
   const app = appButton(info, lang, "egx30")
-  return reply(lines.join("\n"), [[cb(T.bWeek, "k"), cb(T.bBuys, "b")], ...(app ? [[app]] : [])])
+  return reply(text, [[cb(T.bWeek, "k"), cb(T.bBuys, "b")], ...(app ? [[app]] : [])])
 }
 
 function buys(info, lang) {
   const T = L(lang)
   const list = Object.entries(info.stocks).filter(([, s]) => s.a === "BUY")
   if (!list.length) return reply(T.noBuys(T.day(info.scan)), [[cb(T.bWeek, "k"), cb(T.bTop, "t")]])
-  return reply(T.buys(T.day(info.scan)) + "\n" + list.map(([sym, s]) => T.buyLine(esc(sym), px(s.e), px(s.s), px(s.t)))
-    .join("\n") + "\n\n" + T.buysFoot, symbolButtons(list.map(([sym]) => sym)))
+  return reply([T.buys(T.day(info.scan)), ...list.map(([sym, s]) => T.buyLine(esc(sym), s.n ? ` · ${esc(s.n)}` : "",
+    px(s.e), px(s.s), px(s.t))), T.buysFoot].join("\n\n"), symbolButtons(list.map(([sym]) => sym)))
 }
 
 // Stock names: Arabic spelled several ways (أ/إ/آ/ا, ى/ي, ة/ه, with or without marks), English in any case.
@@ -605,8 +609,8 @@ function watch(state, cid, text, lang) {
   const T = L(lang), mine = state.alerts[cid] || []
   if (LIST_RE.test(text)) {
     if (!mine.length) return reply(T.noAlerts + T.help)
-    return reply(T.yourAlerts + "\n" + [...mine].sort((a, b) => (a.symbol + a.kind).localeCompare(b.symbol + b.kind))
-      .map(a => esc(alertText(a, lang))).join("\n"))
+    return reply(T.yourAlerts + "\n\n" + [...mine].sort((a, b) => (a.symbol + a.kind).localeCompare(b.symbol + b.kind))
+      .map(a => "• " + esc(alertText(a, lang))).join("\n"))
   }
   let m = UNWATCH_RE.exec(text)
   if (m) {
@@ -733,17 +737,17 @@ export function portfolioText(book, info, lang = "en", fresh = null) {
     // like your broker's (and the website's): against what you paid with the buy fees; selling fees once you sell
     const cost = p.avg * p.shares + (p.fees || 0), pnl = last * p.shares - cost
     const flag = p.stop != null && last <= p.stop ? T.atStop : p.target != null && last >= p.target ? T.atTarget : ""
-    return `<b>${esc(p.symbol)}</b> ${p.shares.toLocaleString("en-US")} × ${px(p.avg)} → ${px(last)} ` +
-      `(${pct(pnl / cost, true)}, ${pnl >= 0 ? "+" : "-"}${egp(Math.abs(pnl))} EGP)${flag}\n` +
-      `   ${esc(T.status(p.status || ""))}${p.stop != null ? ` · ${T.stopW} ${px(p.stop)}` : ""}` +
-      `${p.target != null ? ` · ${T.targetW} ${px(p.target)}` : ""}` +
-      (p.status && p.status !== "HOLD" && p.reason ? `\n   ${esc(T.note(p.reason))}` : "")
+    return block(`<b>${esc(p.symbol)}</b> · ${esc(T.status(p.status || ""))}${flag}`,
+      `${p.shares.toLocaleString("en-US")} × ${px(p.avg)} → ${px(last)} · <b>${pct(pnl / cost, true)}</b> ` +
+      `(${pnl >= 0 ? "+" : "-"}${egp(Math.abs(pnl))} ${T.egpW})`,
+      [p.stop != null ? `${T.stopW} ${px(p.stop)}` : "", p.target != null ? `${T.targetW} ${px(p.target)}` : ""].filter(Boolean).join(" · "),
+      p.status && p.status !== "HOLD" && p.reason ? `<i>${esc(T.note(p.reason))}</i>` : null)
   })
   const head = [T.worth(egp(worth), book.start ? pct(worth / book.start - 1, true) : null),
     T.cash(egp(book.cash), book.positions.length)]
   if (book.closed && book.closed.count) head.push(T.closed(book.closed.count, pct(book.closed.win_rate),
     `${book.closed.total >= 0 ? "+" : "-"}${egp(Math.abs(book.closed.total))}`))
-  return head.join("\n") + (lines.length ? "\n\n" + lines.join("\n") : "") +
+  return head.join("\n") + (lines.length ? "\n\n" + lines.join("\n\n") : "") +
     (newer ? T.fresh(T.day(fresh.date)) : T.foot(T.day(book.sent), T.day(info && info.scan)))
 }
 
@@ -782,10 +786,10 @@ export function shotText(holdings, book, info, lang = "en") {
 export function watchlistText(book, info, lang = "en") {
   const T = L(lang), stocks = (info && info.stocks) || {}
   if (!book.watchlist || !book.watchlist.length) return T.wlEmpty
-  return T.wl + "\n" + book.watchlist.map(sym => {
+  return T.wl + "\n\n" + book.watchlist.map(sym => {
     const s = stocks[sym]
     if (!s) return `<b>${esc(sym)}</b>`
-    return `<b>${esc(sym)}</b> ${px(s.c)}${s.ch != null ? ` (${pct(s.ch, true)})` : ""}` +
+    return `<b>${esc(sym)}</b> ${px(s.c)}${move(s.ch)}` +
       (s.a === "BUY" ? " · 🟢 BUY" : "") + (s.p10 != null ? T.wlChance(pct(s.p10)) : "")
   }).join("\n") + "\n\n" + T.wlFoot
 }
