@@ -77,3 +77,21 @@ def test_a_logged_buy_takes_the_chart_levels_when_they_fit():
 def test_describe_explains_the_plan():
     lines = levels.describe(levels.plan_at(add_indicators(frame(V_PATH)), CFG))
     assert lines and lines[0].startswith("Stop sits just under support")
+
+
+def test_entries_on_a_dip_and_a_breakout_have_their_own_plan():
+    # V_PATH ends at 110 after holding 100: a dip entry just above that support and a breakout over the 20-day high.
+    ind = add_indicators(frame(V_PATH))
+    plan = levels.plan_at(ind, CFG)
+    got = {e["kind"]: e for e in levels.entries(ind, CFG, plan)}
+    c = float(ind["close"].iloc[-1])
+    for e in got.values():
+        assert e["stop"] < e["price"] < e["target"]
+        assert abs(e["rr"] - (e["target"] - e["price"]) / (e["price"] - e["stop"])) < 1e-9
+        assert abs(e["away"] - (e["price"] / c - 1)) < 1e-12
+    if "dip" in got:
+        assert c * (1 - levels.NEAR) <= got["dip"]["price"] < c and got["dip"]["stop"] <= plan["stop"]
+    if "breakout" in got:
+        assert got["breakout"]["price"] == float(ind["high"].tail(20).max()) > c
+    assert got, "a V-shaped chart has at least one way in"
+    assert levels.entries(ind, CFG, None) == []

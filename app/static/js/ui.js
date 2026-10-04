@@ -1,7 +1,7 @@
 // Shared building blocks: icons, Shariah badges, KPI tiles, tables, forms, the stock picker, dialogs.
 import {
   html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
-  stockHref, watchForData, toggleWatch, STATIC, api, todayISO,
+  stockHref, watchForData, toggleWatch, STATIC, api, todayISO, toast,
 } from './lib.js';
 import { t, term, tn, tw } from './i18n.js';
 
@@ -826,3 +826,47 @@ export function LiveQuotes({ symbols, title = 'Live' }) {
 }
 
 export const LIVE_NOTE = 'Live prices from TradingView, about 15 minutes late. The signals, stops and your profit / loss still use the last close.';
+
+// ------------------------------------------------------------------ the bell
+// A Telegram message when the stock gets a BUY (the bot's /watch). On a browser linked to the bot (Connect Telegram, or
+// the site opened inside Telegram) a tap turns it on or off right here and a lit bell shows it's on (local/api.js
+// setBell). Otherwise the tap opens Telegram once with t.me/<bot>?start=watch-SYMBOL, which worker/bot.js and
+// app/alerts.py read as "/watch SYMBOL". Only on the website, which has a bot (Picks and the stock page).
+export function useBells(tg) {
+  const [bells, setBells] = useState(null);         // the symbols with a bell on; null: not linked
+  const bot = tg && tg.bot;
+  useEffect(() => {
+    if (bot) import('./local/api.js').then(m => m.bells()).then(setBells, () => setBells(null));
+  }, [bot]);
+  return [bells, setBells];
+}
+
+export function Bell({ sym, tg, bells, setBells }) {
+  const [busy, setBusy] = useState(false);
+  if (!tg || !tg.bot) return null;
+  if (bells) {
+    const on = bells.includes(sym);
+    const toggle = async e => {
+      e.preventDefault();
+      e.stopPropagation();
+      setBusy(true);
+      try {
+        setBells(await (await import('./local/api.js')).setBell(sym, !on));
+        toast(on ? t('{sym}: bell off. No Telegram message when it gets a BUY.', { sym })
+          : t("{sym}: bell on. You'll get a Telegram message when it gets a BUY.", { sym }));
+      } catch (err) {
+        toast(err.message, 'error', 8000);
+      } finally {
+        setBusy(false);
+      }
+    };
+    return html`<button type="button" class=${cls('bell-btn', on && 'on')} onClick=${toggle} disabled=${busy} aria-pressed=${on}
+      aria-label=${t(on ? 'Stop the Telegram message for {sym}' : 'Tell me on Telegram when {sym} gets a BUY', { sym })}
+      title=${t(on ? 'On: a Telegram message when {sym} gets a BUY. Tap to turn it off.' : 'Tell me on Telegram when {sym} gets a BUY', { sym })}>
+      <${Icon} name="bell" size=${15} /></button>`;
+  }
+  return html`<a class="bell-btn" href=${`https://t.me/${tg.bot}?start=watch-${sym}`} target="_blank" rel="noopener noreferrer"
+    onClick=${e => e.stopPropagation()} aria-label=${t('Tell me on Telegram when {sym} gets a BUY', { sym })}
+    title=${t('A Telegram message when {sym} gets a BUY signal. Telegram must be connected first: Settings → Connect Telegram.', { sym })}>
+    <${Icon} name="bell" size=${15} /></a>`;
+}

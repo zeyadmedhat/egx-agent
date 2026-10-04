@@ -494,6 +494,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     out["plan"] = {"stop": sf.stop, "target": sf.target, "atr": last.atr14}
     # stop-loss and target from the chart's support and resistance, with the levels behind them (every stock)
     out["chart"] = levels.plan_at(ind, cfg)
+    out["entries"] = levels.entries(ind, cfg, out["chart"])   # buying on a dip to support or on a breakout instead
     k = rule_checks(ind, cfg, sf)
     out["checklist"] = [   # shown when the stock has no signal today
         {"ok": k["liquid"], "text": f"Liquid & clean data (≥ {cfg['min_avg_value_egp'] / 1e6:g}M EGP/day, "

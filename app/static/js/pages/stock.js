@@ -3,6 +3,7 @@ import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO, 
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, WatchStar,
   Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard, sessionState,
+  Bell, useBells,
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
@@ -50,7 +51,7 @@ export function StockPage({ route }) {
     <div class="card stock-head">
       <div class="who">
         <div class="sym-line"><${StockAvatar} symbol=${data.symbol} size=${40} /><span class="sym-big" style="font-size:26px">${data.symbol}</span>
-          <${WatchStar} symbol=${data.symbol} label /><${IndexPills} info=${info} />
+          <${WatchStar} symbol=${data.symbol} label /><${StockBell} sym=${data.symbol} tg=${data.telegram} /><${IndexPills} info=${info} />
           ${data.signal && html`<${StatusChip} status=${data.signal.action} />`}
           ${data.position && html`<span class="tag"><${Icon} name="briefcase" size=${13} />${t('You hold it')}</span>`}</div>
         <div class="row" style="gap:8px"><span class="stock-name" dir="rtl">${info.name_ar || ''}</span>
@@ -111,6 +112,7 @@ export function StockPage({ route }) {
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
           ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes} />`}
           ${data.signal && html`<${SignalPanel} data=${data} />`}
+          <${EntryCard} data=${data} />
           ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} />`}
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
           ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
@@ -194,6 +196,47 @@ function Verdict({ data }) {
         : html`<span class="muted">${t('No rating: the model rates only stocks with enough daily trading.')}</span>`}
     </div>
     <p class="faint verdict-foot">${t('A summary of the cards below, not advice.')}</p>
+  </div>`;
+}
+
+function StockBell({ sym, tg }) {
+  const [bells, setBells] = useBells(tg);
+  return html`<${Bell} sym=${sym} tg=${tg} bells=${bells} setBells=${setBells} />`;
+}
+
+// Where to buy it: now (only with a BUY signal), on a dip to support or on a breakout, each with the chart's own stop
+// and target at that price (levels.entries). The best is the BUY when there is one, else the most reward for the risk.
+const ENTRY = {
+  now: ['Now: at the next session', 'Up to {price}. Skip it if it opens higher.'],
+  today: ["At today's price", "For comparison: there's no BUY signal, so the rules wouldn't buy here."],
+  dip: ['On a dip to support', 'If it falls to about {price} ({away}) and holds there.'],
+  breakout: ['On a breakout', 'On a close above {price} ({away}) with more trading than usual: the BUY rule\'s trigger.'],
+};
+
+function EntryCard({ data }) {
+  const sig = data.signal, ch = data.chart, close = data.stats.close;
+  const rows = [];
+  if (sig && sig.action === 'BUY') rows.push({ kind: 'now', price: sig.entry_high, stop: sig.stop, target: sig.target });
+  else if (ch) rows.push({ kind: 'today', price: close, stop: ch.stop, target: ch.target });
+  rows.push(...(data.entries || []).map(e => ({ ...e })));
+  if (rows.length < 2 && rows[0] && rows[0].kind === 'today') return null;
+  for (const r of rows) r.rr = (r.target - r.price) / (r.price - r.stop);
+  const best = rows[0].kind === 'now' ? rows[0]
+    : rows.filter(r => r.kind !== 'today').reduce((b, r) => (!b || r.rr > b.rr ? r : b), null);
+  const uptrend = (sig && sig.action === 'BUY') || !(data.checklist && data.checklist[1] && !data.checklist[1].ok);
+  return html`<div class="card">
+    <div class="card-title"><${Icon} name="target" size=${15} />${t('Where to buy it')}</div>
+    ${!uptrend && html`<p class="entry-note">${t("Not in an uptrend now, and the rules buy only in one (price above its 20- and 50-day averages). Until then these are prices to watch, not buys.")}</p>`}
+    ${rows.map(r => html`<div class=${cls('entry-row', r === best && 'best', r.kind === 'today' && 'ref')}>
+      <span class="entry-name">${t(ENTRY[r.kind][0])}${r === best && html`<span class="best-chip">${t('Best')}</span>`}</span>
+      <span class="entry-price">${fmt.price(r.price)}</span>
+      ${r.kind !== 'today' && html`<span class="entry-detail">${t(ENTRY[r.kind][1], { price: fmt.price(r.price), away: fmt.pct(r.away, 1) })}
+        ${r.kind === 'dip' && r.why && r.why.length ? html` ${t('Support:')} ${sources(r.why)}.` : ''}</span>`}
+      ${r.kind === 'today' && html`<span class="entry-detail">${t(ENTRY.today[1])}</span>`}
+      <span class="entry-nums"><span class="down">${t('stop')} ${fmt.price(r.stop)}</span><span class="up">${t('target')} ${fmt.price(r.target)}</span>
+        <span>${t('{rr}× reward for the risk', { rr: fmt.num(r.rr, 1) })}</span></span>
+    </div>`)}
+    <p class="faint entry-foot">${t('Stops and targets from the chart\'s support and resistance at each price. Prices to watch, not advice.')}</p>
   </div>`;
 }
 

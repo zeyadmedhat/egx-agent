@@ -113,12 +113,12 @@ def _zones(cands: list[tuple[float, float, str]], width: float) -> list[dict]:
     return out
 
 
-def chart_plan(o: dict, cfg: dict) -> dict | None:
-    """Stop, target and the levels behind them for buying at today's close. o: numpy arrays (COLS) and dates, oldest
-    first, ending at the day in question. None: too little history."""
+def chart_plan(o: dict, cfg: dict, entry: float | None = None) -> dict | None:
+    """Stop, target and the levels behind them for buying at today's close (or at `entry`, another price). o: numpy
+    arrays (COLS) and dates, oldest first, ending at the day in question. None: too little history."""
     if len(o["close"]) < 60:
         return None
-    c, atr = float(o["close"][-1]), float(o["atr14"][-1])
+    c, atr = float(entry if entry else o["close"][-1]), float(o["atr14"][-1])
     if not (np.isfinite(c) and np.isfinite(atr) and atr > 0):
         return None
     zones = _zones(_candidates(o), max(atr / 3, c * 0.004))
@@ -183,11 +183,40 @@ def arrays(ind: pd.DataFrame) -> dict:
     return o
 
 
-def plan_at(ind: pd.DataFrame, cfg: dict, day=None) -> dict | None:
-    """chart_plan on the bars up to `day` (default: the last bar)."""
+def plan_at(ind: pd.DataFrame, cfg: dict, day=None, entry: float | None = None) -> dict | None:
+    """chart_plan on the bars up to `day` (default: the last bar), buying at the close or at `entry`."""
     if day is not None:
         ind = ind[ind.index <= pd.Timestamp(day)]
-    return chart_plan(arrays(ind.tail(LOOKBACK)), cfg)
+    return chart_plan(arrays(ind.tail(LOOKBACK)), cfg, entry)
+
+
+NEAR = 0.15           # a dip or breakout further from the price than this is too far off to wait for
+
+
+def entries(ind: pd.DataFrame, cfg: dict, plan: dict | None) -> list[dict]:
+    """Two ways into the stock besides today's price, each with the chart's own stop and target at that price:
+    "dip", just above the nearest solid support under the price, and "breakout", a close above the 20-day high, the
+    BUY rule's trigger, each within NEAR of the price. [{kind, price, away (from the close), stop, target, rr, why}]."""
+    if not plan or not len(ind):
+        return []
+    c, atr = float(ind["close"].iloc[-1]), float(ind["atr14"].iloc[-1])
+    out = []
+
+    def add(kind, price, why):
+        p = plan_at(ind, cfg, entry=price)
+        if p and p["stop"] < price < p["target"]:
+            out.append({"kind": kind, "price": price, "away": price / c - 1, "stop": p["stop"], "target": p["target"],
+                        "rr": p["rr"], "why": why})
+
+    dip = next((z for z in plan["supports"] if z["strength"] >= SOLID and z["high"] >= c * (1 - NEAR)), None)
+    if dip:
+        price = dip["high"] + TARGET_BUFFER * atr            # just above the zone: a dip that holds there
+        if price < c * 0.995:
+            add("dip", price, dip["sources"])
+    high20 = float(ind["high"].tail(20).max())
+    if c * 1.005 < high20 <= c * (1 + NEAR):
+        add("breakout", high20, ["20-day high"])
+    return out
 
 
 FRAME_COLS = ("stop", "target", "sup", "near_support", "near_resist", "support_strength")
