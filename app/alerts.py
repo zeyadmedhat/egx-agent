@@ -809,7 +809,7 @@ def _r(v, digits=3):
 def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
     """What the bot answers /stock, /top, /buys and /why from: each stock's last close, today's signal, the prediction
     model's chances and rating, the company's results in brief (co), the chart's stop, target and nearest support and
-    resistance, and the BUY rule's checks
+    resistance, the best way in on a dip or a breakout (be), and the BUY rule's checks
     (k: liquid, uptrend, breakout, volume, ADX as 1/0, with the 20-day high, volume ratio and ADX behind them).
     Short keys: it's sent every run."""
     d = views.Data(conn, cfg, views.Cache())
@@ -855,6 +855,13 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
             s.update(cs=_r(plan["stop"]), ct=_r(plan["target"]),
                      sup=_r(plan["supports"][0]["price"]) if plan["supports"] else None,
                      res=_r(plan["resistances"][0]["price"]) if plan["resistances"] else None)
+            try:   # the best way in besides today's price (the stock page's Where to buy it): [d|b, price, stop, target, rr]
+                ents = levels.entries(ind, cfg, plan)
+            except Exception:
+                ents = []
+            if ents:
+                e = max(ents, key=lambda e: e["rr"])
+                s["be"] = [e["kind"][0], _r(e["price"]), _r(e["stop"]), _r(e["target"]), _r(e["rr"], 1)]
         stocks[sym] = s
     # /week: how its strong picks and the average stock did in the tests, how many are its top 10%, a weak market
     test = (((predict.load_meta(predict.model_dir(conn)) or {}).get("horizons") or {}).get(str(wk)) or {}).get("week")

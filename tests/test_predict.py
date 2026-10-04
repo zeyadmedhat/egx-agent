@@ -289,6 +289,10 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
     assert s["c"] * (1 + s["wm"]) == pytest.approx(row["target5"], rel=1e-3)
     assert info["week"]["top"] == 1 and info["week"]["weak"] == page["week"]["weak"]
     assert info["x30"]["r"]["1Y"] == pytest.approx(per["1Y"]["egp"], abs=1e-4) and info["x30"]["u"]["1Y"] is None
+    for x in info["stocks"].values():       # the best way in (the stock page's Where to buy it): [d|b, price, stop, target, rr]
+        if "be" in x:
+            how, price, stop, target, rr = x["be"]
+            assert how in ("d", "b") and stop < price < target and rr == pytest.approx((target - price) / (price - stop), abs=0.06)
     line = alerts._week_line(views.Data(conn, config.DEFAULTS, views.Cache()))
     assert line.startswith("Next week") and line.endswith("(/week).")
 

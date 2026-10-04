@@ -148,6 +148,9 @@ st.info.stocks.COMI.n = "البنك التجاري الدولي-مصر (سى ا�
 const card = await respond(st, u("comi"))
 assert.deepEqual(card.kb[0].map(b => b.callback_data), ["w:COMI", "l:COMI"])
 assert.equal(card.kb.at(-1)[0].web_app.url, "https://example.github.io/egx-agent/?go=stock%2FCOMI")
+st.info.stocks.COMI.be = ["d", 76.5, 72.1, 88, 2.6]                      // the best way in (app/alerts.py bot_info)
+assert.match((await respond(st, u("comi"))).text, /🎯 Best way in: on a dip to about 76\.50 \(-?[\d.]+%\) · stop 72\.10 · target 88\.00 · 2\.6× reward/)
+delete st.info.stocks.COMI.be
 assert.equal(callbackText("w:COMI"), "/watch COMI")
 assert.equal(callbackText("l:COMI"), "/watch COMI levels")
 assert.equal(callbackText("t20"), "/top 20")

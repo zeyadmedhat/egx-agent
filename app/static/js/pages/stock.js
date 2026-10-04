@@ -224,8 +224,9 @@ function EntryCard({ data }) {
   const best = rows[0].kind === 'now' ? rows[0]
     : rows.filter(r => r.kind !== 'today').reduce((b, r) => (!b || r.rr > b.rr ? r : b), null);
   const uptrend = (sig && sig.action === 'BUY') || !(data.checklist && data.checklist[1] && !data.checklist[1].ok);
-  return html`<div class="card">
-    <div class="card-title"><${Icon} name="target" size=${15} />${t('Where to buy it')}</div>
+  const how = { now: 'now', dip: 'on a dip', breakout: 'on a breakout' }[best && best.kind];
+  return html`<${Fold} title="Where to buy it"
+    hint=${best ? t('Best: {how} at {price}, {rr}× reward for the risk', { how: t(how), price: fmt.price(best.price), rr: fmt.num(best.rr, 1) }) : ''}>
     ${!uptrend && html`<p class="entry-note">${t("Not in an uptrend now, and the rules buy only in one (price above its 20- and 50-day averages). Until then these are prices to watch, not buys.")}</p>`}
     ${rows.map(r => html`<div class=${cls('entry-row', r === best && 'best', r.kind === 'today' && 'ref')}>
       <span class="entry-name">${t(ENTRY[r.kind][0])}${r === best && html`<span class="best-chip">${t('Best')}</span>`}</span>
@@ -237,7 +238,7 @@ function EntryCard({ data }) {
         <span>${t('{rr}× reward for the risk', { rr: fmt.num(r.rr, 1) })}</span></span>
     </div>`)}
     <p class="faint entry-foot">${t('Stops and targets from the chart\'s support and resistance at each price. Prices to watch, not advice.')}</p>
-  </div>`;
+  <//>`;
 }
 
 function Checklist({ list }) {
@@ -250,20 +251,21 @@ function Checklist({ list }) {
 function SignalPanel({ data }) {
   const s = data.signal;
   const buy = s.action === 'BUY';
-  return html`<div class="card">
-    <div class="card-title"><${StatusChip} status=${s.action} /> <${Term} k="score">${t('Score')}<//> ${fmt.num(s.score, 0)}${s.setup ? ` · ${t(s.setup)}` : ''}</div>
+  // a BUY opens with its prices and the Log button; NEAR A BUY folds to one line, its reasons a tap away
+  return html`<${Fold} open=${buy}
+    title=${html`<span class="sig-title"><${StatusChip} status=${s.action} /> ${t('Score')} ${fmt.num(s.score, 0)}${s.setup ? ` · ${t(s.setup)}` : ''}</span>`}
+    hint=${buy ? '' : t('In a strong uptrend but no entry trigger yet.')}>
     ${buy && html`<div class="stat-list" style="margin-bottom:14px">
       <span class="k"><${Term} k="buyupto">${t('Buy up to')}<//></span><span class="v">${fmt.price(s.entry_high)}</span>
       <span class="k"><${Term} k="stop">${t('Stop-loss')}<//></span><span class="v down">${fmt.price(s.stop)}</span>
       <span class="k"><${Term} k="target">${t('Target')}<//></span><span class="v up">${fmt.price(s.target)}</span>
       <span class="k">${t('Shares')}</span><span class="v">${s.shares ? fmt.int(s.shares) : '–'}</span>
       <span class="k">${t('Max loss')}</span><span class="v">${fmt.egp(s.risk_egp)}</span></div>`}
-    ${!buy && html`<p class="muted" style="font-size:13px;margin-bottom:8px">${t('In a strong uptrend but no entry trigger yet.')}</p>`}
     <ul class="reasons" dir="auto">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${tn(r)}</li>`)}</ul>
     ${buy && html`<a class="btn primary block" style="margin-top:14px"
       href=${`#/portfolio?buy=${encodeURIComponent(data.symbol)}&price=${s.entry_high.toFixed(2)}&shares=${s.shares || ''}`}>
       <${Icon} name="plus" />${t('Log this buy')}</a>`}
-  </div>`;
+  <//>`;
 }
 
 // Where a level comes from: "swing low 2026-03-16" → "Swing low (16 Mar 2026)", each in the chosen language.

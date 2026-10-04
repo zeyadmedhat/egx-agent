@@ -107,6 +107,9 @@ const EN = {
   chance: "Chance to reach the target: ",
   inDays: (p, hz, rank, x) => `${p} in ${hz} days (rank ${rank}${x ? `, expected ${x}` : ""})`,
   chart: (sup, res, s, t) => `Chart: support ${sup} · resistance ${res} · stop ${s} · target ${t}`,
+  bestIn: (how, p, away, s, t, rr) => `🎯 Best way in: ${how === "d" ? "on a dip to about" : "on a close above"} ${p} (${away}) · ` +
+    `stop ${s} · target ${t} · ${rr}× reward for the risk`,
+  notUp: "Not in an uptrend yet: a price to watch, not a buy.",
   levelsTip: sym => `/watch ${sym} levels: an alert when it nears support or resistance`,
   top: (hz, d) => `<b>Best chances to reach the target in ${hz} days</b> (${d})`,
   expected: x => ` · expected ${x}`,
@@ -257,6 +260,9 @@ const AR = {
   chance: "فرصة الوصول إلى الهدف: ",
   inDays: (p, hz, rank, x) => `${p} خلال ${hz} يومًا (الترتيب ${rank}${x ? `، المتوقع ${x}` : ""})`,
   chart: (sup, res, s, t) => `الرسم البياني: الدعم ${sup} · المقاومة ${res} · الوقف ${s} · الهدف ${t}`,
+  bestIn: (how, p, away, s, t, rr) => `🎯 أفضل دخول: ${how === "d" ? "عند الهبوط إلى نحو" : "عند إغلاق فوق"} ${p} (${away}) · ` +
+    `الوقف ${s} · الهدف ${t} · عائد ${rr}× مقابل المخاطرة`,
+  notUp: "ليس في اتجاه صاعد بعد: سعر للمتابعة، لا للشراء.",
   levelsTip: sym => `/watch ${sym} levels: تنبيه عندما يقترب من الدعم أو المقاومة`,
   top: (hz, d) => `<b>أفضل الفرص للوصول إلى الهدف خلال ${hz} يومًا</b> (${d})`,
   expected: x => ` · المتوقع ${x}`,
@@ -401,12 +407,20 @@ function stockCard(state, cid, sym, lang) {
     T.inDays(pct(s["p" + hz]), hz, s["r" + hz], s["x" + hz] != null ? pct(s["x" + hz], true) : null))
   if (ch.length) lines.push(T.chance + ch.join(" · "))
   if (s.cs != null) lines.push(T.chart(s.sup != null ? px(s.sup) : "–", s.res != null ? px(s.res) : "–", px(s.cs), px(s.ct)))
+  lines.push(...bestIn(s, T))
   lines.push(T.levelsTip(esc(sym)))
   const kb = [[cb(T.bBuy, `w:${sym}`), cb(T.bLevels, `l:${sym}`)], [cb(T.bWhy, `y:${sym}`)]]
   if ((state.alerts[cid] || []).some(a => a.symbol === sym)) kb.push([cb(T.bStop, `u:${sym}`)])
   const app = appButton(info, lang, `stock/${sym}`)
   if (app) kb.push([app])
   return reply(lines.join("\n"), kb)
+}
+
+// The best way in besides today's price (the website's Where to buy it), for a stock without a BUY: [] or its lines.
+function bestIn(s, T) {
+  if (s.a === "BUY" || !s.be) return []
+  const [how, p, st, t, rr] = s.be
+  return [T.bestIn(how, px(p), pct(p / s.c - 1, true), px(st), px(t), rr.toFixed(1)), ...(s.k && s.k[1] === "0" ? [T.notUp] : [])]
 }
 
 // /why COMI: the agent's own reasons, from the website's data (app/alerts.py bot_info): its rating and what stocks
@@ -440,6 +454,7 @@ function whyCard(info, sym, lang) {
     for (let i = 0; i < 5; i++) lines.push(`${s.k[i] === "1" ? "✅" : "❌"} ${T.check[i](vals[i])}`)
   }
   if (s.cs != null) lines.push("", T.chart(s.sup != null ? px(s.sup) : "–", s.res != null ? px(s.res) : "–", px(s.cs), px(s.ct)))
+  lines.push(...bestIn(s, T))
   lines.push("", `<i>${T.whyFoot}</i>`)
   const app = appButton(info, lang, `stock/${sym}`)
   return reply(lines.join("\n"), [[cb(T.bBuy, `w:${sym}`), cb(T.bLevels, `l:${sym}`)], ...(app ? [[app]] : [])])
