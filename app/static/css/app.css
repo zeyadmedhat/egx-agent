@@ -1238,6 +1238,11 @@ html[dir="rtl"] .nb-name { text-align: right; }   /* Arabic text, cut at its own
 .entry-note { font-size: 12.5px; color: var(--warn); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0 0 10px; }
 .entry-foot { font-size: 12px; margin-top: 10px; }
 .sig-title { display: inline-flex; align-items: center; gap: 8px; }
+/* Picks: the best way in on each card (pages/picks.js BestIn), and the BUY card's bell at the end of its name line */
+.best-in { display: flex; align-items: flex-start; gap: 6px; margin-top: 10px; font-size: 12.5px; color: var(--text-2); }
+.best-in .icon { color: var(--accent); flex: none; margin-top: 2px; }
+.near-box .best-in { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.sig-bell { margin-inline-start: auto; }
 button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .bell-btn.on, .bell-btn.on:hover { background: var(--accent); color: var(--on-accent); }   /* lit: the alert is on */
 .week-row { display: flex; align-items: center; gap: 10px; }

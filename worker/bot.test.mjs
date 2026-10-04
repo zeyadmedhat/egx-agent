@@ -35,8 +35,8 @@ st.info = { scan: "2026-09-29", pred: "2026-09-29", stocks: {
   COMI: { n: "CIB", c: 128.01, d: "2026-09-29", ch: -0.0038, p10: 0.134, r10: 2, p20: 0.25, r20: 1, x20: 0.021,
           cs: 115.8, ct: 151.56, sup: 127.11, res: 129.73 },
   ABUK: { n: "Abu Qir", c: 50, d: "2026-09-29", ch: 0.01, a: "BUY", e: 50.5, s: 47, t: 56, p10: 0.4, r10: 1 } } }
-assert.match(await ask("comi"), /<b>COMI<\/b> CIB\nClose 128.01 \(-0.4%\) on 29 Sep\nNo signal today.\nChance to reach the target: 13.4% in 10 days \(rank 2\) · 25.0% in 20 days \(rank 1, expected \+2.1%\)\nChart: support 127.11 · resistance 129.73/)
-assert.match(await ask("/stock abuk"), /BUY<\/b> up to 50.50 · stop 47.00 · target 56.00/)
+assert.match(await ask("comi"), /<b>COMI<\/b> · CIB\n💰 <b>128.01<\/b>  ▼ -0.4% · close of 29 Sep\n\n⚪ <b>No signal today<\/b>\n\n🎲 <b>Chance to reach the target<\/b>\n10 days: 13.4% · rank 2\n20 days: 25.0% · rank 1 · expected \+2.1%\n\n📊 <b>Chart<\/b>\nSupport 127.11 · resistance 129.73/)
+assert.match(await ask("/stock abuk"), /🟢 <b>BUY<\/b>\nBuy up to <b>50.50<\/b> · stop 47.00 · target 56.00/)
 assert.match(await ask("/s XXXX"), /don't know XXXX/)
 assert.match(await ask("hello there"), /didn't find “hello there”/)       // a hint, not silence
 assert.match(await ask("/top"), /1\. <b>ABUK<\/b> 40.0%.*\n2\. <b>COMI<\/b>/)
@@ -149,7 +149,7 @@ const card = await respond(st, u("comi"))
 assert.deepEqual(card.kb[0].map(b => b.callback_data), ["w:COMI", "l:COMI"])
 assert.equal(card.kb.at(-1)[0].web_app.url, "https://example.github.io/egx-agent/?go=stock%2FCOMI")
 st.info.stocks.COMI.be = ["d", 76.5, 72.1, 88, 2.6]                      // the best way in (app/alerts.py bot_info)
-assert.match((await respond(st, u("comi"))).text, /🎯 Best way in: on a dip to about 76\.50 \(-?[\d.]+%\) · stop 72\.10 · target 88\.00 · 2\.6× reward/)
+assert.match((await respond(st, u("comi"))).text, /🎯 <b>Best way in<\/b>\nOn a dip to about <b>76\.50<\/b> \(-?[\d.]+%\)\nStop 72\.10 · target 88\.00 · 2\.6× reward/)
 delete st.info.stocks.COMI.be
 assert.equal(callbackText("w:COMI"), "/watch COMI")
 assert.equal(callbackText("l:COMI"), "/watch COMI levels")
@@ -166,7 +166,7 @@ assert.equal(tapped.kb[0][0].callback_data, "u:COMI")                     // a w
 const arMsg = text => ({ update_id: 5, message: { chat: { id: 9, type: "private" }, from: { language_code: "en" }, text } })
 assert.match(await handle(st, arMsg("/lang ar")), /سأرد بالعربية/)
 assert.equal(st.subs[9].lang, "ar")
-assert.match(await handle(st, arMsg("comi")), /الإغلاق 128.01/)
+assert.match(await handle(st, arMsg("comi")), /128.01<\/b>  ▼ -0.4% · إغلاق/)
 assert.match(await handle(st, arMsg("/lang")), /answer in English/)          // no word: the other language
 assert.match(await handle(st, arMsg("/quiet")), /only message you/)
 assert.equal(st.subs[9].quiet, true)
@@ -279,7 +279,7 @@ assert.match(why, /❌ Volume at least 1.5× normal \(last session 1.1×\)\n✅ 
 assert.equal(callbackText("y:COMI"), "/why COMI")
 assert.equal((await respond(st, u("comi"))).kb[1][0].callback_data, "y:COMI")        // a Why button under the card
 assert.match(await handle(st, u("/why")), /Which stock\?/)
-assert.match(await handle(st, u("abuk")), /No rating[\s\S]*BUY<\/b> up to 50.50/)     // the answer to "which stock?"
+assert.match(await handle(st, u("abuk")), /No rating[\s\S]*BUY<\/b>\nBuy up to <b>50.50/)     // the answer to "which stock?"
 assert.match(await handle(st, arMsg("/lang ar")), /بالعربية/)
 assert.match(await handle(st, arMsg("/why COMI")), /التقييم 71\/100[\s\S]*الشركة: الأرباح \+28.0% خلال سنة[\s\S]*❌ اختراق: إغلاق فوق أعلى سعر في 20 يومًا/)
 assert.match(await handle(st, arMsg("/morning off")), /بدون تذكير صباحي/)
@@ -380,7 +380,7 @@ console.log("why, morning, screenshots ok")
   assert.doesNotMatch(wk, /Weak market/)
   info.week.weak = true
   assert.match(await q("/week"), /close\)\n⚠️ <b>Weak market<\/b>/)
-  assert.match(await q("/stock comi"), /No signal today.\nNext week: 42.0% chance to reach 134.41 before 121.61 \(rank 2\)\nChance to reach/)
+  assert.match(await q("/stock comi"), /No signal today<\/b>\n\n📅 <b>Next week<\/b>\n42.0% chance to reach 134.41 before 121.61 · rank 2\n\n🎲 <b>Chance to reach/)
   assert.match(await q("/egx30"), /<b>EGX30<\/b> 53,055 \(\+2.2%\) · 1 Oct\nWeek -1.3% · month -4.7% · this year \+26.8% · a year \+50.7%\nIn dollars: this year \+15.6% · a year \+38.8%\n1-year range 35,208 – 56,937 · 6.4% under its record\n🔴 Under its 50-day average \(54,220\): the agent makes no new BUYs\n32.4% of stocks/)
   assert.equal(callbackText("k"), "/week")
   assert.equal(callbackText("e"), "/egx30")

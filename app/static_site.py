@@ -108,6 +108,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         high = d.prices(r["symbol"])["high"].tail(20)
         r["trigger"] = float(high.max()) if len(high) else None
         r["to_trigger"] = r["trigger"] / r["close"] - 1 if r["trigger"] and r["close"] else None
+        if r["action"] != "BUY":                 # Picks' Getting close boxes: the best way in (views.best_entry)
+            r["best_in"] = views.best_entry(d, r["symbol"])
 
     index_ind = d.indicators(prices.INDEX_SYMBOL)
     spark = index = None

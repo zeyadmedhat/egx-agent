@@ -345,6 +345,16 @@ def status(d: Data) -> dict:
     }
 
 
+def best_entry(d: Data, sym: str) -> dict | None:
+    """The best way in besides today's price (the stock page's Where to buy it): the dip or breakout (levels.entries)
+    with the most reward for the risk, or None."""
+    ind = d.indicators(sym)
+    if len(ind) < 60:
+        return None
+    ents = levels.entries(ind, d.cfg, levels.plan_at(ind, d.cfg))
+    return max(ents, key=lambda e: e["rr"]) if ents else None
+
+
 def today(d: Data) -> dict:
     cfg = d.cfg
     m = market_info(d.conn)
@@ -366,6 +376,7 @@ def today(d: Data) -> dict:
             trigger = float(px["high"].tail(20).max()) if len(px) else None
             r["trigger"] = trigger
             r["to_trigger"] = trigger / r["close"] - 1 if trigger and r["close"] else None
+            r["best_in"] = best_entry(d, r["symbol"])
             watch.append(r)
     idx = d.indicators(prices.INDEX_SYMBOL)
     spark = None

@@ -100,16 +100,23 @@ const EN = {
           a => `Trend strength ADX above 20 (now ${a})`],
   whyFoot: "Rules and a model, not advice.",
   bWhy: "❓ Why",
-  close: (c, ch, d) => `Close ${c}${ch} on ${d}`,
-  buy: (e, s, t) => `🟢 <b>BUY</b> up to ${e} · stop ${s} · target ${t}`,
-  signal: (a, e, s, t) => `Signal: ${a}${e ? ` (entry up to ${e} · stop ${s} · target ${t})` : ""}`,
-  noSignal: "No signal today.",
-  chance: "Chance to reach the target: ",
-  inDays: (p, hz, rank, x) => `${p} in ${hz} days (rank ${rank}${x ? `, expected ${x}` : ""})`,
-  chart: (sup, res, s, t) => `Chart: support ${sup} · resistance ${res} · stop ${s} · target ${t}`,
-  bestIn: (how, p, away, s, t, rr) => `🎯 Best way in: ${how === "d" ? "on a dip to about" : "on a close above"} ${p} (${away}) · ` +
-    `stop ${s} · target ${t} · ${rr}× reward for the risk`,
-  notUp: "Not in an uptrend yet: a price to watch, not a buy.",
+  head: (c, ch, d) => `💰 <b>${c}</b>${ch} · close of ${d}`,
+  sigBuy: "🟢 <b>BUY</b>",
+  sigNear: "👀 <b>Near a buy</b>",
+  noSignal: "⚪ <b>No signal today</b>",
+  planBuy: (e, s, t) => `Buy up to <b>${e}</b> · stop ${s} · target ${t}`,
+  planNear: (e, s, t) => `If it triggers: up to ${e} · stop ${s} · target ${t}`,
+  hBest: "🎯 <b>Best way in</b>",
+  bestHow: (how, p, away) => `${how === "d" ? "On a dip to about" : "On a close above"} <b>${p}</b> (${away})`,
+  stopTgt: (s, t) => `Stop ${s} · target ${t}`,
+  rr: r => `${r}× reward for the risk`,
+  notUp: "⚠️ Not in an uptrend yet: a price to watch, not a buy.",
+  hWeek: "📅 <b>Next week</b>",
+  wkChance: (p, tgt, stop, rank) => `${p} chance to reach ${tgt} before ${stop} · rank ${rank}`,
+  hChance: "🎲 <b>Chance to reach the target</b>",
+  inDays: (hz, p, rank, x) => `${hz} days: ${p} · rank ${rank}${x ? ` · expected ${x}` : ""}`,
+  hChart: "📊 <b>Chart</b>",
+  supRes: (a, b) => `Support ${a} · resistance ${b}`,
   levelsTip: sym => `/watch ${sym} levels: an alert when it nears support or resistance`,
   top: (hz, d) => `<b>Best chances to reach the target in ${hz} days</b> (${d})`,
   expected: x => ` · expected ${x}`,
@@ -167,7 +174,6 @@ const EN = {
   weekFoot: (strong, all) => "Chance: it rises to the target (1.5× its daily range) before it falls as far to the " +
     "stop, within 5 sessions." + (strong ? ` In its tests, strong picks (its top 10%, in an uptrend, while the market ` +
     `is healthy) got there first ${strong} of the time, the average stock ${all}.` : "") + " Always use the stop. Not advice.",
-  weekCard: (p, tgt, stop, rank) => `Next week: ${p} chance to reach ${tgt} before ${stop} (rank ${rank})`,
   // EGX30 (the website's Home → EGX30)
   x30: (c, ch, d) => `<b>EGX30</b> ${c} (${ch}) · ${d}`,
   x30Ret: r => `Week ${r["1W"]} · month ${r["1M"]} · this year ${r.YTD} · a year ${r["1Y"]}`,
@@ -253,16 +259,23 @@ const AR = {
   whyFoot: "قواعد ونموذج، وليست نصيحة.",
   bWhy: "❓ لماذا",
   langSet: "تم: سأرد بالعربية. /lang en للإنجليزية.",
-  close: (c, ch, d) => `الإغلاق ${c}${ch} يوم ${d}`,
-  buy: (e, s, t) => `🟢 <b>شراء</b> حتى ${e} · الوقف ${s} · الهدف ${t}`,
-  signal: (a, e, s, t) => `الإشارة: ${a}${e ? ` (الدخول حتى ${e} · الوقف ${s} · الهدف ${t})` : ""}`,
-  noSignal: "لا توجد إشارة اليوم.",
-  chance: "فرصة الوصول إلى الهدف: ",
-  inDays: (p, hz, rank, x) => `${p} خلال ${hz} يومًا (الترتيب ${rank}${x ? `، المتوقع ${x}` : ""})`,
-  chart: (sup, res, s, t) => `الرسم البياني: الدعم ${sup} · المقاومة ${res} · الوقف ${s} · الهدف ${t}`,
-  bestIn: (how, p, away, s, t, rr) => `🎯 أفضل دخول: ${how === "d" ? "عند الهبوط إلى نحو" : "عند إغلاق فوق"} ${p} (${away}) · ` +
-    `الوقف ${s} · الهدف ${t} · عائد ${rr}× مقابل المخاطرة`,
-  notUp: "ليس في اتجاه صاعد بعد: سعر للمتابعة، لا للشراء.",
+  head: (c, ch, d) => `💰 <b>${c}</b>${ch} · إغلاق ${d}`,
+  sigBuy: "🟢 <b>شراء</b>",
+  sigNear: "👀 <b>قريب من الشراء</b>",
+  noSignal: "⚪ <b>لا توجد إشارة اليوم</b>",
+  planBuy: (e, s, t) => `اشترِ حتى <b>${e}</b> · الوقف ${s} · الهدف ${t}`,
+  planNear: (e, s, t) => `إذا تحققت الإشارة: حتى ${e} · الوقف ${s} · الهدف ${t}`,
+  hBest: "🎯 <b>أفضل دخول</b>",
+  bestHow: (how, p, away) => `${how === "d" ? "عند الهبوط إلى نحو" : "عند إغلاق فوق"} <b>${p}</b> (${away})`,
+  stopTgt: (s, t) => `الوقف ${s} · الهدف ${t}`,
+  rr: r => `عائد ${r}× مقابل المخاطرة`,
+  notUp: "⚠️ ليس في اتجاه صاعد بعد: سعر للمتابعة، لا للشراء.",
+  hWeek: "📅 <b>الأسبوع القادم</b>",
+  wkChance: (p, tgt, stop, rank) => `فرصة ${p} للوصول إلى ${tgt} قبل ${stop} · الترتيب ${rank}`,
+  hChance: "🎲 <b>فرصة الوصول إلى الهدف</b>",
+  inDays: (hz, p, rank, x) => `${hz} يومًا: ${p} · الترتيب ${rank}${x ? ` · المتوقع ${x}` : ""}`,
+  hChart: "📊 <b>الرسم البياني</b>",
+  supRes: (a, b) => `الدعم ${a} · المقاومة ${b}`,
   levelsTip: sym => `/watch ${sym} levels: تنبيه عندما يقترب من الدعم أو المقاومة`,
   top: (hz, d) => `<b>أفضل الفرص للوصول إلى الهدف خلال ${hz} يومًا</b> (${d})`,
   expected: x => ` · المتوقع ${x}`,
@@ -314,7 +327,6 @@ const AR = {
   weekFoot: (strong, all) => "الفرصة: أن يصعد إلى الهدف (1.5 ضعف مداه اليومي) قبل أن يهبط بالقدر نفسه إلى الوقف، خلال 5 جلسات." +
     (strong ? ` في اختباراته، الاختيارات القوية (أفضل 10% لديه، في اتجاه صاعد، والسوق سليم) وصلت أولًا في ${strong} من المرات، ومتوسط الأسهم ${all}.` : "") +
     " استخدم الوقف دائمًا. ليست نصيحة.",
-  weekCard: (p, tgt, stop, rank) => `الأسبوع القادم: فرصة ${p} للوصول إلى ${tgt} قبل ${stop} (الترتيب ${rank})`,
   x30: (c, ch, d) => `<b>EGX30</b> ${c} (${ch}) · ${d}`,
   x30Ret: r => `أسبوع ${r["1W"]} · شهر ${r["1M"]} · هذا العام ${r.YTD} · سنة ${r["1Y"]}`,
   x30Usd: (y, yr) => `بالدولار: هذا العام ${y} · سنة ${yr}`,
@@ -395,32 +407,49 @@ const symbolButtons = syms => rows(syms.map(s => cb(s, `s:${s}`)), 4)
 const menuButtons = T => [[cb(T.bBuys, "b"), cb(T.bWeek, "k")], [cb(T.bTop, "t"), cb(T.bX30, "e")]]
 
 // ------------------------------------------------------------------ asking about the website's data
+// A stock in short sections, each a bold title and a line or two, a blank line between: the price, the signal, the
+// best way in, next week, the chances and the chart.
+const block = (...lines) => lines.filter(Boolean).join("\n")
+
+function signalBlock(s, T) {
+  const plan = s.e ? T.planNear(px(s.e), px(s.s), px(s.t)) : null
+  if (s.a === "BUY") return block(T.sigBuy, T.planBuy(px(s.e), px(s.s), px(s.t)))
+  if (s.a === "WATCH") return block(T.sigNear, plan)
+  return s.a ? block(`<b>${esc(s.a)}</b>`, plan) : T.noSignal
+}
+
+// The best way in besides today's price (the website's Where to buy it), for a stock without a BUY.
+function bestBlock(s, T) {
+  if (s.a === "BUY" || !s.be) return null
+  const [how, p, st, t, rr] = s.be
+  return block(T.hBest, T.bestHow(how, px(p), pct(p / s.c - 1, true)), `${T.stopTgt(px(st), px(t))} · ${T.rr(rr.toFixed(1))}`,
+               s.k && s.k[1] === "0" ? T.notUp : null)
+}
+
+function chartBlock(s, T) {
+  if (s.cs == null) return null
+  return block(T.hChart, T.supRes(s.sup != null ? px(s.sup) : "–", s.res != null ? px(s.res) : "–"), T.stopTgt(px(s.cs), px(s.ct)))
+}
+
 function stockCard(state, cid, sym, lang) {
   const T = L(lang), info = state.info, s = info.stocks[sym]
-  const lines = [`<b>${esc(sym)}</b> ${esc(s.n)}`,
-    T.close(px(s.c), s.ch != null ? ` (${pct(s.ch, true)})` : "", T.day(s.d))]
-  if (s.a === "BUY") lines.push(T.buy(px(s.e), px(s.s), px(s.t)))
-  else if (s.a) lines.push(T.signal(esc(s.a), s.e ? px(s.e) : null, s.e ? px(s.s) : null, s.e ? px(s.t) : null))
-  else lines.push(T.noSignal)
-  if (s.w != null) lines.push(T.weekCard(pct(s.w), px(s.c * (1 + s.wm)), px(s.c * (1 - s.wm)), s.wr))
-  const ch = [10, 20].filter(hz => s["p" + hz] != null).map(hz =>
-    T.inDays(pct(s["p" + hz]), hz, s["r" + hz], s["x" + hz] != null ? pct(s["x" + hz], true) : null))
-  if (ch.length) lines.push(T.chance + ch.join(" · "))
-  if (s.cs != null) lines.push(T.chart(s.sup != null ? px(s.sup) : "–", s.res != null ? px(s.res) : "–", px(s.cs), px(s.ct)))
-  lines.push(...bestIn(s, T))
-  lines.push(T.levelsTip(esc(sym)))
+  const move = s.ch != null ? `  ${s.ch < 0 ? "▼" : "▲"} ${pct(s.ch, true)}` : ""
+  const chances = [10, 20].filter(hz => s["p" + hz] != null).map(hz =>
+    T.inDays(hz, pct(s["p" + hz]), s["r" + hz], s["x" + hz] != null ? pct(s["x" + hz], true) : null))
+  const text = [
+    block(`<b>${esc(sym)}</b>${s.n ? ` · ${esc(s.n)}` : ""}`, T.head(px(s.c), move, T.day(s.d))),
+    signalBlock(s, T),
+    bestBlock(s, T),
+    s.w != null ? block(T.hWeek, T.wkChance(pct(s.w), px(s.c * (1 + s.wm)), px(s.c * (1 - s.wm)), s.wr)) : null,
+    chances.length ? block(T.hChance, ...chances) : null,
+    chartBlock(s, T),
+    `<i>${T.levelsTip(esc(sym))}</i>`,
+  ].filter(Boolean).join("\n\n")
   const kb = [[cb(T.bBuy, `w:${sym}`), cb(T.bLevels, `l:${sym}`)], [cb(T.bWhy, `y:${sym}`)]]
   if ((state.alerts[cid] || []).some(a => a.symbol === sym)) kb.push([cb(T.bStop, `u:${sym}`)])
   const app = appButton(info, lang, `stock/${sym}`)
   if (app) kb.push([app])
-  return reply(lines.join("\n"), kb)
-}
-
-// The best way in besides today's price (the website's Where to buy it), for a stock without a BUY: [] or its lines.
-function bestIn(s, T) {
-  if (s.a === "BUY" || !s.be) return []
-  const [how, p, st, t, rr] = s.be
-  return [T.bestIn(how, px(p), pct(p / s.c - 1, true), px(st), px(t), rr.toFixed(1)), ...(s.k && s.k[1] === "0" ? [T.notUp] : [])]
+  return reply(text, kb)
 }
 
 // /why COMI: the agent's own reasons, from the website's data (app/alerts.py bot_info): its rating and what stocks
@@ -445,16 +474,14 @@ function whyCard(info, sym, lang) {
     if (parts.length) lines.push(`${T.co.head}: ${parts.join(" · ")}`)
   }
   lines.push("")
-  if (s.a === "BUY") lines.push(T.buy(px(s.e), px(s.s), px(s.t)))
-  else if (s.a) lines.push(T.signal(esc(s.a), s.e ? px(s.e) : null, s.e ? px(s.s) : null, s.e ? px(s.t) : null))
+  if (s.a) lines.push(signalBlock(s, T), "")
   if (s.k) {
     const vals = [+((info.min_value || 5e6) / 1e6).toFixed(1), null, s.h20 != null ? px(s.h20) : "–",
                   s.vr != null ? s.vr.toFixed(1) : "–", s.adx != null ? Math.round(s.adx) : "–"]
     lines.push(s.a === "BUY" ? T.checks : T.notBuy)
     for (let i = 0; i < 5; i++) lines.push(`${s.k[i] === "1" ? "✅" : "❌"} ${T.check[i](vals[i])}`)
   }
-  if (s.cs != null) lines.push("", T.chart(s.sup != null ? px(s.sup) : "–", s.res != null ? px(s.res) : "–", px(s.cs), px(s.ct)))
-  lines.push(...bestIn(s, T))
+  for (const b of [chartBlock(s, T), bestBlock(s, T)]) if (b) lines.push("", b)
   lines.push("", `<i>${T.whyFoot}</i>`)
   const app = appButton(info, lang, `stock/${sym}`)
   return reply(lines.join("\n"), [[cb(T.bBuy, `w:${sym}`), cb(T.bLevels, `l:${sym}`)], ...(app ? [[app]] : [])])

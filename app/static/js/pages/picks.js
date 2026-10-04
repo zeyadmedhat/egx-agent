@@ -15,6 +15,7 @@ const WK = 5;           // the model's week (predict.WEEK)
 export function PicksPage() {
   const { page, data, blocked } = useToday('Picks');
   const { data: pred } = useApi('/predict');
+  const [bells, setBells] = useBells(data && data.telegram);      // one list for every bell on the page
   if (page) return page;
   const m = data.market;
   const model = pred && pred.model ? pred : null;
@@ -30,7 +31,8 @@ export function PicksPage() {
         hint=${data.buys.length ? "Don't pay more than Buy up to. If it opens higher, skip it." : ''} />
       ${data.buys.length
         ? html`<div class="signal-grid">${data.buys.map(s => html`<${PickCard} s=${s} m=${m} wk=${week[s.symbol]}
-            odds=${data.odds} fee=${data.cfg.fee_pct_per_side} model=${data.model} key=${s.symbol} />`)}</div>`
+            odds=${data.odds} fee=${data.cfg.fee_pct_per_side} model=${data.model} key=${s.symbol}
+            bell=${{ tg: data.telegram, bells, setBells }} />`)}</div>`
         : html`<div class="card"><${Empty} icon="shield" title="No BUY signals for the next session" text=${blocked
           ? 'No new BUYs while EGX30 is below its 50-day average. Sitting in cash is a valid decision. Below: what is close to a BUY once the market recovers.'
           : 'No stock met all the entry rules at the last close. Sitting in cash is a valid decision. Below: what is close to a BUY.'} /></div>`}
@@ -39,7 +41,7 @@ export function PicksPage() {
       <${SectionHead} title=${html`<${Term} k="watchlist">${t('Getting close')}<//>`} count=${data.watch.length}
         hint="Strong uptrends waiting to break out. A close above the breakout price can make them a BUY.">
         <${ShariahNote} mode=${data.cfg.shariah_filter} /><//>
-      <${NearBoxes} rows=${data.watch} rated=${!!data.model} tg=${data.telegram} />
+      <${NearBoxes} rows=${data.watch} rated=${!!data.model} bell=${{ tg: data.telegram, bells, setBells }} />
     </section>
     ${model && model.week && html`<section class="section"><${WeekPicks} p=${model} /></section>`}
     <section class="section"><${Trust} rec=${data.record} p=${model} /></section>
@@ -131,7 +133,18 @@ function Money({ s, fee }) {
     loss: html`<b class="down">${fmt.signed(-loss)}</b>`, gain: html`<b class="up">${fmt.signed(gain)}</b>` })}</p>`;
 }
 
-function PickCard({ s, m, wk, odds, fee, model }) {
+// The best way in, as on the stock page's Where to buy it: for a BUY, buying now; else the dip or breakout with the
+// most reward for the risk (views.best_entry).
+function BestIn({ e }) {
+  if (!e) return null;
+  const rr = fmt.num((e.target - e.price) / (e.price - e.stop), 1);
+  return html`<div class="best-in"><${Icon} name="target" size=${14} /><span>${e.kind === 'now'
+    ? t('Best way in: now, up to {price} · {rr}× reward for the risk', { price: fmt.price(e.price), rr })
+    : t(e.kind === 'dip' ? 'Best way in: on a dip to about {price} ({away}) · {rr}×' : 'Best way in: on a close above {price} ({away}) · {rr}×',
+      { price: fmt.price(e.price), away: fmt.pct(e.away, 1), rr })}</span></div>`;
+}
+
+function PickCard({ s, m, wk, odds, fee, model, bell }) {
   const i = s.info;
   const both = s.source !== 'model' && s.pred && s.pred.top10;
   const cautions = s.cautions || [];
@@ -142,7 +155,8 @@ function PickCard({ s, m, wk, odds, fee, model }) {
         <div class="sym-line"><${StockAvatar} symbol=${s.symbol} size=${34} /><a class="sym-big" href=${stockHref(s.symbol)}>${s.symbol}</a>
           ${s.source === 'model'
             ? html`<span class="model-pick" title=${t("One of the prediction model's top picks today that also passes the trading and uptrend checks. Same stop, target and sizing as any BUY.")}><${Icon} name="target" size=${12} />${t('Model pick')}</span>`
-            : both && html`<span class="agree" title=${t("A BUY by the rules that is also one of the model's top 10% today")}><${Icon} name="check" size=${12} />${t('Both agree')}</span>`}</div>
+            : both && html`<span class="agree" title=${t("A BUY by the rules that is also one of the model's top 10% today")}><${Icon} name="check" size=${12} />${t('Both agree')}</span>`}
+          <span class="sig-bell"><${Bell} sym=${s.symbol} ...${bell} /></span></div>
         <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}<span class="faint"> · ${tn(i.sector)}</span></div>
       </div>
     </div>
@@ -152,6 +166,7 @@ function PickCard({ s, m, wk, odds, fee, model }) {
       <div class="buy-line"><span><${Term} k="buyupto">${t('Buy up to')}<//> <b>${fmt.price(s.entry_high)}</b></span>
         <span class="faint">${t('last close')} ${fmt.price(s.close)}</span></div>
       <${PlanBar} p=${{ stop: s.stop, target: s.target, price: s.close, avg_price: s.entry_high }} />
+      <${BestIn} e=${{ kind: 'now', price: s.entry_high, stop: s.stop, target: s.target }} />
     </div>
     <${Checks} items=${checks(s, m)} />
     <${Money} s=${s} fee=${fee} />
@@ -184,9 +199,8 @@ function PickCard({ s, m, wk, odds, fee, model }) {
 // BUY needs the close above it, so that isn't a signal yet.
 const SHOW = 8;
 const GAP = 0.2;        // ponytail: the bar starts 20% under the breakout price; farther ones show an empty bar
-function NearBoxes({ rows, rated, tg }) {
+function NearBoxes({ rows, rated, bell }) {
   const [all, setAll] = useState(false);
-  const [bells, setBells] = useBells(tg);
   const q = useQuotes(rows.map(r => r.symbol));
   if (!rows.length) return html`<div class="card"><${Empty} icon="eye" title="Nothing close to a BUY" text="No strong uptrend is waiting to break out at the last close." /></div>`;
   const live = sessionState().state === 'open';
@@ -204,7 +218,7 @@ function NearBoxes({ rows, rated, tg }) {
         <div class="nb-who"><a class="sym" href=${stockHref(r.symbol)}>${r.symbol}</a>
           <div class="faint nb-name" dir="rtl">${r.info && r.info.name_ar}</div></div>
         ${rated && html`<${Rating} v=${r.pred && r.pred.rating} />`}
-        <${Bell} sym=${r.symbol} tg=${tg} bells=${bells} setBells=${setBells} />
+        <${Bell} sym=${r.symbol} ...${bell} />
       </div>
       ${over ? html`<div class="nb-over" title=${t('A BUY needs the close above the breakout price')}>${t('Above it now: wait for the close')}</div>`
         : away != null && html`<div class="nb-away"><b class=${near ? 'up' : ''}>${fmt.pct(away, 1)}</b> <span class="faint">${t('to break out')}</span></div>`}
@@ -214,6 +228,7 @@ function NearBoxes({ rows, rated, tg }) {
           <span class="faint">${t(quote ? 'now' : 'last close')}</span></span>
         <span class="r" title=${t('Breakout price: the 20-day high')}><b>${fmt.price(r.trigger)}</b>
           <span class="faint">${t('breakout')}</span></span></div>
+      <${BestIn} e=${r.best_in} />
       ${rated && r.pred && r.pred.why10 && html`<div class="nb-why"><${Reason} items=${r.pred.why10} stacked /></div>`}
     </article>`;
   })}</div>
