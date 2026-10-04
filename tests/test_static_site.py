@@ -781,4 +781,24 @@ def test_your_stop_counts_from_the_day_you_set_it():
     after_dip, on_dip, after_close = run_js(case("2026-01-06"), case("2026-01-05"), case("2026-01-08"))
     assert after_dip["status"] == "HOLD" and after_dip["stop"] == 9.5
     assert on_dip["status"] == "EXIT" and "2026-01-05" in on_dip["reason"]
-    assert after_close["status"] == "TIGHTEN STOP" and after_close["stop"] == 9.5 and after_close["prev_stop"] == 9.0
+    assert after_close["status"] == "HOLD" and after_close["stop"] == 9.5     # no "raise your stop" for your own stop
+
+
+@needs_node
+def test_stops_that_move_only_when_you_change_them(cfg):
+    """stop_moves "mine": no rise to support nor after a 1× gain, in the browser and in Python alike."""
+    ind, cases, expected = market(), [], []
+    c = {**cfg, "stop_moves": "mine"}
+    for sym, frame in ind.items():
+        for i in (70, 150, 230):
+            day, price = frame.index[i], float(frame.close.iloc[i])
+            stop = float(strategy.initial_stop(price, frame.atr14.iloc[i], c))
+            row = pd.Series({"symbol": sym, "entry_date": str(day.date()), "entry_price": price, "shares": 100,
+                             "initial_stop": stop, "stop": stop, "target": price + 2 * (price - stop), "sector": "A"})
+            expected.append(portfolio.real_status(row, frame, c))
+            cases.append({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(frame), "cfg": c}})
+            assert expected[-1]["stop"] == stop and expected[-1]["status"] != "TIGHTEN STOP"
+    for py, js in zip(expected, run_js(*cases)):
+        assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "prev_stop", "last_close"))
+    auto = [portfolio.real_status(pd.Series(x["args"]["trade"]), ind[x["args"]["trade"]["symbol"]], cfg) for x in cases]
+    assert any(a["stop"] > e["stop"] for a, e in zip(auto, expected))      # the same trades' stops rise by themselves

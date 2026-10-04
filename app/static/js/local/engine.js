@@ -132,12 +132,12 @@ export function updateAfterClose(p, bar, cfg) {
   const c = bar.close;
   if (c > p.highest_close) p.highest_close = c;          // Python's max() skips a NaN close the same way
   const r = p.entry_price - p.initial_stop;
-  if (p.highest_close >= p.entry_price + r) {
+  if (p.highest_close >= p.entry_price + r && !cfg.freeze_stops) {   // freeze_stops: stop_moves "mine" (realStatus)
     const trail = p.highest_close - cfg.atr_stop_mult * bar.atr14;
     p.stop = Math.max(p.stop, p.entry_price * (1 + (cfg.breakeven_pct || 0) / 100));   // entry + breakeven_pct
     if (trail > p.stop) p.stop = trail;                    // a NaN trail (no ATR yet) is ignored, as in Python
   }
-  if (cfg.stop_follows_support && bar.sup > p.stop) p.stop = bar.sup;   // just under the nearest support; NaN: none
+  if (cfg.stop_follows_support && !cfg.freeze_stops && bar.sup > p.stop) p.stop = bar.sup;   // under the nearest support; NaN: none
   if (c < bar.ema50) p.exit_next_open = 'Trend break (closed below 50-day average)';
   else if (p.days_held >= cfg.max_hold_days) p.exit_next_open = `Max hold reached (${cfg.max_hold_days} trading days)`;
 }
@@ -180,7 +180,7 @@ export function replayStatus(p, bars, cfg) {
       reason: `Day ${p.days_held}: no +1R move yet (needs ${f2(p.entry_price + r)}). Consider exiting.`,
       stop: p.stop, days_held: p.days_held, event_date: last };
   }
-  if (p.stop > prevStop + 1e-9) {
+  if (p.stop > prevStop + 1e-9 && p.stop !== p.my_stop) {   // a stop you set yourself needs no reminder
     return { status: 'TIGHTEN STOP', reason: `Raise your stop to ${f2(p.stop)}`, stop: p.stop, prev_stop: prevStop,
       days_held: p.days_held, event_date: last };
   }
@@ -215,6 +215,7 @@ export function realStatus(t, bars, cfg) {
     return { status: 'NO DATA', reason: 'No price data for this symbol', stop: t.stop, days_held: 0, last_close: null };
   }
   const p = position({ ...t, stop: t.initial_stop, highest_close: t.entry_price, days_held: 0, exit_next_open: null });
+  if (cfg.stop_moves === 'mine') cfg = { ...cfg, freeze_stops: true };   // the stop stays where it was set
   const st = onBounce(t, bars, replayStatus(p, bars, cfg));
   st.last_close = bars[bars.length - 1].close;
   return st;

@@ -287,7 +287,7 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
             "buy_signal": r.symbol in buys, "top_pick": bool((preds.get(r.symbol) or {}).get("top10")),
             # how far under its 3-month high: after a 50%+ fall even the model's top ratings did worse (2026-10)
             "from_high": last / float(ind["close"].tail(60).max()) - 1 if len(ind) else None,
-            "target": float(r.target), "day": int(stt["days_held"]),
+            "target": float(r.target), "day": int(stt["days_held"]), "stops_mine": d.cfg.get("stop_moves") == "mine",
             "sell_by": sessions_after(r.entry_date, d.cfg["max_hold_days"] - 1),
             "fees": fees, "dividends": div, "notes": r.notes or "", "fills": fills, "adjust": ev,
             "n_buys": sum(1 for f in fills if f["side"] == "buy") or 1,
@@ -1284,6 +1284,16 @@ SETTINGS_SECTIONS = [
         _f("max_pct_of_adv", "Max position vs daily traded value", 0.5, 25, 0.5, "%",
            "Keeps you out of stocks too thin to exit quickly."),
     ]},
+    {"title": "Your stops", "fields": [
+        {"key": "stop_moves", "label": "Your positions' stops move", "kind": "choice",
+         "options": [{"value": "auto", "label": "By themselves: up to each newer support, never down (tested better)"},
+                     {"value": "mine", "label": "Only when I change them"}],
+         "help": "By themselves: each evening the stop rises to just under the newest support, and once a position "
+                 "has gained 1× its risk it goes no lower than your price + 1.5%; the to-do list says when to move "
+                 "it at your broker. Tested 2016–2026: 31.8% a year with stops that follow support against 22.3% "
+                 "without. Only when I change them: the stop stays where it was set when you bought, until you "
+                 "change it (Sell or edit → Change the stop)."},
+    ]},
     {"title": "Shariah", "fields": [
         {"key": "shariah_filter", "label": "Shariah filter for BUY signals", "kind": "select",
          "options": [{"value": k, "label": v} for k, v in config.SHARIAH_MODES.items()],
@@ -1395,8 +1405,14 @@ def parse_settings(values: dict, current: dict) -> tuple[dict, dict[str, str]]:
                     errors[key] = "Pick one of the options."
                 else:
                     new[key] = v
-            elif kind in ("toggle", "choice"):
+            elif kind == "toggle":
                 new[key] = bool(v)
+            elif kind == "choice":           # one of the options as it is: True/False, or a word like "chart"
+                match = [o["value"] for o in f["options"] if o["value"] == v and type(o["value"]) is type(v)]
+                if not match:
+                    errors[key] = "Pick one of the options."
+                else:
+                    new[key] = match[0]
             elif kind == "multi":
                 allowed = {o["value"] for o in f["options"]}
                 picked = [x for x in (v or []) if x in allowed]

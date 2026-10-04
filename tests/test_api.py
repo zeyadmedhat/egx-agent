@@ -108,3 +108,11 @@ def test_backtest_runs_in_the_background(client):
 def test_json_cleaning():
     out = views.clean({"a": np.float64("nan"), "b": np.int64(3), "c": [float("inf"), np.bool_(True)]})
     assert out == {"a": None, "b": 3, "c": [None, True]}
+
+
+def test_choice_settings_keep_their_value():
+    """A two-way choice is saved as the option itself: "mine" or "chart" stay words, True/False stay booleans."""
+    new, errors = views.parse_settings({"stop_moves": "mine", "levels_mode": "atr", "riskoff_block_buys": False},
+                                       dict(config.DEFAULTS))
+    assert not errors and new["stop_moves"] == "mine" and new["levels_mode"] == "atr" and new["riskoff_block_buys"] is False
+    assert "stop_moves" in views.parse_settings({"stop_moves": True}, dict(config.DEFAULTS))[1]

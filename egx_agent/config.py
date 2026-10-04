@@ -101,6 +101,9 @@ DEFAULTS: dict = {
     # −22.7%; the rules alone 20.4% against 13.4% (engine.py). Also tried: skipping BUYs with no support within
     # stop_max_pct (28.1%, drop −14.8%, but worse in 2016–21) and stops up to 20% under support (18.0%): not used.
     "stop_follows_support": True,
+    # Your own positions' stops: "auto" rises as above (and after a 1× gain, below); "mine" stays where it was set
+    # (at the buy, or when you change it) and only you move it. Paper trades and backtests always use "auto".
+    "stop_moves": "auto",
     # Once a trade has gained 1× its risk, the stop goes no lower than the entry plus this % (enough to cover both
     # fees): a trade that comes back ends a small win instead of a small loss. Walk-forward 2016–2026 with the model's
     # picks (4 seeds): 48.0% of trades won against 44.9% with the stop at the entry (higher in every seed), the same
@@ -121,7 +124,7 @@ DEFAULTS: dict = {
 # Each person's own numbers on the shared website. Everything else is the strategy, which the admin sets for all.
 PERSONAL_KEYS = (
     "capital", "paper_capital", "broker", "fee_pct_per_side", "risk_per_trade_pct", "max_position_pct", "max_positions",
-    "max_open_risk_pct", "max_per_sector", "max_pct_of_adv", "shariah_filter", "auto_paper",
+    "max_open_risk_pct", "max_per_sector", "max_pct_of_adv", "shariah_filter", "auto_paper", "stop_moves",
     "telegram_chat_id", "telegram_only_action",
 )
 

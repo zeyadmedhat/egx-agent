@@ -427,7 +427,9 @@ function PositionPanel({ p, hold, c, atr, quotes }) {
       ${tw && html`<li><b class="up">${t('Target')}</b> ${tw}</li>`}
       ${next && html`<li><b class="up">${t('Next target')}</b> ${fmt.price(next)}: ${t('the next resistance above your target, if the price gets through it')}</li>`}
     </ul>
-    <p class="faint" style="font-size:12px;margin-top:8px">${t('Each evening the stop rises to just under the newest support below the price, and never goes down. The target stays where it was set.')}</p><//>`}
+    <p class="faint" style="font-size:12px;margin-top:8px">${p.stops_mine
+      ? t('The stop stays where it is until you change it (Settings → Your stops). The target stays where it was set.')
+      : t('Each evening the stop rises to just under the newest support below the price, and never goes down. The target stays where it was set.')}</p><//>`}
     <a class="btn sm block" href=${`#/portfolio?open=${p.id}`}>${t('Sell or edit in My Portfolio')}</a>
   <//>`;
 }

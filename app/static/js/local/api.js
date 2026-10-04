@@ -124,6 +124,7 @@ async function openPositions(c, symbol = null) {
       pnl_pct: ((worth - r.entry_price) * r.shares - fees) / (r.entry_price * r.shares + fees),
       pnl: (worth - r.entry_price) * r.shares - fees + div,
       stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target, my_stop: r.my_stop ?? null,
+      stops_mine: cfg.stop_moves === 'mine',
       bounce_level: stt.bounce_level ?? null, bounce_by: stt.bounce_by ?? null,
       buy_signal: buys.has(r.symbol), top_pick: !!(preds[r.symbol] && preds[r.symbol].top10),
       // how far under its 3-month high: after a 50%+ fall even the model's top ratings did worse (2026-10)
@@ -438,7 +439,10 @@ export function parseSettings(values, current, sections) {
     } else if (f.kind === 'select') {
       if (!f.options.some(o => o.value === v)) errors[f.key] = 'Pick one of the options.';
       else next[f.key] = v;
-    } else if (f.kind === 'toggle' || f.kind === 'choice') next[f.key] = !!v;
+    } else if (f.kind === 'choice') {                 // one of the options as it is: true/false, or a word like 'mine'
+      if (!f.options.some(o => o.value === v)) errors[f.key] = 'Pick one of the options.';
+      else next[f.key] = v;
+    } else if (f.kind === 'toggle') next[f.key] = !!v;
   }
   return [next, errors];
 }

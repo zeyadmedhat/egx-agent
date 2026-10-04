@@ -100,13 +100,14 @@ def update_after_close(pos: Position, bar: pd.Series, cfg: dict) -> None:
     −18.7% against −20.3%); with the model's picks, as the site runs, 31.8% against 22.3% (worst drop −25.2% against
     −22.7%). Better in both halves. A plain daily 2×ATR trail made 16.4% (rules), so most of it is the supports.
 
-    Once the trade has gained 1× its risk, the stop goes no lower than the entry plus breakeven_pct (config.py)."""
+    Once the trade has gained 1× its risk, the stop goes no lower than the entry plus breakeven_pct (config.py).
+    freeze_stops (your positions with stop_moves "mine", portfolio.real_status): the stop never moves by itself."""
     c = float(bar["close"])
     pos.highest_close = max(pos.highest_close, c)
-    if pos.highest_close >= pos.entry_price + pos.r:
+    if pos.highest_close >= pos.entry_price + pos.r and not cfg.get("freeze_stops"):
         trail = pos.highest_close - cfg["atr_stop_mult"] * float(bar["atr14"])
         pos.stop = max(pos.stop, pos.entry_price * (1 + cfg.get("breakeven_pct", 0.0) / 100), trail)
-    sup = bar.get("sup", float("nan")) if cfg.get("stop_follows_support") else float("nan")
+    sup = bar.get("sup", float("nan")) if cfg.get("stop_follows_support") and not cfg.get("freeze_stops") else float("nan")
     if sup == sup and sup > pos.stop:     # sup == sup: not NaN
         pos.stop = float(sup)
     if c < float(bar["ema50"]):

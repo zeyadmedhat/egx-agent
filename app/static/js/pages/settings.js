@@ -143,7 +143,7 @@ function SettingField({ f, value, onChange, error }) {
   if (f.kind === 'choice') {
     return html`<${Field} className="wide" label=${label} help=${f.help} error=${error}><div class="radio-cards">
       ${f.options.map(o => html`<label class=${cls('radio-card', value === o.value && 'on')}>
-        <input type="radio" checked=${value === o.value} onChange=${() => onChange(o.value)} />${o.label}</label>`)}
+        <input type="radio" checked=${value === o.value} onChange=${() => onChange(o.value)} />${t(o.label)}</label>`)}
       </div><//>`;
   }
   return html`<${Field} className="wide" help=${f.help} error=${error}>

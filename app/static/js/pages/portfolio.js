@@ -443,7 +443,8 @@ function StopForm({ p }) {
       <button class="btn" type="submit" disabled=${!(n > 0) || busy}><${Icon} name="shield" size=${14} />${t('Set stop')}</button>
       ${p.my_stop && html`<button type="button" class="linkish" disabled=${busy} onClick=${() => save(null)}>${t('Back to the automatic stop')}</button>`}
     </div>
-    <p class="faint">${t("From today on, and it can still rise to a newer support. The automatic stop sits a little under a support so a dip that only touches it doesn't sell you; a stop right on the support sells on a touch.")}</p>
+    <p class="faint">${p.stops_mine ? t('From today on, and it stays there until you change it again.')
+      : t('From today on, and it can still rise to a newer support.')} ${t("The automatic stop sits a little under a support so a dip that only touches it doesn't sell you; a stop right on the support sells on a touch.")}</p>
   </form>`;
 }
 

@@ -246,7 +246,9 @@ def on_bounce(row: pd.Series, ind: pd.DataFrame, st: dict) -> dict:
 
 
 def real_status(row: pd.Series, ind: pd.DataFrame | None, cfg: dict) -> dict:
-    """What the exit rules say about one open real trade today."""
+    """What the exit rules say about one open real trade today. With stop_moves "mine" its stop stays where it was set."""
+    if cfg.get("stop_moves") == "mine":
+        cfg = {**cfg, "freeze_stops": True}
     if ind is None or ind.empty:
         return {"status": "NO DATA", "reason": "No price data for this symbol", "stop": row["stop"],
                 "days_held": 0, "last_close": None}
