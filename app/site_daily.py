@@ -248,11 +248,12 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             try:
                 if all(worker):      # the Worker has the messages (and has answered them already)
                     try:
-                        updates = alerts.worker_call(*worker, "/updates")["updates"]
+                        got = alerts.worker_call(*worker, "/updates")
+                        updates, web = got["updates"], got.get("web") or []
                     except alerts.TelegramError as exc:
                         report["worker"] = str(exc)
-                        updates = []
-                    subs = alerts.sync_subscribers(conn, token, code, updates, answered=True)
+                        updates, web = [], []
+                    subs = alerts.sync_subscribers(conn, token, code, updates, answered=True, web=web)
                 else:
                     subs = alerts.sync_subscribers(conn, token, code)
             except alerts.TelegramError as exc:

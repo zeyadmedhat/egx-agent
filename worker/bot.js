@@ -6,7 +6,7 @@
 // Keep the replies in step with app/alerts.py.
 
 const WATCH_RE = /^\/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?|levels))?\s*$/i
-const UNWATCH_RE = /^\/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})\s*$/i
+const UNWATCH_RE = /^\/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+(buy|levels))?\s*$/i   // a kind: only that alert
 const LIST_RE = /^\/(?:list|alerts)(?:@\w+)?\s*$/i
 const WEEKLY_RE = /^\/weekly(?:@\w+)?\s+(on|off)\s*$/i
 const QUIET_RE = /^\/quiet(?:@\w+)?(?:\s+(on|off))?\s*$/i
@@ -568,8 +568,10 @@ function watch(state, cid, text, lang) {
   }
   let m = UNWATCH_RE.exec(text)
   if (m) {
-    const sym = m[1].toUpperCase(), n = mine.filter(a => sym === "ALL" || a.symbol === sym).length
-    state.alerts[cid] = mine.filter(a => sym !== "ALL" && a.symbol !== sym)
+    const sym = m[1].toUpperCase(), kind = m[2] && m[2].toLowerCase()
+    const gone = a => sym === "ALL" || (a.symbol === sym && (!kind || a.kind === kind))
+    const n = mine.filter(gone).length
+    state.alerts[cid] = mine.filter(a => !gone(a))
     return reply(sym === "ALL" ? T.removedAll(n) : T.removed(n, esc(sym)))
   }
   m = WATCH_RE.exec(text)
@@ -890,6 +892,16 @@ const COMMANDS = {
 const COMMANDS_VERSION = "2026-10-04"
 
 // One Durable Object holds the data, so messages are handled one at a time, in order.
+// The website's bells (Picks): /watch SYMBOL or /unwatch SYMBOL buy from a linked browser, kept in order here until
+// the website's run has applied them (app/alerts.py web_commands), like the messages in the log.
+async function catchUp(state, store) {
+  for (const u of (await store.get("log")) || []) await respond(state, u)
+  for (const w of (await store.get("web")) || []) {
+    if (w.seq > (state.web_seen || 0)) await respond(state, webUpdate(w))
+  }
+}
+const webUpdate = w => ({ update_id: 0, message: { chat: { id: w.cid, type: "private" }, text: w.text } })
+
 export class Bot {
   constructor(ctx, env) { this.ctx = ctx; this.env = env }
 
@@ -912,7 +924,7 @@ export class Bot {
       }
       if (!update.message) return json({})
       const state = structuredClone(base)
-      for (const u of log) await respond(state, u)         // what's happened since the website's last run
+      await catchUp(state, store)                          // what's happened since the website's last run
       const linked = await this.noteStart(state, update)
       let out = (await this.personal(state, update)) ?? await respond(state, update)
       const lang = langOf(state, String((update.message.chat || {}).id), update.message)
@@ -922,7 +934,7 @@ export class Bot {
       return json({})
     }
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
-    if (req.method === "POST" && ["/pair", "/book", "/restore", "/miniapp", "/started", "/unpair", "/read"].includes(url.pathname)) {
+    if (req.method === "POST" && ["/pair", "/book", "/restore", "/miniapp", "/started", "/unpair", "/read", "/bell", "/bells"].includes(url.pathname)) {
       if (url.pathname === "/book") return this.book(await req.text())
       if (url.pathname === "/read") return this.read(await req.text())
       const body = await req.json().catch(() => ({}))
@@ -930,18 +942,20 @@ export class Bot {
       if (url.pathname === "/restore") return this.restore(body)
       if (url.pathname === "/miniapp") return this.miniapp(body)
       if (url.pathname === "/started") return this.started(body)
+      if (url.pathname === "/bell" || url.pathname === "/bells") return this.bell(body, url.pathname === "/bell")
       const cid = await this.owner(body.token)
       if (cid) await this.forget(cid)
       return json({ ok: true })
     }
     if (req.headers.get("Authorization") !== `Bearer ${env.SYNC_KEY}`) return new Response("", { status: 403 })
-    if (url.pathname === "/updates") return json({ updates: (await store.get("log")) || [] })
+    if (url.pathname === "/updates") return json({ updates: (await store.get("log")) || [], web: (await store.get("web")) || [] })
     if (url.pathname === "/books") return this.books()
     if (url.pathname === "/tick") return this.tick()
     if (url.pathname === "/state" && req.method === "POST") {
       const state = await req.json()
       await store.put("state", state)
       await store.put("log", ((await store.get("log")) || []).filter(u => u.update_id > state.seen))
+      await store.put("web", ((await store.get("web")) || []).filter(w => w.seq > (state.web_seen || 0)))
       const want = `${url.origin}/telegram`, info = await telegram(env, "getWebhookInfo", {})
       if (info.result?.url !== want || !(info.result?.allowed_updates || []).includes("callback_query")) {
         const set = await telegram(env, "setWebhook", { url: want, secret_token: hook,
@@ -1141,13 +1155,38 @@ export class Bot {
   async miniapp(body) {
     const user = await webAppUser(body.initData, this.env.BOT_TOKEN), cid = user && String(user.id)
     const state = structuredClone(await this.ctx.storage.get("state"))
-    for (const u of (state && (await this.ctx.storage.get("log"))) || []) await respond(state, u)  // joined since the run
+    if (state) await catchUp(state, this.ctx.storage)                                       // joined since the run
     if (!cid || !state || !(cid in state.subs)) return json({ error: "Press Connect Telegram on the website first." }, 403)
     if (!state.sitekey) return json({ error: "The website's key hasn't reached the bot yet." }, 503)
     const token = hex(await hmac(this.env.SYNC_KEY, "mini:" + cid)), hash = await sha(token)
     await this.ctx.storage.put("tok:" + hash, cid)
     await this.ctx.storage.put("mini:" + cid, hash)
     return json({ key: state.sitekey, token })
+  }
+
+  // The website's bell on a stock (Picks): a Telegram message when it gets a BUY, turned on or off from a linked
+  // browser without opening Telegram. /bells: which stocks have one. {bells: [SYMBOL…]} or {error}.
+  async bell(body, change) {
+    const store = this.ctx.storage, cid = await this.owner(body.token)
+    if (!cid) return json({ error: "Not linked" }, 401)
+    const base = await store.get("state")
+    if (!base) return json({ error: "The bot has no data yet." }, 503)
+    const state = structuredClone(base)
+    await catchUp(state, store)
+    if (!(cid in state.subs)) return json({ error: "Press Connect Telegram on the website first." }, 403)
+    const bells = () => (state.alerts[cid] || []).filter(a => a.kind === "buy").map(a => a.symbol)
+    if (!change) return json({ bells: bells() })
+    const sym = String(body.symbol || "").toUpperCase()
+    if (!/^[A-Z0-9]{2,12}$/.test(sym) || !(sym in state.stocks)) return json({ error: "Unknown stock" }, 400)
+    const on = body.on !== false, mine = state.alerts[cid] || []
+    if (on && mine.length >= MAX_ALERTS && !bells().includes(sym)) {
+      return json({ error: `You already have ${MAX_ALERTS} alerts. Remove some first.` }, 400)
+    }
+    const web = (await store.get("web")) || [], seq = Math.max(base.web_seen || 0, ...web.map(w => w.seq)) + 1
+    const w = { seq, cid, text: on ? `/watch ${sym}` : `/unwatch ${sym} buy` }
+    await respond(state, webUpdate(w))
+    await store.put("web", web.concat(w))
+    return json({ bells: bells() })
   }
 
   // Your Mac's Connect Telegram: Telegram hands the messages only to this Worker now, so the Mac asks here who
@@ -1169,7 +1208,7 @@ export class Bot {
     if ((await store.get("morning_sent")) === m.day) return 0
     await store.put("morning_sent", m.day)
     const state = structuredClone(base)
-    for (const u of (await store.get("log")) || []) await respond(state, u)   // what's happened since the run
+    await catchUp(state, store)                                             // what's happened since the run
     let sent = 0
     for (const [cid, text] of Object.entries(m.texts || {})) {
       const s = state.subs[cid]

@@ -44,6 +44,15 @@ const TELEGRAM = (() => {
   };
   post('web_app_ready');
   post('web_app_expand');
+  // Telegram's own bar and background in the site's colours, again whenever the light/dark look changes
+  const paint = () => {
+    const css = getComputedStyle(document.documentElement), bg = css.getPropertyValue('--bg').trim();
+    post('web_app_set_header_color', { color: bg });
+    post('web_app_set_background_color', { color: bg });
+    post('web_app_set_bottom_bar_color', { color: css.getPropertyValue('--bg-2').trim() });
+  };
+  paint();
+  new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   return { initData };
 })();
 

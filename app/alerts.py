@@ -511,7 +511,7 @@ def _reply(token: str, chat_id: str, text: str) -> None:
 
 # Alerts for the stocks a friend follows: sent after a close, when the stock gets a BUY signal or closes past a price.
 WATCH_RE = re.compile(r"^/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?|levels))?\s*$", re.I)
-UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})\s*$", re.I)
+UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+(buy|levels))?\s*$", re.I)   # a kind: only that alert
 LIST_RE = re.compile(r"^/(?:list|alerts)(?:@\w+)?\s*$", re.I)
 WEEKLY_RE = re.compile(r"^/weekly(?:@\w+)?\s+(on|off)\s*$", re.I)
 QUIET_RE = re.compile(r"^/quiet(?:@\w+)?(?:\s+(on|off))?\s*$", re.I)
@@ -546,8 +546,11 @@ def _drop_alert(conn: sqlite3.Connection, key: tuple) -> None:
     conn.execute("DELETE FROM watch_alerts WHERE chat_id=? AND symbol=? AND kind=?", key)
 
 
-def forget_alerts(conn: sqlite3.Connection, chat_id: str, symbol: str | None = None) -> int:
-    """Remove a chat's alerts (all, or one stock's). Returns how many there were."""
+def forget_alerts(conn: sqlite3.Connection, chat_id: str, symbol: str | None = None, kind: str | None = None) -> int:
+    """Remove a chat's alerts (all, one stock's, or one kind of one stock's). Returns how many there were."""
+    if symbol and kind:
+        return conn.execute("DELETE FROM watch_alerts WHERE chat_id=? AND symbol=? AND kind=?",
+                            (chat_id, symbol, kind)).rowcount
     if symbol:
         return conn.execute("DELETE FROM watch_alerts WHERE chat_id=? AND symbol=?", (chat_id, symbol)).rowcount
     return conn.execute("DELETE FROM watch_alerts WHERE chat_id=?", (chat_id,)).rowcount
@@ -573,7 +576,7 @@ def watch_command(conn: sqlite3.Connection, chat_id: str, text: str) -> str | No
     m = UNWATCH_RE.match(text)
     if m:
         sym = m.group(1).upper()
-        n = forget_alerts(conn, chat_id, None if sym == "ALL" else sym)
+        n = forget_alerts(conn, chat_id, None if sym == "ALL" else sym, (m.group(2) or "").lower() or None)
         if sym == "ALL":
             conn.commit()
             return f"Removed all your alerts ({n})." if n else "You have no alerts."
@@ -700,9 +703,10 @@ def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str, cfg:
 
 
 def sync_subscribers(conn: sqlite3.Connection, token: str, code: str, updates: list | None = None,
-                     answered: bool = False) -> dict:
+                     answered: bool = False, web: list | None = None) -> dict:
     """Connect the friends who pressed Start through the site's link and disconnect those who sent /stop.
     `updates`: the messages, when the Worker collected them (it has `answered` them already), else read here.
+    `web`: the website's bells from the Worker ({seq, cid, text}: /watch SYMBOL or /unwatch SYMBOL buy), after them.
     Returns counts only (the logs are public)."""
     subs = _subscribers(conn)
     seen = int(db.get_meta(conn, "site_update_seen") or 0)
@@ -761,6 +765,16 @@ def sync_subscribers(conn: sqlite3.Connection, token: str, code: str, updates: l
         elif cid in subs and (reply := watch_command(conn, cid, text)):
             replies.append((cid, reply))
             commands += 1
+    web_seen = int(db.get_meta(conn, "site_web_seen") or 0)
+    for w in sorted(web or [], key=lambda w: w["seq"]):
+        if int(w["seq"]) <= web_seen:
+            continue
+        web_seen = int(w["seq"])
+        cid, text = str(w["cid"]), str(w["text"])
+        if cid in subs and (WATCH_RE.match(text) or UNWATCH_RE.match(text)):
+            watch_command(conn, cid, text)
+            commands += 1
+    db.set_meta(conn, "site_web_seen", str(web_seen))
     if answered:
         replies = []
     for cid in [c for c, s in subs.items() if s["code"] != fp]:   # the password changed
@@ -875,7 +889,8 @@ def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None, e
         "FROM stocks s")}
     extra = dict(extra or {})
     info = {**bot_info(conn, cfg or config.DEFAULTS), **({"site": extra.pop("site")} if extra.get("site") else {})}
-    return {"fp": _fingerprint(code), "seen": int(db.get_meta(conn, "site_update_seen") or 0), "stocks": stocks,
+    return {"fp": _fingerprint(code), "seen": int(db.get_meta(conn, "site_update_seen") or 0),
+            "web_seen": int(db.get_meta(conn, "site_web_seen") or 0), "stocks": stocks,
             "subs": {c: {"weekly": s.get("weekly", True), **{k: s[k] for k in ("lang", "quiet") if s.get(k)},
                          **({"morning": False} if s.get("morning") is False else {})}
                      for c, s in _subscribers(conn).items()},

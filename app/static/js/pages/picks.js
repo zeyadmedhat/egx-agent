@@ -1,7 +1,7 @@
 // Picks: what to buy at the next session and what may come next, from the BUY rules and the prediction model side by
 // side. The Picks tab answers, in order: can I buy now (the market light), what (the BUY cards), what's coming (close
 // to a BUY, the model's week) and can I trust it now. Track record: how the published BUYs and the model did live.
-import { html, useApi, useState, fmt, tone, stockHref, cls, go } from '../lib.js';
+import { html, useApi, useState, useEffect, fmt, tone, stockHref, cls, go, toast } from '../lib.js';
 import {
   Icon, Badges, IndexPills, Empty, Callout, PageHead, SectionHead, StockAvatar, Cautions, Term, DataTable,
   SessionBadge, More, ShariahNote, Rating, Reason, Why, Chance, useQuotes, sessionState, PlanBar,
@@ -186,6 +186,7 @@ const SHOW = 8;
 const GAP = 0.2;        // ponytail: the bar starts 20% under the breakout price; farther ones show an empty bar
 function NearBoxes({ rows, rated, tg }) {
   const [all, setAll] = useState(false);
+  const [bells, setBells] = useBells(tg);
   const q = useQuotes(rows.map(r => r.symbol));
   if (!rows.length) return html`<div class="card"><${Empty} icon="eye" title="Nothing close to a BUY" text="No strong uptrend is waiting to break out at the last close." /></div>`;
   const live = sessionState().state === 'open';
@@ -203,7 +204,7 @@ function NearBoxes({ rows, rated, tg }) {
         <div class="nb-who"><a class="sym" href=${stockHref(r.symbol)}>${r.symbol}</a>
           <div class="faint nb-name" dir="rtl">${r.info && r.info.name_ar}</div></div>
         ${rated && html`<${Rating} v=${r.pred && r.pred.rating} />`}
-        <${Bell} sym=${r.symbol} tg=${tg} />
+        <${Bell} sym=${r.symbol} tg=${tg} bells=${bells} setBells=${setBells} />
       </div>
       ${over ? html`<div class="nb-over" title=${t('A BUY needs the close above the breakout price')}>${t('Above it now: wait for the close')}</div>`
         : away != null && html`<div class="nb-away"><b class=${near ? 'up' : ''}>${fmt.pct(away, 1)}</b> <span class="faint">${t('to break out')}</span></div>`}
@@ -220,10 +221,43 @@ function NearBoxes({ rows, rated, tg }) {
     all ? t('Show fewer') : t('Show all {n}', { n: sorted.length })}</button>`}`;
 }
 
-// A Telegram message when the stock gets a BUY: the bot's /watch, set with one tap (t.me/<bot>?start=watch-SYMBOL;
-// worker/bot.js and app/alerts.py read it as "/watch SYMBOL"). Only on the website, which has a bot.
-function Bell({ sym, tg }) {
+// A Telegram message when the stock gets a BUY (the bot's /watch). On a browser linked to the bot (Connect Telegram, or
+// the site opened inside Telegram) a tap turns it on or off right here and a lit bell shows it's on (local/api.js
+// setBell). Otherwise the tap opens Telegram once with t.me/<bot>?start=watch-SYMBOL, which worker/bot.js and
+// app/alerts.py read as "/watch SYMBOL". Only on the website, which has a bot.
+function useBells(tg) {
+  const [bells, setBells] = useState(null);         // the symbols with a bell on; null: not linked
+  const bot = tg && tg.bot;
+  useEffect(() => {
+    if (bot) import('../local/api.js').then(m => m.bells()).then(setBells, () => setBells(null));
+  }, [bot]);
+  return [bells, setBells];
+}
+
+function Bell({ sym, tg, bells, setBells }) {
+  const [busy, setBusy] = useState(false);
   if (!tg || !tg.bot) return null;
+  if (bells) {
+    const on = bells.includes(sym);
+    const toggle = async e => {
+      e.preventDefault();
+      e.stopPropagation();
+      setBusy(true);
+      try {
+        setBells(await (await import('../local/api.js')).setBell(sym, !on));
+        toast(on ? t('{sym}: bell off. No Telegram message when it gets a BUY.', { sym })
+          : t("{sym}: bell on. You'll get a Telegram message when it gets a BUY.", { sym }));
+      } catch (err) {
+        toast(err.message, 'error', 8000);
+      } finally {
+        setBusy(false);
+      }
+    };
+    return html`<button type="button" class=${cls('bell-btn', on && 'on')} onClick=${toggle} disabled=${busy} aria-pressed=${on}
+      aria-label=${t(on ? 'Stop the Telegram message for {sym}' : 'Tell me on Telegram when {sym} gets a BUY', { sym })}
+      title=${t(on ? 'On: a Telegram message when {sym} gets a BUY. Tap to turn it off.' : 'Tell me on Telegram when {sym} gets a BUY', { sym })}>
+      <${Icon} name="bell" size=${15} /></button>`;
+  }
   return html`<a class="bell-btn" href=${`https://t.me/${tg.bot}?start=watch-${sym}`} target="_blank" rel="noopener noreferrer"
     onClick=${e => e.stopPropagation()} aria-label=${t('Tell me on Telegram when {sym} gets a BUY', { sym })}
     title=${t('A Telegram message when {sym} gets a BUY signal. Telegram must be connected first: Settings → Connect Telegram.', { sym })}>

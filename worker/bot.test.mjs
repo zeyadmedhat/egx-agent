@@ -120,6 +120,20 @@ await tg("/portfolio")
 assert.match(sentMsgs.at(-1), /COMI<\/b> 100 × 120.00/)
 await tg("/watchlist")
 assert.match(sentMsgs.at(-1), /Your watchlist/)
+// The website's bell: on and off from the linked browser without opening Telegram, kept for the website's run
+const bellPost = async body => (await post(body.symbol ? "/bell" : "/bells", { token, ...body })).json()
+assert.deepEqual(await bellPost({}), { bells: ["ABUK"] })                                // set in Telegram earlier
+assert.deepEqual(await bellPost({ symbol: "comi", on: true }), { bells: ["ABUK", "COMI"] })
+await tg("/watch COMI levels")
+assert.deepEqual(await bellPost({ symbol: "COMI", on: false }), { bells: ["ABUK"] })
+await tg("/list")
+assert.match(sentMsgs.at(-1), /COMI: near support/)                                       // only the BUY alert went
+assert.doesNotMatch(sentMsgs.at(-1), /COMI: a BUY signal/)
+const ups = await (await bot.fetch(new Request(W + "/updates", { headers: { Authorization: `Bearer ${env.SYNC_KEY}` } }))).json()
+assert.deepEqual(ups.web.map(w => w.text), ["/watch COMI", "/unwatch COMI buy"])
+assert.equal((await post("/bell", { token: "x".repeat(48), symbol: "COMI" })).status, 401)
+await post("/state", { ...st, seen: uid, web_seen: 2 }, { Authorization: `Bearer ${env.SYNC_KEY}` })      // the run applied them
+assert.deepEqual((await (await bot.fetch(new Request(W + "/updates", { headers: { Authorization: `Bearer ${env.SYNC_KEY}` } }))).json()).web, [])
 await tg("/unlink")
 assert.equal((await post("/book", { token, book })).status, 401)                           // the browser's link is gone
 await tg("/portfolio")

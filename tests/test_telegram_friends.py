@@ -102,6 +102,24 @@ def test_the_websites_bell_sets_a_buy_alert(tmp_path, monkeypatch):
     assert "5" in alerts._subscribers(conn)                             # still connected: not taken as a new link
 
 
+def test_bells_from_the_website_turn_the_buy_alert_on_and_off(tmp_path, monkeypatch):
+    """A linked browser's bell, kept by the Worker ({seq, cid, text}): applied once, in order; off removes only BUY."""
+    conn = db.connect(tmp_path / "egx.db")
+    code = "c" * 24
+    db.set_meta(conn, "site_subscribers", json.dumps({"5": {"code": alerts._fingerprint(code)}}))
+    conn.execute("INSERT INTO stocks(symbol) VALUES ('AAA')")
+    monkeypatch.setattr(alerts, "_reply", lambda *a: None)
+    msg = {"update_id": 1, "message": {"chat": {"id": 5, "type": "private"}, "text": "/watch AAA levels"}}
+    web = [{"seq": 2, "cid": "5", "text": "/unwatch AAA buy"}, {"seq": 1, "cid": "5", "text": "/watch AAA"},
+           {"seq": 3, "cid": "6", "text": "/watch AAA"}]                       # 6 isn't connected
+    res = alerts.sync_subscribers(conn, "123:abc", code, [msg], answered=True, web=web[1:2])
+    assert sorted(r["kind"] for r in conn.execute("SELECT kind FROM watch_alerts")) == ["buy", "levels"]
+    res = alerts.sync_subscribers(conn, "123:abc", code, [], answered=True, web=web)   # seq 1 again: skipped
+    assert res["commands"] == 1
+    assert [r["kind"] for r in conn.execute("SELECT kind FROM watch_alerts")] == ["levels"]
+    assert alerts.worker_state(conn, code)["web_seen"] == 3
+
+
 def test_quiet_friends_get_nothing_on_a_day_with_nothing_to_do(tmp_path, monkeypatch):
     conn = db.connect(tmp_path / "egx.db")
     db.set_meta(conn, "site_subscribers", json.dumps({"1": {"code": "x", "quiet": True}, "2": {"code": "x"}}))

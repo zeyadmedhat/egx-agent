@@ -1223,6 +1223,8 @@ html[dir="rtl"] .nb-name { text-align: right; }   /* Arabic text, cut at its own
 .near-more { margin-top: 10px; }
 .bell-btn { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-sm); color: var(--accent); flex: none; }
 .bell-btn:hover { background: var(--accent-soft); }
+button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
+.bell-btn.on, .bell-btn.on:hover { background: var(--accent); color: var(--on-accent); }   /* lit: the alert is on */
 .week-row { display: flex; align-items: center; gap: 10px; }
 .wk-rank { min-width: 44px; font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .wk-chance { font-weight: 700; }

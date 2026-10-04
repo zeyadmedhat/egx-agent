@@ -835,6 +835,24 @@ export async function restoreFromBot() {
 
 export const syncNow = () => context().then(sendBook);
 
+// The bells on Picks (worker/bot.js bell): the stocks whose BUY signal you get on Telegram, and turning one on or off
+// from here. null when this browser isn't linked to the bot (the bell then opens Telegram instead).
+export async function bells() {
+  const link = botLink();
+  if (!link || link.pending) return null;
+  try {
+    return (await botPost(link.url, '/bells', { token: link.token })).bells;
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) return null;
+    throw err;
+  }
+}
+export async function setBell(symbol, on) {
+  const link = botLink();
+  if (!link || link.pending) throw new Error('Connect Telegram first: Settings → Connect Telegram.');
+  return (await botPost(link.url, '/bell', { token: link.token, symbol, on })).bells;
+}
+
 // "Add from a screenshot": the bot's free AI reads the holdings off a picture of your broker's portfolio screen
 // (worker/bot.js read). {holdings: [{symbol, name, shares, avg_price, last}]}; the picture isn't kept.
 export async function readScreenshot(image) {
