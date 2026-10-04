@@ -169,6 +169,10 @@ assert.equal(scanDue({ scan: "2026-09-30", final: true }, at("2026-09-30", "16:2
 assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "16:20")).key, "2026-09-30 970")
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-10-02", "16:20", "Fri")).key, undefined)
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "23:00")).key, undefined)
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "10:35")).key, "2026-09-30 s630")   // session
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "11:05")).key, "2026-09-30 s660")
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "14:40")).key, "2026-09-30 s870")
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "10:10")).key, undefined)          // not yet
 assert.deepEqual(cairo(new Date("2026-09-30T13:05:00Z")), { day: "2026-09-30", minute: 16 * 60 + 5, weekday: "Wed" })
 console.log("scan times ok")
 

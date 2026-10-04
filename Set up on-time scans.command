@@ -31,8 +31,9 @@ printf '%s' "$KEY" | $W secret put GH_TOKEN >/dev/null || { echo "Couldn't save 
 
 cat <<'EOF'
 
-Done. From the next session on, the bot checks every 10 minutes after the close and starts the scan on GitHub
-if it hasn't run yet (at 15:40, then 16:10, 16:40, 17:40, 19:10 and 21:10 Cairo time until it has).
+Done. During each session the bot starts a scan of the live prices every half hour (10:30 to 14:30 Cairo time),
+and after the close it starts the closing scan if it hasn't run yet (at 15:40, then 16:10, 16:40, 17:40, 19:10
+and 21:10 until it has).
 You can see those runs on GitHub → Actions: they say "workflow_dispatch".
 EOF
 pause

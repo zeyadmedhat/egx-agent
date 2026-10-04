@@ -794,9 +794,14 @@ export function cairo(now = new Date()) {
   return { day: `${p.year}-${p.month}-${p.day}`, minute: +p.hour * 60 + +p.minute, weekday: p.weekday }
 }
 
-// The slot to ask for now ("2026-09-30 940"), or why not.
+const SESSION = [630, 885]                            // 10:30–14:45: the live prices every half hour (scan.session_scan_due)
+
+// The slot to ask for now ("2026-09-30 940", or "2026-09-30 s660" during the session), or why not.
 export function scanDue(info, now) {
   if (!SESSION_DAYS.includes(now.weekday)) return { why: "no session today" }
+  if (now.minute >= SESSION[0] && now.minute <= SESSION[1]) {
+    return { key: `${now.day} s${SESSION[0] + Math.floor((now.minute - SESSION[0]) / 30) * 30}` }
+  }
   if (now.minute > LAST_MINUTE) return { why: "too late today" }
   const slot = [...SLOTS].reverse().find(m => m <= now.minute)
   if (slot == null) return { why: "before the close's prices" }
@@ -1196,11 +1201,11 @@ export default {
     if (url.pathname === "/quotes" && req.method === "GET") return quotes(url)
     return env.BOT.get(env.BOT.idFromName("bot")).fetch(req)
   },
-  // Every 10 minutes (wrangler.toml): only the morning (the reminder at 9:30 Cairo, UTC+2 or +3) and the evening
-  // hours (a scan after the close) have anything to do, so the rest return at once.
+  // Every 10 minutes (wrangler.toml): only the morning (the reminder at 9:30 Cairo, UTC+2 or +3), the session (a scan
+  // every half hour) and the evening (a scan after the close) have anything to do, so the night returns at once.
   scheduled(event, env, ctx) {
     const hour = new Date(event.scheduledTime).getUTCHours()
-    if (!env.SYNC_KEY || !((hour >= 6 && hour <= 7) || (hour >= 12 && hour <= 20))) return
+    if (!env.SYNC_KEY || hour < 6 || hour > 20) return
     ctx.waitUntil(env.BOT.get(env.BOT.idFromName("bot")).fetch("https://bot/tick",
       { method: "POST", headers: { Authorization: `Bearer ${env.SYNC_KEY}` } }))
   },
