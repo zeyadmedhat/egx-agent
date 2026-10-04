@@ -146,7 +146,9 @@ import { createHmac } from "node:crypto"
 st.info.site = "https://example.github.io/egx-agent"
 st.info.stocks.COMI.n = "البنك التجاري الدولي-مصر (سى اى بى )"
 const card = await respond(st, u("comi"))
-assert.deepEqual(card.kb[0].map(b => b.callback_data), ["w:COMI", "l:COMI"])
+assert.deepEqual((await respond({ ...st, alerts: { 9: [{ symbol: "COMI", kind: "buy" }] } }, u("comi"))).kb[0].map(b => b.callback_data), ["n:COMI"])   // on: a tap stops it
+assert.equal(callbackText("n:COMI"), "/unwatch COMI buy")
+assert.deepEqual((await respond({ ...st, alerts: {} }, u("comi"))).kb[0].map(b => b.callback_data), ["w:COMI"])   // off
 assert.equal(card.kb.at(-1)[0].web_app.url, "https://example.github.io/egx-agent/?go=stock%2FCOMI")
 st.info.stocks.COMI.be = ["d", 76.5, 72.1, 88, 2.6]                      // the best way in (app/alerts.py bot_info)
 assert.match((await respond(st, u("comi"))).text, /🎯 <b>Best way in<\/b>\nOn a dip to about <b>76\.50<\/b> \(-?[\d.]+%\)\nStop 72\.10 · target 88\.00 · 2\.6× reward/)
@@ -277,7 +279,7 @@ assert.match(why, /stocks rated 71–90 reached the target before the stop 16.5%
 assert.match(why, /Not a BUY today[\s\S]*✅ Liquid: at least 5M EGP[\s\S]*❌ Breakout: a close above its 20-day high \(131.20\)/)
 assert.match(why, /❌ Volume at least 1.5× normal \(last session 1.1×\)\n✅ Trend strength ADX above 20 \(now 32\)/)
 assert.equal(callbackText("y:COMI"), "/why COMI")
-assert.equal((await respond(st, u("comi"))).kb[1][0].callback_data, "y:COMI")        // a Why button under the card
+assert.equal((await respond(st, u("comi"))).kb[1][1].callback_data, "y:COMI")        // a Why button under the card
 assert.match(await handle(st, u("/why")), /Which stock\?/)
 assert.match(await handle(st, u("abuk")), /No rating[\s\S]*BUY<\/b>\nBuy up to <b>50.50/)     // the answer to "which stock?"
 assert.match(await handle(st, arMsg("/lang ar")), /بالعربية/)

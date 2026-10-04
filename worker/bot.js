@@ -139,6 +139,7 @@ const EN = {
     "(the levels on its page on the website).",
   noPrices: s => `There are no prices for ${s} yet, so I can't watch its price.`,
   okPrice: (s, k, p, last) => `OK: I'll tell you when ${s} closes ${k} ${p} (last close ${last}).`,
+  bBellOn: "🔔 BUY alert: on (tap to stop)", bBellOff: "🔕 Tell me when it's a BUY",
   bBuy: "🔔 BUY alert", bLevels: "📍 Levels alert", bStop: "🔕 Stop its alerts", bApp: "📱 Open the app",
   bBuys: "🟢 Today's BUYs", bTop: "🏆 Best chances",
   // your portfolio
@@ -300,6 +301,7 @@ const AR = {
   okLevels: s => `تم: سأخبرك عندما يغلق ${s} قرب دعم قوي أو يصل إلى مقاومة (المستويات في صفحته على الموقع).`,
   noPrices: s => `لا توجد أسعار لـ ${s} بعد، فلا يمكنني متابعة سعره.`,
   okPrice: (s, k, p, last) => `تم: سأخبرك عندما يغلق ${s} ${k === "above" ? "فوق" : "تحت"} ${p} (آخر إغلاق ${last}).`,
+  bBellOn: "🔔 تنبيه الشراء: مفعّل (اضغط للإيقاف)", bBellOff: "🔕 نبّهني عند إشارة الشراء",
   bBuy: "🔔 تنبيه شراء", bLevels: "📍 تنبيه المستويات", bStop: "🔕 إيقاف تنبيهاته", bApp: "📱 افتح التطبيق",
   bBuys: "🟢 شراء اليوم", bTop: "🏆 أفضل الفرص",
   linkCode: (code, mins) => `الكود: <code>${code}</code>\nعلى الموقع: الإعدادات ← <b>محفظتك في تيليجرام</b> ← اكتبه واضغط ربط. ` +
@@ -385,7 +387,7 @@ async function sha(text) {
 const reply = (text, kb) => ({ text, kb: kb && kb.length ? kb : undefined })
 const cb = (text, data) => ({ text, callback_data: data })
 // Buttons send these; each becomes the command it stands for (the website's run reads it like a typed message).
-const CALLBACKS = { w: s => `/watch ${s}`, l: s => `/watch ${s} levels`, u: s => `/unwatch ${s}`, s: s => `/stock ${s}`,
+const CALLBACKS = { w: s => `/watch ${s}`, l: s => `/watch ${s} levels`, u: s => `/unwatch ${s}`, n: s => `/unwatch ${s} buy`, s: s => `/stock ${s}`,
                     y: s => `/why ${s}`, b: () => "/buys", t: () => "/top", t20: () => "/top 20", k: () => "/week",
                     e: () => "/egx30" }
 export function callbackText(data) {
@@ -448,7 +450,9 @@ function stockCard(state, cid, sym, lang) {
     chartBlock(s, T),
     `<i>${T.levelsTip(esc(sym))}</i>`,
   ].filter(Boolean).join("\n\n")
-  const kb = [[cb(T.bBuy, `w:${sym}`), cb(T.bLevels, `l:${sym}`)], [cb(T.bWhy, `y:${sym}`)]]
+  // the bell, as on the website: lit when its BUY alert is on (a tap stops it), else a tap turns it on
+  const bell = (state.alerts[cid] || []).some(a => a.symbol === sym && a.kind === "buy")
+  const kb = [[bell ? cb(T.bBellOn, `n:${sym}`) : cb(T.bBellOff, `w:${sym}`)], [cb(T.bLevels, `l:${sym}`), cb(T.bWhy, `y:${sym}`)]]
   if ((state.alerts[cid] || []).some(a => a.symbol === sym)) kb.push([cb(T.bStop, `u:${sym}`)])
   const app = appButton(info, lang, `stock/${sym}`)
   if (app) kb.push([app])
