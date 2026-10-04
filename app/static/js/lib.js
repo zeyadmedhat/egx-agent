@@ -61,6 +61,7 @@ export const store = {
   tick: 0,           // bumped after anything you change, so pages reload
   stocks: null,      // all stocks for search and pickers
   watchlist: null,   // the stocks you starred (kept with your portfolio)
+  bells: null,       // the stocks whose BUY you get on Telegram (ui.js useBells); null: not linked to the bot
   toasts: [],
   offline: false,
   theme: document.documentElement.dataset.theme || 'light',
@@ -221,7 +222,19 @@ export async function toggleWatch(symbol) {
   } catch (e) {
     setStore({ watchlist: before });
     toast(e.message, 'error');
+    return;
   }
+  // A new star turns its bell on too (a Telegram message when it gets a BUY), on a browser linked to the bot.
+  // Taking the star off leaves the bell as it is.
+  if (!STATIC || next.length < before.length) return;
+  try {
+    const local = await import('./local/api.js');
+    const bells = store.bells || await local.bells();
+    if (!bells || bells.includes(symbol)) { if (bells) setStore({ bells }); return; }
+    setStore({ bells: await local.setBell(symbol, true) });
+    const { t } = await import('./i18n.js');
+    toast(t("{sym}: bell on. You'll get a Telegram message when it gets a BUY.", { sym: symbol }));
+  } catch { /* the star is saved; the bell can be turned on by hand */ }
 }
 
 // ------------------------------------------------------------------ routing (#/page/arg?query)

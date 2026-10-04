@@ -1,7 +1,7 @@
 // Shared building blocks: icons, Shariah badges, KPI tiles, tables, forms, the stock picker, dialogs.
 import {
   html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
-  stockHref, watchForData, toggleWatch, STATIC, api, todayISO, toast,
+  stockHref, watchForData, toggleWatch, STATIC, api, todayISO, toast, setStore,
 } from './lib.js';
 import { t, term, tn, tw } from './i18n.js';
 
@@ -833,7 +833,8 @@ export const LIVE_NOTE = 'Live prices from TradingView, about 15 minutes late. T
 // setBell). Otherwise the tap opens Telegram once with t.me/<bot>?start=watch-SYMBOL, which worker/bot.js and
 // app/alerts.py read as "/watch SYMBOL". Only on the website, which has a bot (Picks and the stock page).
 export function useBells(tg) {
-  const [bells, setBells] = useState(null);         // the symbols with a bell on; null: not linked
+  const bells = useStore(s => s.bells);             // the symbols with a bell on (shared, so a new star lights it); null: not linked
+  const setBells = v => setStore({ bells: v });
   const bot = tg && tg.bot;
   useEffect(() => {
     if (bot) import('./local/api.js').then(m => m.bells()).then(setBells, () => setBells(null));
