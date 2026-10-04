@@ -10,6 +10,7 @@ const tx = v => (typeof v === 'string' ? t(v) : v);   // plain text is translate
 // ------------------------------------------------------------------ icons (stroke icons, 24×24)
 const ICONS = {
   activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  home: '<path d="m3 10 9-7 9 7"/><path d="M5 9v12h14V9"/><path d="M10 21v-6h4v6"/>',
   chart: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
   briefcase: '<rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
   flask: '<path d="M9 3h6"/><path d="M10 3v6.5L4.6 18.6A1.6 1.6 0 0 0 6 21h12a1.6 1.6 0 0 0 1.4-2.4L14 9.5V3"/><path d="M7 15h10"/>',
@@ -204,8 +205,8 @@ export function livePosition(p, q) {
 const DO = { HOLD: 'Hold', EXIT: 'Sell at the open', BOUNCE: 'Sell on a bounce', REVIEW: 'Consider selling', 'TIGHTEN STOP': 'Raise your stop',
   ADJUST: 'Update your shares', 'NO DATA': 'No price yet' };
 
-// Where the price sits between your stop and your target, with your buy price marked.
-function PlanBar({ p }) {
+// Where the price sits between your stop and your target, with your buy price marked (on Picks: Buy up to).
+export function PlanBar({ p }) {
   if (p.stop == null || !(p.target > p.stop)) return null;
   const at = v => `${Math.max(0, Math.min(100, ((v - p.stop) / (p.target - p.stop)) * 100))}%`;
   return html`<div class="planbar" aria-hidden="true">

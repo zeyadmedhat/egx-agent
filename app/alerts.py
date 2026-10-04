@@ -69,6 +69,7 @@ def check_token(token: str) -> dict:
 
 
 START_RE = re.compile(r"^/start\s+([A-Za-z0-9_-]{8,64})\s*$")
+BELL_RE = re.compile(r"^/start\s+watch-([A-Za-z0-9]{2,12})\s*$", re.I)   # the website's bell (Picks)
 KEEP_STARTS = 200
 
 
@@ -719,6 +720,8 @@ def sync_subscribers(conn: sqlite3.Connection, token: str, code: str, updates: l
             continue
         cid, text = str(chat["id"]), (msg.get("text") or "").strip()
         told = _lang_of(msg)
+        if bell := BELL_RE.match(text):          # t.me/<bot>?start=watch-SYMBOL: the same as /watch SYMBOL
+            text = f"/watch {bell.group(1)}"
         if cid in subs and told and not subs[cid].get("lang"):
             subs[cid]["lang"] = told       # their Telegram app's language, until they choose with /lang
         m = START_RE.match(text)

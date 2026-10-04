@@ -1,16 +1,15 @@
-// Today, in two tabs. Summary: the day in a few sentences, the orders for the next session, your positions and the
-// market. Signals: the BUY signals and the stocks close to one.
-import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, go, todayISO, copyText, STATIC } from '../lib.js';
+// Home → Summary: the day in a few sentences, the orders for the next session, your positions and the market. The BUY
+// signals are on Picks (pages/picks.js), which reads the same /today.
+import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, todayISO, copyText, STATIC } from '../lib.js';
 import {
-  Icon, Badges, IndexPills, ScoreRing, Empty, Callout, PageHead, SectionHead, PageLoading, DataTable,
-  StockCell, JobControl, Chance, MarketSwitch, Cautions, Why, StockAvatar, Change, Term,
-  SessionBadge, More, ScoreBar, ShariahNote, CompanyLine, Rating, Reason, useQuotes, livePosition, PositionCard,
+  Icon, Badges, Empty, Callout, PageHead, SectionHead, PageLoading, JobControl, MarketSwitch, Change, Term,
+  SessionBadge, useQuotes, livePosition, PositionCard,
 } from '../ui.js';
 import { t, tp, isAr, tn } from '../i18n.js';
 import { Sparkline } from '../charts.js';
 
-// Both tabs read /today; before the first scan they explain how to get one.
-function useToday(title) {
+// Summary, Picks and Track record read /today; before the first scan they explain how to get one.
+export function useToday(title) {
   const { data, error } = useApi('/today');
   if (!data) return { page: html`<${PageLoading} error=${error} />` };
   if (!data.market) {
@@ -40,34 +39,6 @@ export function TodayPage() {
       <${SectionHead} title="Market" />
       <${MarketCard} m=${m} spark=${data.spark} blocked=${blocked} b=${data.breadth} />
     </section>`;
-}
-
-export function SignalsPage() {
-  const { page, data, blocked } = useToday('Signals');
-  if (page) return page;
-  const m = data.market;
-  return html`
-    <${PageHead} title="Signals" sub=${t('Signals for the next session, from the {date} close', { date: fmt.date(m.date) })}>
-      <${SessionBadge} dataDate=${m.date} /><//>
-    <section>
-      <${SectionHead} title="BUY signals" count=${data.buys.length}
-        hint=${data.buys.length ? "Don't pay more than Buy up to. If it opens higher, skip it." : ''} />
-      ${data.buys.length
-        ? html`<div class="signal-grid">${data.buys.map(s => html`<${SignalCard} s=${s} model=${data.model} odds=${data.odds} key=${s.symbol} />`)}</div>`
-        : html`<div class="card"><${Empty} icon="shield" title="No BUY signals for the next session" text=${blocked
-          ? "The market is weak (EGX30 is below its 50-day average), so the agent isn't making new BUY calls. Sitting in cash is a valid decision. The list below shows what is close to a BUY once the market recovers."
-          : 'No stock met all the entry rules at the last close. Sitting in cash is a valid decision. The list below shows what is close to a BUY.'} /></div>`}
-    </section>
-    <section class="section">
-      <${SectionHead} title=${html`<${Term} k="watchlist">${t('Close to a BUY')}<//>`} count=${data.watch.length}
-        hint="Strong uptrends without an entry trigger yet."><${ShariahNote} mode=${data.cfg.shariah_filter} /><//>
-      <div class="card flush"><${NearList} rows=${data.watch} model=${data.model} /></div>
-    </section>
-    ${data.record && html`<section class="section"><${TrackRecord} rec=${data.record} odds=${data.odds} /></section>`}
-    ${data.cfg.auto_paper && data.paper && data.paper.last_scan && html`<p class="faint note">
-      ${t('Paper trading at this scan: {filled} filled, {closed} closed, {skipped} skipped, {orders} new orders for the next session.', {
-        filled: data.paper.last_scan.filled || 0, closed: data.paper.last_scan.closed || 0,
-        skipped: data.paper.last_scan.cancelled || 0, orders: data.paper.last_scan.new_orders || 0 })}</p>`}`;
 }
 
 // "Today in one minute": the market, the signals and your positions in a few plain sentences, from this page's data.
@@ -103,7 +74,7 @@ function Brief({ data, blocked, alerts }) {
   return html`<div class="card brief">
     <div class="brief-head">${t('Today in one minute')}</div>
     <ul>${lines.map(l => html`<li>${l}</li>`)}</ul>
-    ${data.buys.length > 0 && html`<a class="btn sm primary brief-go" href="#/signals">${t('See the BUY signals')}
+    ${data.buys.length > 0 && html`<a class="btn sm primary brief-go" href="#/signals">${t('See the picks')}
       <${Icon} name="chevron" size=${14} /></a>`}
   </div>`;
 }
@@ -170,7 +141,7 @@ function sessionName(day) {
 }
 
 
-const buyHref = (sym, price, shares) =>
+export const buyHref = (sym, price, shares) =>
   `#/portfolio?buy=${encodeURIComponent(sym)}&price=${Number(price).toFixed(2)}&shares=${shares || ''}`;
 
 function OrderAction({ it }) {
@@ -234,146 +205,7 @@ function OrdersCard({ o }) {
       ${t(o.blocked ? 'No new buys while EGX30 is below its 50-day average.' : 'No BUY signals at this close.')}</div>`}
     ${(o.holds.length > 0 || o.skipped.length > 0) && html`<div class="orders-foot">
       ${o.holds.length > 0 && html`<span>${t('No change')}: ${o.holds.map((h, i) => html`${i ? ', ' : ''}<b>${h.symbol}</b> (${t('stop')} ${fmt.price(h.stop)})`)}</span>`}
-      ${o.skipped.length > 0 && html`<span>${t('Not bought')}: ${o.skipped.map((x, i) => html`${i ? ', ' : ''}<b>${x.symbol}</b> (${x.note})`)}</span>`}
+      ${o.skipped.length > 0 && html`<span>${t('Not bought')}: ${o.skipped.map((x, i) => html`${i ? ', ' : ''}<b>${x.symbol}</b> (<span dir="auto">${tn(x.note)}</span>)`)}</span>`}
     </div>`}
   </div></section>`;
-}
-
-function Level({ label, value, sub, subCls }) {
-  return html`<div class="level"><div class="l-label">${typeof label === 'string' ? t(label) : label}</div><div class="l-value">${value}</div>
-    ${sub && html`<div class=${cls('l-sub', subCls)}>${sub}</div>`}</div>`;
-}
-
-// What the rules' BUYs with a score like this one did in the 10-year test (egx_agent/record.py). Not for the model's
-// picks: its own test is on the Predict page.
-function Odds({ s, odds }) {
-  if (!odds || s.source === 'model') return null;
-  const b = (odds.bands || []).find(x => s.score >= x.from && s.score < (x.to === 100 ? 101 : x.to));
-  if (!b || !b.n) return null;
-  return html`<p class="odds-line">${t('In {years} of tests, BUYs scored {from}–{to} won {win} of the time, {avg} a trade on average after fees ({n} trades).', {
-    years: t('10 years'), from: b.from, to: b.to, win: fmt.pct(b.win_rate, 0, false), avg: fmt.pct(b.avg, 1), n: fmt.int(b.n) })}</p>`;
-}
-
-// Every BUY the agent published, followed with the same exit rules from the next open (egx_agent/record.py), set
-// against the 10-year test. The live record is the honest check; the test only says what to expect.
-function TrackRecord({ rec, odds }) {
-  const s = rec.summary, h = rec.health, test = odds && odds.all;
-  const ended = x => (x.status === 'closed' ? tn(x.reason) : x.status === 'open' ? t('Still open')
-    : x.status === 'waiting' ? t('Buys at the next open') : t('Skipped: the open was past its limits'));
-  const columns = [
-    { key: 'date', label: 'Signal', fmt: v => fmt.date(v) },
-    { key: 'symbol', label: 'Stock', render: r => html`<a href=${stockHref(r.symbol)}>${r.symbol}</a>` },
-    { key: 'status', label: 'How it went', sortable: false, render: r => html`<span dir="auto">${ended(r)}</span>` },
-    { key: 'days', label: 'Days', align: 'r', fmt: v => (v ? fmt.int(v) : '–') },
-    { key: 'return', label: 'Result', align: 'r', fmt: v => (v == null ? '–' : html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>`) },
-  ];
-  return html`<${SectionHead} title="Track record" hint=${s.since ? t('Every BUY since {date}, followed with the same exit rules', { date: fmt.date(s.since) }) : ''} />
-    <div class="card">
-      ${s.signals ? html`<div class="stat-list">
-          <span class="k">${t('BUY signals')}</span><span class="v">${fmt.int(s.signals)}${s.open ? html` <span class="faint" style="font-weight:500">· ${t('{n} still open', { n: fmt.int(s.open) })}</span>` : ''}</span>
-          <span class="k">${t('Ended')}</span><span class="v">${fmt.int(s.n)}</span>
-          ${s.n > 0 && html`<span class="k">${t('Won')}</span><span class="v">${fmt.pct(s.win_rate, 0, false)}</span>
-            <span class="k">${t('Average per trade, after fees')}</span><span class=${cls('v', tone(s.avg))}>${fmt.pct(s.avg, 1)}</span>`}
-        </div>`
-        : html`<p class="muted" style="font-size:13px">${t('No BUY signals published yet. Each one is added here and followed until it ends.')}</p>`}
-      ${h.status === 'cold' && html`<div style="margin-top:12px"><${Callout} tone="warn">${t('The last {n} signals did clearly worse than the tests: {win} won against {test}. Consider smaller positions until they recover.', {
-        n: fmt.int(h.closed), win: fmt.pct(s.win_rate, 0, false), test: fmt.pct(h.test_win_rate, 0, false) })}<//></div>`}
-      ${h.status === 'ok' && html`<p class="muted" style="font-size:13px;margin-top:10px">${t('In line with the tests: {win} won against {test}.', {
-        win: fmt.pct(s.win_rate, 0, false), test: fmt.pct(h.test_win_rate, 0, false) })}</p>`}
-      ${h.status === 'early' && html`<p class="muted" style="font-size:13px;margin-top:10px">${t('{closed} of the {need} ended signals needed to judge it. Until then, go by the test below, not these numbers.', {
-        closed: fmt.int(h.closed), need: fmt.int(h.need) })}</p>`}
-      ${test && test.n > 0 && html`<p class="faint" style="font-size:12.5px;margin-top:10px">${t('The same rules on {from} – {to}: {n} trades, {win} won, {avg} a trade on average, {cagr} a year, worst drop {dd}.', {
-        from: fmt.date(odds.from), to: fmt.date(odds.to), n: fmt.int(test.n), win: fmt.pct(test.win_rate, 0, false),
-        avg: fmt.pct(test.avg, 1), cagr: fmt.pct(odds.cagr, 1), dd: fmt.pct(odds.max_drawdown, 1) })}</p>`}
-      ${rec.signals.length > 0 && html`<${More} label="Every signal"><div class="flush"><${DataTable} columns=${columns} rows=${rec.signals}
-        rowKey=${r => `${r.date}:${r.symbol}`} sort=${{ key: 'date', dir: 'desc' }} /></div><//>`}
-      <${More} label="How far to trust these numbers"><p>${t(TRUST)}</p><//>
-    </div>`;
-}
-
-const TRUST = 'The test replays the current rules on 10 years of prices, from the open after each signal, fees included. It '
-  + 'flatters them a little: it only knows the companies listed today (ones that failed and left the exchange are missing), '
-  + 'and the rules were chosen by testing on those same years. The track record is the honest check: every BUY the agent '
-  + 'published, followed the same way. Judge it after about 30 ended signals; a handful proves nothing either way. In the '
-  + 'test a higher score barely changed the odds, so treat every BUY about the same.';
-
-function SignalCard({ s, model, odds }) {
-  const i = s.info;
-  const logHref = buyHref(s.symbol, s.entry_high, s.shares);
-  const cautions = s.cautions || [];
-  const results = cautions.find(c => c.kind === 'results');
-  return html`<article class="card signal">
-    <div class="sig-head">
-      <div class="who">
-        <div class="sym-line"><${StockAvatar} symbol=${s.symbol} size=${34} /><a class="sym-big" href=${stockHref(s.symbol)}>${s.symbol}</a>
-          ${s.source === 'model'
-            ? html`<span class="model-pick" title="One of the prediction model's top picks today that also passes the trading and uptrend checks. Same stop, target and sizing as any BUY."><${Icon} name="target" size=${12} />${t('Model pick')}</span>`
-            : s.setup && html`<span class="tag">${t(s.setup)}</span>`}</div>
-        <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}<span class="faint"> · ${tn(i.sector)}</span></div>
-      </div>
-      <${ScoreRing} score=${s.score} />
-    </div>
-    <div class="sig-tags"><${Badges} info=${i} compact /><${IndexPills} info=${i} /><${Cautions} items=${cautions} compact /></div>
-    ${(s.co || (s.pred && s.pred.rating != null)) && html`<div class="sig-company">
-      ${s.pred && s.pred.rating != null && html`<span class="faint">${t('Rating')}</span> <${Rating} v=${s.pred.rating} />`}
-      <${CompanyLine} co=${s.co} />
-      ${s.pred && s.pred.why10 && html`<div class="sig-reason"><${Reason} items=${s.pred.why10} /></div>`}</div>`}
-    <div class="levels">
-      <${Level} label="Last close" value=${fmt.price(s.close)} />
-      <${Level} label=${html`<${Term} k="buyupto">${t('Buy up to')}<//>`} value=${fmt.price(s.entry_high)} sub=${fmt.pct(s.entry_high / s.close - 1)} subCls="faint" />
-      <${Level} label=${html`<${Term} k="stop">${t('Stop-loss')}<//>`} value=${fmt.price(s.stop)} sub=${fmt.pct(s.stop / s.close - 1)} subCls="down" />
-      <${Level} label=${html`<${Term} k="target">${t('Target')}<//>`} value=${fmt.price(s.target)} sub=${fmt.pct(s.target / s.close - 1)} subCls="up" />
-    </div>
-    <div class="sizing">
-      <span>${t('Shares')} <b>${s.shares ? fmt.int(s.shares) : '–'}</b></span>
-      <span>${t('Amount')} <b>${fmt.egp(s.amount)}</b></span>
-      <span>${t('Max loss')} <b class="down">${fmt.egp(s.risk_egp)}</b></span>
-    </div>
-    <${Odds} s=${s} odds=${odds} />
-    <${More} label="Why this signal">
-      <ul class="reasons" dir="auto">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${tn(r)}</li>`)}</ul>
-      ${model && s.pred && html`<div class="model-line"><${Icon} name="target" size=${14} />
-        ${s.pred.top10 === false
-          ? html`<a href="#/predict">${t('Model: #{rank} of {n}, not one of its top picks today', { rank: fmt.int(s.pred.rank10), n: fmt.int(model.count) })}</a>`
-          : html`<a href="#/predict">${tp('Model: #{rank} of {n}, {chance} chance of target before stop in 2 weeks', {
-              rank: fmt.int(s.pred.rank10), n: fmt.int(model.count), chance: html`<${Chance} p=${s.pred.p10} base=${model.base[10]} />` })}</a>
-        <span class="faint">(${t('average stock {pct}', { pct: fmt.pct(model.base[10], 0, false) })})</span>`}</div>
-        ${s.pred.why10 && s.pred.why10.length > 0 && html`<${Why} items=${s.pred.why10} />`}`}
-      ${cautions.some(c => c.kind === 'ex_dividend') && html`<p>${t('It goes ex-dividend before this trade would end. The price drops by the dividend that morning and you get it in cash, so the agent lowers the stop and target by the same amount (a to-do reminds you the evening before). Counting the dividend, BUYs this close to an ex-date did as well as the others in 10 years of tests.')}</p>`}
-      ${results && html`<p>${t('Results are expected around {date}, before this trade would end. The price can jump either way that day; the agent keeps the same stop.', {
-        date: fmt.date(results.date, false) })}</p>`}
-      <p class="faint">${t('Sizing')}: <span dir="auto">${tn(s.size_note)}</span> · ${t('hold at most until')} <b class="muted">${fmt.date(s.sell_by)}</b></p>
-    <//>
-    <div class="sig-foot">
-      <a class="btn sm ghost" href=${stockHref(s.symbol)}><${Icon} name="chart" />${t('Chart')}</a>
-      <a class="btn sm ghost" href=${`#/calc/${encodeURIComponent(s.symbol)}`}><${Icon} name="coins" />${t('Size it')}</a>
-      <a class="btn sm primary" href=${logHref}><${Icon} name="plus" />${t('Log buy')}</a>
-    </div>
-  </article>`;
-}
-
-// The agent's list of stocks close to a BUY (not your own Watchlist).
-function NearList({ rows, model }) {
-  const columns = [
-    { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
-    { key: 'rating', label: 'Rating', align: 'r', sortValue: r => (r.pred && r.pred.rating != null ? r.pred.rating : -1),
-      title: "The model's rank among the day's actively traded stocks, 1–100, from the chart and the company's results",
-      render: r => html`<${Rating} v=${r.pred && r.pred.rating} />` },
-    { key: 'why', label: 'Why', sortable: false, title: 'What lifted (▲) and lowered (▼) its rating most',
-      render: r => html`<${Reason} items=${r.pred && r.pred.why10} stacked />` },
-    { key: 'score', label: html`<${Term} k="score">${t('Score')}<//>`, width: '140px', render: r => html`<${ScoreBar} score=${r.score} />` },
-    { key: 'close', label: 'Price', align: 'r', fmt: v => fmt.price(v) },
-    { key: 'trigger', label: html`<${Term} k="breakout">${t('Breakout above')}<//>`, align: 'r', fmt: v => html`<b>${fmt.price(v)}</b>` },
-    { key: 'to_trigger', label: 'Distance', align: 'r', fmt: v => html`<span class="muted">${fmt.pct(v)}</span>`,
-      title: 'How far the price must rise to break out' },
-    { key: 'company', label: 'Company', sortable: false, title: "Profit growth over a year, and the P/E",
-      render: r => html`<${CompanyLine} co=${r.co} compact />` },
-    { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
-    { key: 'cautions', label: 'Good to know', sortable: false, render: r => html`<${Cautions} items=${r.cautions} compact />` },
-  ];
-  if (!model) columns.splice(1, 2);        // no model trained yet: no rating or reason to show
-  // the rating first: in 10 years of tests the rules' score barely changed the odds, the model's rank did
-  return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol}
-    sort=${model ? { key: 'rating', dir: 'desc' } : { key: 'score', dir: 'desc' }}
-    onRowClick=${r => go(stockHref(r.symbol))} empty="No stocks on the watchlist at the last close." />`;
 }

@@ -9,7 +9,8 @@ import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm, Change,
 import { AuthScreen } from './pages/login.js';
 import { UnlockScreen } from './pages/unlock.js';
 import { AdminPage } from './pages/admin.js';
-import { TodayPage, SignalsPage } from './pages/today.js';
+import { TodayPage } from './pages/today.js';
+import { PicksPage, RecordPage } from './pages/picks.js';
 import { MarketPage } from './pages/market.js';
 import { HeatmapPage } from './pages/heatmap.js';
 import { Egx30Page } from './pages/egx30.js';
@@ -48,17 +49,17 @@ const TELEGRAM = (() => {
 
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
 const PAGES = Object.fromEntries(Object.entries({
-  today: TodayPage, signals: SignalsPage, news: NewsPage, market: MarketPage, egx30: Egx30Page, heatmap: HeatmapPage, predict: PredictPage, dividends: DividendsPage,
+  today: TodayPage, signals: PicksPage, record: RecordPage, news: NewsPage, market: MarketPage, egx30: Egx30Page, heatmap: HeatmapPage, predict: PredictPage, dividends: DividendsPage,
   stock: StockPage, screener: ScreenerPage, watchlist: WatchlistPage, portfolio: PortfolioPage, paper: PaperPage,
   calc: CalcPage, backtest: BacktestPage, settings: SettingsPage, admin: AdminPage,
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
 
 // The top bar's four sections and their tabs. Every page keeps its own #/address, so links from Telegram and old
-// bookmarks still work. Settings and Admin sit in the ⚙ menu.
+// bookmarks still work (#/signals is Picks, #/predict its Rankings). Settings and Admin sit in the ⚙ menu.
 const SECTIONS = [
-  { id: 'today', label: 'Today', icon: 'activity', tabs: [['today', 'Summary'], ['signals', 'Signals'], ['news', 'News']] },
-  { id: 'market', label: 'Market', icon: 'bars',
-    tabs: [['market', 'Overview'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['predict', 'Predictions'], ['dividends', 'Dividends & results']] },
+  { id: 'home', label: 'Home', icon: 'home',
+    tabs: [['today', 'Summary'], ['market', 'Market'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['dividends', 'Dividends & results'], ['news', 'News']] },
+  { id: 'picks', label: 'Picks', icon: 'target', tabs: [['signals', 'Picks'], ['predict', 'Rankings'], ['record', 'Track record']] },
   { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist']] },
   { id: 'portfolio', label: 'Portfolio', icon: 'briefcase',
     tabs: [['portfolio', 'My portfolio'], ['paper', 'Practice'], ['calc', 'Calculator'], ['backtest', 'Rules test']] },
@@ -73,7 +74,7 @@ const pageTitle = page => {
 function useCounts() {
   const status = useStore(s => s.status);
   const m = status && status.market;
-  return { today: (m && m.buys) || 0, signals: (m && m.buys) || 0, portfolio: (status && status.alerts) || 0 };
+  return { picks: (m && m.buys) || 0, signals: (m && m.buys) || 0, portfolio: (status && status.alerts) || 0 };
 }
 function Count({ id, counts }) {
   const n = counts[id];

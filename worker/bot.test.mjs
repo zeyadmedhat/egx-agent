@@ -59,6 +59,9 @@ assert.match(await handle(st, u("/list")), /ABUK: near support/)   // another co
 assert.match(await handle(st, u("hello")), /didn't find/)
 assert.match(await handle(st, u("/unwatch")), /or all/)
 assert.match(await handle(st, u("all")), /Removed all your alerts \(1\)/)
+const bell = u("/start watch-ABUK")                               // the website's bell (Picks)
+assert.match(await handle(st, bell), /ABUK gets a BUY signal/)
+assert.equal(bell.message.text, "/watch ABUK")
 console.log("menu ok")
 
 // Your own portfolio

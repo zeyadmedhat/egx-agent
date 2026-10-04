@@ -243,6 +243,7 @@ async function today(c) {
     cfg: { ...Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
       'shariah_filter'].map(k => [k, cfg[k]])), fee_pct_per_side: E.feePct(cfg) },
     record: core.record || null, odds: core.odds || null,
+    telegram: core.telegram || null,      // Picks' bell: the site's bot (/watch SYMBOL)
   };
 }
 

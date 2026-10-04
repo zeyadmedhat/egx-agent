@@ -86,6 +86,22 @@ def test_morning_off_stops_the_reminder(tmp_path, monkeypatch):
     assert texts == {"day": "2026-10-01", "texts": {}}                  # no scan: nothing to remind anyone of
 
 
+def test_the_websites_bell_sets_a_buy_alert(tmp_path, monkeypatch):
+    """Picks' bell opens t.me/<bot>?start=watch-SYMBOL: for a connected friend that is /watch SYMBOL."""
+    conn = db.connect(tmp_path / "egx.db")
+    code = "c" * 24
+    db.set_meta(conn, "site_subscribers", json.dumps({"5": {"code": alerts._fingerprint(code)}}))
+    conn.execute("INSERT INTO stocks(symbol) VALUES ('AAA')")
+    monkeypatch.setattr(alerts, "_reply", lambda *a: None)
+    msg = lambda cid, uid, text: {"update_id": uid, "message": {"chat": {"id": cid, "type": "private"}, "text": text}}  # noqa: E731
+    res = alerts.sync_subscribers(conn, "123:abc", code, [msg(5, 1, "/start watch-AAA"), msg(6, 2, "/start watch-AAA")],
+                                  answered=True)
+    assert res["commands"] == 1                                         # not connected (6): nothing
+    rows = [tuple(r) for r in conn.execute("SELECT chat_id, symbol, kind FROM watch_alerts")]
+    assert rows == [("5", "AAA", "buy")]
+    assert "5" in alerts._subscribers(conn)                             # still connected: not taken as a new link
+
+
 def test_quiet_friends_get_nothing_on_a_day_with_nothing_to_do(tmp_path, monkeypatch):
     conn = db.connect(tmp_path / "egx.db")
     db.set_meta(conn, "site_subscribers", json.dumps({"1": {"code": "x", "quiet": True}, "2": {"code": "x"}}))

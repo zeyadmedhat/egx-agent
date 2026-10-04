@@ -1,4 +1,4 @@
-// Predict: a machine-learning model's chance that a trade reaches its target before its stop. Information only.
+// Picks → Rankings: a machine-learning model's chance that a trade reaches its target before its stop. Information only.
 // Next week (predict.WEEK): a short target and stop, 1.5× each stock's daily range, within 5 sessions; next 2 weeks:
 // the chart's own stop and target within 10 sessions (the model that orders the BUYs).
 import { html, useApi, useState, startJob, fmt, tone, cls, go, stockHref, STATIC } from '../lib.js';
@@ -21,7 +21,7 @@ export function PredictPage() {
   const { running } = useJob();
   if (!data) return html`<${PageLoading} error=${error} />`;
   const train = () => startJob('/predict/train');
-  const head = html`<${PageHead} title="Predictions"
+  const head = html`<${PageHead} title="Rankings"
     sub="A model rates every actively traded stock after each close, from its chart and its company's results. The best rated BUYs get money first." />`;
   const week = view === 'week' && data.week;
   if (!data.model) {
@@ -170,7 +170,7 @@ function Intro({ data, onTrain, running }) {
 // ones that ran out of time together. Only for the stocks it gives a chance for.
 export const expected = (r, hz) => (r[`top${hz}`] && r[`exp${hz}`] != null ? r[`exp${hz}`] : null);
 
-function RankMove({ now, before }) {
+export function RankMove({ now, before }) {
   if (!now || !before || now === before) return null;
   const up = now < before;
   return html`<span class=${cls('rank-move', up ? 'up' : 'down')} title=${t('#{n} at the close before', { n: fmt.int(before) })}>
@@ -200,7 +200,7 @@ function ChanceTable({ rows, base }) {
 }
 
 // Lately, in one line: its daily top 10 over the last 30 decided sessions.
-function Recent({ rec }) {
+export function Recent({ rec }) {
   if (!rec || !rec.n) return null;
   return html`<p class="recent-line"><${Icon} name="history" size=${14} />
     ${t('Last {days} sessions: of its daily top {top}, {hits} reached the target first and {misses} did not, averaging {ret} a trade (all scored stocks {all}).', {
@@ -216,7 +216,7 @@ const HEALTH = {
   weak: 'Weaker than in its tests: its top picks still beat the average stock, but by less than half as much.',
   bad: "Not working lately: its top picks did no better than the average stock. Until that changes, it adds no BUYs of its own.",
 };
-function Health({ h }) {
+export function Health({ h }) {
   if (!h || !HEALTH[h.status]) return null;
   const tone = h.status === 'bad' ? 'warn' : '';
   return html`<${Callout} tone=${tone}><span class=${`health-dot ${h.status}`}></span><b>${t('Live check')}</b>${' '}

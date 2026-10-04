@@ -14,6 +14,7 @@ const MORNING_RE = /^\/morning(?:@\w+)?(?:\s+(on|off))?\s*$/i
 const WHY_RE = /^\/why(?:@\w+)?\s+(.+)$/i
 const LANG_RE = /^\/lang(?:@\w+)?(?:\s+(\S+))?\s*$/i
 const START_RE = /^\/start\s+([A-Za-z0-9_-]{8,64})\s*$/
+const BELL_RE = /^\/start\s+watch-([A-Za-z0-9]{2,12})\s*$/i   // the website's bell (Picks): /watch SYMBOL
 const STOP_RE = /^\/stop(@\w+)?\s*$/
 const STOCK_RE = /^(?:\/(?:stock|s)(?:@\w+)?\s+)?([A-Za-z0-9]{2,12})\s*$/i
 const ASK_RE = /^\/(?:stock|s)(?:@\w+)?\s+(.+)$/i
@@ -164,7 +165,7 @@ const EN = {
     "stop, within 5 sessions." + (strong ? ` In its tests, strong picks (its top 10%, in an uptrend, while the market ` +
     `is healthy) got there first ${strong} of the time, the average stock ${all}.` : "") + " Always use the stop. Not advice.",
   weekCard: (p, tgt, stop, rank) => `Next week: ${p} chance to reach ${tgt} before ${stop} (rank ${rank})`,
-  // EGX30 (the website's Market → EGX30)
+  // EGX30 (the website's Home → EGX30)
   x30: (c, ch, d) => `<b>EGX30</b> ${c} (${ch}) · ${d}`,
   x30Ret: r => `Week ${r["1W"]} · month ${r["1M"]} · this year ${r.YTD} · a year ${r["1Y"]}`,
   x30Usd: (y, yr) => `In dollars: this year ${y} · a year ${yr}`,
@@ -602,6 +603,8 @@ export async function respond(state, update) {
   const cid = String(chat.id)
   let text = (msg.text || "").trim()
   const subbed = cid in state.subs
+  const bell = BELL_RE.exec(text)
+  if (bell) text = msg.text = `/watch ${bell[1]}`        // rewritten in place: the website's run reads the same
   const m = START_RE.exec(text)
   if (m) {
     const code = m[1].length > CODE_LEN ? m[1].slice(0, CODE_LEN) : m[1]
@@ -968,7 +971,7 @@ export class Bot {
   // /start (your Mac's own Connect link) is noted for the Mac to find (POST /started).
   async noteStart(state, update) {
     const msg = update.message || {}, chat = msg.chat || {}, m = START_RE.exec((msg.text || "").trim())
-    if (!m || chat.type !== "private") return false
+    if (!m || chat.type !== "private" || BELL_RE.test(msg.text.trim())) return false
     const cid = String(chat.id), code = m[1].slice(0, CODE_LEN), nonce = m[1].slice(CODE_LEN)
     if (m[1].length > CODE_LEN && (await sha(code)).slice(0, 16) === state.fp) {
       if (!NONCE_RE.test(nonce)) return false
