@@ -549,8 +549,9 @@ function adjust(c, id, body) {
     + `${res.avg.toFixed(3)}. The stop and target moved by the same ratio.` };
 }
 
-// A stop you choose for an open position (e.g. right on a support), counted from today; null: back to the automatic
-// one. It must be above the automatic stop, which never goes down, and under the last close.
+// A stop you choose for an open position (e.g. right on a support), counted from the next session (today's before
+// the open); null, or the automatic stop's own price: back to the automatic one. It must not be under the automatic
+// stop, which never goes down, and must be under the last close.
 async function setStop(c, id, body) {
   const pos = c.book.trades.find(t => t.id === id && t.account === 'real' && t.status === 'open');
   if (!pos) fail(404, 'This position is no longer open. Refresh the page.');
@@ -563,15 +564,24 @@ async function setStop(c, id, body) {
   const stop = toNum(body.stop, 'stop');
   const bars = (await barsFor(c, [pos.symbol]))[pos.symbol];
   const auto = E.realStatus({ ...pos, my_stop: null }, bars, c.cfg);
-  if (auto.stop != null && stop <= auto.stop) {
-    fail(400, `The stop is already ${E.f2(auto.stop)} and stops only go up: choose a higher price.`);
+  if (auto.stop != null && (stop <= auto.stop || E.px(stop) === E.px(auto.stop))) {
+    if (E.px(stop) !== E.px(auto.stop)) {
+      fail(400, `The automatic stop is ${E.px(auto.stop)} and a stop can't go under it. To go back to it, type `
+        + `${E.px(auto.stop)} or choose Back to the automatic stop.`);
+    }
+    delete pos.my_stop;
+    delete pos.my_stop_from;
+    saveBook(c.book);
+    return { message: `${pos.symbol} is back on the automatic stop, ${E.px(auto.stop)}. Move your stop order at your broker too.` };
   }
   if (auto.last_close != null && stop >= auto.last_close) {
     fail(400, `${pos.symbol} closed at ${E.f2(auto.last_close)}: the stop must be under that.`);
   }
-  Object.assign(pos, { my_stop: stop, my_stop_from: localToday() });
+  const from = E.stopFrom();
+  Object.assign(pos, { my_stop: stop, my_stop_from: from });
   saveBook(c.book);
-  return { message: `${pos.symbol} stop set to ${E.f2(stop)}. Move your stop order at your broker too.` };
+  return { message: `${pos.symbol} stop set to ${E.px(stop)}, from the ${E.niceDate(from, true)} session. `
+    + 'Move your stop order at your broker too.' };
 }
 
 const money2 = v => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

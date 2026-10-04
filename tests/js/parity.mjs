@@ -59,6 +59,7 @@ const OPS = {
   describe: ({ factors }) => factors.map(f => E.describe(f)),
   sessionsAfter: ({ pairs }) => pairs.map(([d, n]) => E.sessionsAfter(d, n)),
   expected: ({ times }) => times.map(t => E.expectedSessionDate(new Date(t))),
+  stopFrom: ({ times }) => times.map(t => E.stopFrom(new Date(t))),
   px: ({ values }) => values.map(v => E.px(v)),
 };
 

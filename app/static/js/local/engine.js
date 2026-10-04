@@ -50,18 +50,29 @@ export function sessionsAfter(day, n) {
   return d;
 }
 
-// Most recent EGX session whose closing data should be available by now (scan.expected_session_date).
-export function expectedSessionDate(now = new Date()) {
+// Cairo's date and minutes after midnight at `now`.
+function cairo(now) {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     hourCycle: 'h23',
   }).formatToParts(now).map(x => [x.type, x.value]));
-  let d = `${p.year}-${p.month}-${p.day}`;
-  const minutes = +p.hour * 60 + +p.minute;
+  return { day: `${p.year}-${p.month}-${p.day}`, minutes: +p.hour * 60 + +p.minute };
+}
+
+// Most recent EGX session whose closing data should be available by now (scan.expected_session_date).
+export function expectedSessionDate(now = new Date()) {
+  let { day: d, minutes } = cairo(now);
   if (trading(d) && minutes >= 15 * 60 + 30) return d;
   d = addDays(d, -1);
   while (!trading(d)) d = addDays(d, -1);
   return d;
+}
+
+// The first session a stop you set now counts in: today's if it hasn't opened yet (10:00 Cairo), else the next one,
+// so a price earlier today, from before you set it, can't sell you.
+export function stopFrom(now = new Date()) {
+  const { day, minutes } = cairo(now);
+  return trading(day) && minutes < 10 * 60 ? day : sessionsAfter(day, 1);
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -114,9 +125,9 @@ export function processBar(p, bar, cfg) {
   p.days_held += 1;
   if (p.days_held >= 2 && bar.div > 0) {                    // held at the close before: the dividend is ours
     exDividend(p, bar.div);
-    if (p.my_stop && bar.date > p.my_stop_from) p.my_stop -= bar.div;
+    if (p.my_stop && bar.date >= p.my_stop_from) p.my_stop -= bar.div;   // you chose it on the prices before
   }
-  // a stop you set yourself (only ever higher) counts from the day you set it, not on the days before
+  // a stop you set yourself (only ever higher) counts from its first session (stopFrom), not on the days before
   if (p.my_stop > p.stop && bar.date >= p.my_stop_from) p.stop = p.my_stop;
   const { open: o, high: h, low: l } = bar;
   if (o <= p.stop) return [o, `${stopLabel(p)} (gap down)`];

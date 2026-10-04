@@ -787,6 +787,14 @@ def test_your_stop_counts_from_the_day_you_set_it():
 
 
 @needs_node
+def test_your_stop_starts_at_the_next_session():
+    """A stop set during a session counts from the next one (today's open came before it), before the open from today."""
+    times = ["2026-10-04T06:30:00Z", "2026-10-04T09:00:00Z", "2026-10-08T14:00:00Z", "2026-10-09T09:00:00Z"]
+    (got,) = run_js({"op": "stopFrom", "args": {"times": times}})   # Cairo: Sun 09:30, Sun 12:00, Thu 17:00, Fri
+    assert got == ["2026-10-04", "2026-10-05", "2026-10-11", "2026-10-11"]
+
+
+@needs_node
 def test_stops_that_move_only_when_you_change_them(cfg):
     """stop_moves "mine": no rise to support nor after a 1× gain, in the browser and in Python alike."""
     ind, cases, expected = market(), [], []
