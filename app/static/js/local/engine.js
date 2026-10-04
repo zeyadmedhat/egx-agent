@@ -90,6 +90,7 @@ export function position(o) {
     symbol: o.symbol, entry_date: o.entry_date, entry_price: +o.entry_price, shares: Math.trunc(o.shares),
     initial_stop: +o.initial_stop, stop: +o.stop, target: +o.target, highest_close: +o.highest_close,
     days_held: o.days_held || 0, exit_next_open: o.exit_next_open || null, sector: o.sector || '',
+    ...(o.my_stop ? { my_stop: +o.my_stop, my_stop_from: o.my_stop_from } : {}),
   };
 }
 
@@ -111,7 +112,12 @@ export function exDividend(p, amount) {
 export function processBar(p, bar, cfg) {
   if (p.exit_next_open) return [bar.open, p.exit_next_open];
   p.days_held += 1;
-  if (p.days_held >= 2 && bar.div > 0) exDividend(p, bar.div);   // held at the close before: the dividend is ours
+  if (p.days_held >= 2 && bar.div > 0) {                    // held at the close before: the dividend is ours
+    exDividend(p, bar.div);
+    if (p.my_stop && bar.date > p.my_stop_from) p.my_stop -= bar.div;
+  }
+  // a stop you set yourself (only ever higher) counts from the day you set it, not on the days before
+  if (p.my_stop > p.stop && bar.date >= p.my_stop_from) p.stop = p.my_stop;
   const { open: o, high: h, low: l } = bar;
   if (o <= p.stop) return [o, `${stopLabel(p)} (gap down)`];
   if (l <= p.stop) return [p.stop, stopLabel(p)];
@@ -156,6 +162,7 @@ export function replayStatus(p, bars, cfg) {
         days_held: p.days_held, event_date: bar.date };
     }
   }
+  if (p.my_stop > p.stop) p.stop = p.my_stop;          // set after the last close: it counts from the next session
   const last = bars.length ? bars[bars.length - 1].date : 'None';
   const r = p.entry_price - p.initial_stop;
   if (p.exit_next_open) {

@@ -1,5 +1,5 @@
 // Stock: TradingView-style chart with your levels, why it does or doesn't qualify, your position, Shariah details.
-import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO } from '../lib.js';
+import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO, api, toast, refreshAll, STATIC } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, WatchStar,
   Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard, sessionState,
@@ -234,7 +234,12 @@ const sources = list => (list || []).map(source).join(' · ');
 
 // The chart zone your stop or target sits at. levels.py puts a stop 0.3× the daily range under a support's low and a
 // target 0.1× under a resistance's low; the range has moved since they were set, so the match is a little loose.
-const stopZone = (p, c, atr) => ((c && c.supports) || []).find(z => z.low >= p.stop && z.low - p.stop <= 0.6 * atr) || null;
+// A stop you set on a support is inside its zone; otherwise it's the nearest zone above the stop.
+const stopZone = (p, c, atr) => {
+  const zs = (c && c.supports) || [];
+  return zs.find(z => p.stop >= z.low - 1e-3 && p.stop <= z.high + 1e-3)
+    || zs.filter(z => z.low > p.stop && z.low - p.stop <= 0.6 * atr).sort((a, b) => a.low - b.low)[0] || null;
+};
 const targetZone = (p, c, atr) => ((c && c.resistances) || []).find(z => Math.abs(z.low - 0.1 * atr - p.target) <= 0.3 * atr) || null;
 function nextTarget(p, c, atr) {
   const z = ((c && c.resistances) || []).find(r => r.low - 0.1 * atr > p.target * 1.02);
@@ -243,6 +248,9 @@ function nextTarget(p, c, atr) {
 
 function stopWhy(p, c, atr) {
   const z = stopZone(p, c, atr);
+  if (p.my_stop && Math.abs(p.stop - p.my_stop) < 1e-6) {
+    return z ? `${t('the stop you set, at support:')} ${sources(z.sources)}` : t('the stop you set');
+  }
   if (z) return `${t('just under support:')} ${sources(z.sources)}`;
   if (p.stop >= p.avg_price * 0.9995) return t('raised as the price rose: it now protects at least your buy price');
   if (p.stop_src === 'yours') return t('the stop you entered');
@@ -262,7 +270,10 @@ function targetWhy(p, c, atr) {
 // "Stop" / "Target" beside the zone each one sits under: the plan's, or your position's when you hold it.
 function tagFor(z, down, c, pos, atr) {
   if (pos) {
-    if (down && z === stopZone(pos, c, atr)) return html` <span class="tag down">${t('Your stop')}</span>`;
+    if (down && z === stopZone(pos, c, atr)) {
+      return html` <span class="tag down">${pos.stop < z.low - 1e-3
+        ? t('Your stop ({price}) just under', { price: fmt.price(pos.stop) }) : t('Your stop')}</span>`;
+    }
     if (!down && z === targetZone(pos, c, atr)) return html` <span class="tag up">${t('Your target')}</span>`;
     return '';
   }
@@ -272,10 +283,24 @@ function tagFor(z, down, c, pos, atr) {
   return '';
 }
 
+// Your own stop right on a support (local/api.js setStop).
+async function stopAt(pos, price) {
+  try {
+    toast((await api(`/portfolio/${pos.id}/stop`, { method: 'POST', body: { stop: +price.toFixed(3) } })).message);
+    refreshAll();
+  } catch (err) {
+    toast(err.message, 'error', 9000);
+  }
+}
+
 function ZoneList({ c, pos, atr }) {
-  const zone = (z, down) => html`<div class=${cls('zone', down ? 'down' : 'up')}><span class="p">${fmt.price(z.price)}</span>
+  // a support between your stop and the price can become your stop
+  const canStop = z => STATIC && pos && pos.id && pos.stop != null && z.price > pos.stop + 1e-6 && z.price < c.close;
+  const zone = (z, down) => html`<div class=${cls('zone', down ? 'down' : 'up')}><span class="p">${fmt.price(z.price)}
+      <small><span dir="ltr">${fmt.pct(z.price / c.close - 1, 1)}</span></small></span>
     <span class="s" title=${t('Strength')}>${'●'.repeat(Math.min(5, Math.round(z.strength / 1.5)) || 1)}</span>
-    <span class="w">${sources(z.sources)}${tagFor(z, down, c, pos, atr)}</span></div>`;
+    <span class="w">${sources(z.sources)}${tagFor(z, down, c, pos, atr)}${down && canStop(z) && html`
+      <button type="button" class="btn sm ghost zone-stop" onClick=${() => stopAt(pos, z.price)}>${t('Stop here')}</button>`}</span></div>`;
   return html`<div class="zone-list">
       ${(c.resistances || []).slice().reverse().map(z => zone(z, false))}
       <div class="zone now"><span class="p">${fmt.price(c.close)}</span><span>${t('Last close')}</span></div>

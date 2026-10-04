@@ -165,9 +165,9 @@ def chart_plan(o: dict, cfg: dict) -> dict | None:
         "stop_why": stop_zone["sources"] if stop_zone else [],
         "target_why": target_zone["sources"] if target_zone else [],
         "hurdle": _public(hurdle) if hurdle else None,
-        # every level down to the stop's and up to the target's (at least 3 each side), nearest first
+        # every support down to the stop's (at least 3) and every resistance (goals past the target too), nearest first
         "supports": [_public(z) for i, z in enumerate(supports) if i < 3 or z["high"] >= stop][:8],
-        "resistances": [_public(z) for i, z in enumerate(resist) if i < 3 or z["low"] <= target + atr][:8],
+        "resistances": [_public(z) for z in resist][:8],
         "fib": _fib_leg(o),
     }
 

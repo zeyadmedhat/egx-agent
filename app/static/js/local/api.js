@@ -123,7 +123,7 @@ async function openPositions(c, symbol = null) {
       // like your broker: against what you paid with the buy fees; selling fees count once you sell
       pnl_pct: ((worth - r.entry_price) * r.shares - fees) / (r.entry_price * r.shares + fees),
       pnl: (worth - r.entry_price) * r.shares - fees + div,
-      stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target,
+      stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target, my_stop: r.my_stop ?? null,
       bounce_level: stt.bounce_level ?? null, bounce_by: stt.bounce_by ?? null,
       buy_signal: buys.has(r.symbol), top_pick: !!(preds[r.symbol] && preds[r.symbol].top10),
       // how far under its 3-month high: after a 50%+ fall even the model's top ratings did worse (2026-10)
@@ -544,6 +544,31 @@ function adjust(c, id, body) {
     + `${res.avg.toFixed(3)}. The stop and target moved by the same ratio.` };
 }
 
+// A stop you choose for an open position (e.g. right on a support), counted from today; null: back to the automatic
+// one. It must be above the automatic stop, which never goes down, and under the last close.
+async function setStop(c, id, body) {
+  const pos = c.book.trades.find(t => t.id === id && t.account === 'real' && t.status === 'open');
+  if (!pos) fail(404, 'This position is no longer open. Refresh the page.');
+  if (body.stop === null) {
+    delete pos.my_stop;
+    delete pos.my_stop_from;
+    saveBook(c.book);
+    return { message: `${pos.symbol} is back on the automatic stop.` };
+  }
+  const stop = toNum(body.stop, 'stop');
+  const bars = (await barsFor(c, [pos.symbol]))[pos.symbol];
+  const auto = E.realStatus({ ...pos, my_stop: null }, bars, c.cfg);
+  if (auto.stop != null && stop <= auto.stop) {
+    fail(400, `The stop is already ${E.f2(auto.stop)} and stops only go up: choose a higher price.`);
+  }
+  if (auto.last_close != null && stop >= auto.last_close) {
+    fail(400, `${pos.symbol} closed at ${E.f2(auto.last_close)}: the stop must be under that.`);
+  }
+  Object.assign(pos, { my_stop: stop, my_stop_from: localToday() });
+  saveBook(c.book);
+  return { message: `${pos.symbol} stop set to ${E.f2(stop)}. Move your stop order at your broker too.` };
+}
+
 const money2 = v => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function dividend(c, id, body) {
@@ -870,6 +895,7 @@ async function route(path, { method = 'GET', body } = {}) {
   if (method === 'POST' && a === 'portfolio' && b === 'sell') return sell(c, body || {});
   if (method === 'POST' && a === 'portfolio' && x === 'adjust') return adjust(c, id, body || {});
   if (method === 'POST' && a === 'portfolio' && x === 'dividend') return dividend(c, id, body || {});
+  if (method === 'POST' && a === 'portfolio' && x === 'stop') return setStop(c, id, body || {});
   if (method === 'POST' && a === 'portfolio' && x === 'fills') return addFillTo(c, id, body || {});
   if (method === 'PUT' && a === 'portfolio' && b === 'fills') return editFill(c, Number(x), body || {});
   if (method === 'DELETE' && a === 'portfolio' && b === 'fills') return deleteFill(c, Number(x));

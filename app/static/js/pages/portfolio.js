@@ -397,7 +397,7 @@ function PositionDetail({ p, data, onDone, onClose }) {
 
   return html`<div class="pos-detail">
     ${!p.adjust && p.last / p.avg_price - 1 <= -BIG_LOSS && html`<${BigLossPlan} p=${p} data=${data} />`}
-    ${p.adjust ? html`<${AdjustPanel} p=${p} onDone=${onDone} />` : sellForm}
+    ${p.adjust ? html`<${AdjustPanel} p=${p} onDone=${onDone} />` : html`<div>${sellForm}${STATIC && p.stop != null && html`<${StopForm} p=${p} />`}</div>`}
     <div>
       <h4>${t('Transactions in this position')}${p.n_buys > 1 ? ` · ${t('{n} buys combined at the average price', { n: p.n_buys })}` : ''}</h4>
       <${Fills} fills=${p.fills} tradeId=${p.id} data=${data} onRemoveDividend=${removeDividend} />
@@ -416,6 +416,35 @@ function PositionDetail({ p, data, onDone, onClose }) {
       text="This removes the position and all its transactions, as if you never logged it. Use it only for mistakes. To record a sale, use Record sale instead."
       onConfirm=${remove} onClose=${() => setConfirmDelete(false)} />`}
   </div>`;
+}
+
+// Your own stop, e.g. right on a support you trust: from today, only above the automatic one (local/api.js setStop).
+function StopForm({ p }) {
+  const [v, setV] = useState('');
+  const [busy, setBusy] = useState(false);
+  const n = parseFloat(v);
+  const save = async stop => {
+    setBusy(true);
+    try {
+      toast((await api(`/portfolio/${p.id}/stop`, { method: 'POST', body: { stop } })).message);
+      setV('');
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<form class="stop-form" onSubmit=${e => { e.preventDefault(); if (n > 0) save(n); }}>
+    <h4>${t('Change the stop')}</h4>
+    <div class="row">
+      <input class="input" type="number" min="0.01" step="0.001" value=${v} onInput=${e => setV(e.target.value)}
+        placeholder=${t('Now {stop}', { stop: fmt.price(p.stop) })} aria-label=${t('New stop')} />
+      <button class="btn" type="submit" disabled=${!(n > 0) || busy}><${Icon} name="shield" size=${14} />${t('Set stop')}</button>
+      ${p.my_stop && html`<button type="button" class="linkish" disabled=${busy} onClick=${() => save(null)}>${t('Back to the automatic stop')}</button>`}
+    </div>
+    <p class="faint">${t("From today on, and it can still rise to a newer support. The automatic stop sits a little under a support so a dip that only touches it doesn't sell you; a stop right on the support sells on a touch.")}</p>
+  </form>`;
 }
 
 // A trade's transactions. On the website each buy and sale can be edited or deleted, and one added: the position is

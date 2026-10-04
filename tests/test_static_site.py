@@ -765,3 +765,20 @@ def test_every_reason_the_model_gives_has_arabic():
     body = src[src.index("export const WHY_AR = {"):src.index("const WHY_LABELS")]
     labels = {a or b for a, b in re.findall(r"""(?:'([^']+)'|"([^"]+)"): '""", body)}
     assert {label for label, _ in predict.WHY_TEXT.values()} <= labels
+
+
+@needs_node
+def test_your_stop_counts_from_the_day_you_set_it():
+    """A stop you set (my_stop) is only ever higher, and a dip under it before the day you set it doesn't sell."""
+    bar = lambda d, low, close: {"date": d, "open": close, "high": close + 0.1, "low": low, "close": close,  # noqa: E731
+                                 "atr14": 0.5, "ema20": 9.0, "ema50": 8.0, "sup": None, "div": 0}
+    bars = [bar("2026-01-04", 9.9, 10.0), bar("2026-01-05", 9.4, 9.8), bar("2026-01-06", 9.7, 10.0),
+            bar("2026-01-07", 9.8, 10.1)]
+    trade = {"symbol": "X", "entry_date": "2026-01-04", "entry_price": 10.0, "shares": 100, "initial_stop": 9.0,
+             "stop": 9.0, "target": 13.0, "highest_close": 10.0, "my_stop": 9.5}
+    case = lambda since: {"op": "realStatus", "args": {"trade": {**trade, "my_stop_from": since}, "bars": bars,  # noqa: E731
+                                                       "cfg": config.DEFAULTS}}
+    after_dip, on_dip, after_close = run_js(case("2026-01-06"), case("2026-01-05"), case("2026-01-08"))
+    assert after_dip["status"] == "HOLD" and after_dip["stop"] == 9.5
+    assert on_dip["status"] == "EXIT" and "2026-01-05" in on_dip["reason"]
+    assert after_close["status"] == "TIGHTEN STOP" and after_close["stop"] == 9.5 and after_close["prev_stop"] == 9.0
