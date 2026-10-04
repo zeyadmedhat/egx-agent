@@ -6,7 +6,7 @@ import {
 } from '../lib.js';
 import {
   Icon, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, Field,
-  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard, More,
+  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard, More, DateInput, lastSession,
 } from '../ui.js';
 import { t, tn, tp } from '../i18n.js';
 import { LineChart } from '../charts.js';
@@ -323,7 +323,7 @@ function BigLossPlan({ p, data }) {
 }
 
 function PositionDetail({ p, data, onDone, onClose }) {
-  const [form, setForm] = useState({ date: todayISO(), shares: String(p.shares), price: String(p.price ?? p.last), reason: data.sell_reasons[0] });
+  const [form, setForm] = useState({ date: lastSession(), shares: String(p.shares), price: String(p.price ?? p.last), reason: data.sell_reasons[0] });
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showDividend, setShowDividend] = useState(false);
@@ -371,7 +371,7 @@ function PositionDetail({ p, data, onDone, onClose }) {
   const sellForm = html`<form onSubmit=${submit}>
       <h4>${t('Sell {sym}: all or part of your {n} shares', { sym: p.symbol, n: fmt.int(p.shares) })}</h4>
       <div class="form-grid">
-        <${Field} label="Sell date"><input class="input" type="date" value=${form.date} onInput=${set('date')} required /><//>
+        <${Field} label="Sell date"><${DateInput} value=${form.date} onInput=${set('date')} /><//>
         <${Field} label="Shares to sell" error=${qty > p.shares ? t('You hold {n}', { n: fmt.int(p.shares) }) : null}>
           <input class=${cls('input', qty > p.shares && 'invalid')} type="number" min="1" max=${p.shares} step="1"
             value=${form.shares} onInput=${set('shares')} required /><//>
@@ -503,7 +503,7 @@ function FillForm({ fill, tradeId, data, onClose }) {
   const [form, setForm] = useState(fill
     ? { side: fill.side, date: fill.date, shares: String(fill.shares), price: String(fill.price), note: fill.note || '',
       basis: fill.fees_in ? 'avg' : 'price', value: '', mv: '', pl: '' }
-    : { side: 'buy', date: todayISO(), shares: '', price: '', note: '', basis: 'price', value: '', mv: '', pl: '' });
+    : { side: 'buy', date: lastSession(), shares: '', price: '', note: '', basis: 'price', value: '', mv: '', pl: '' });
   const [busy, setBusy] = useState(false);
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
   const sell = form.side === 'sell';
@@ -533,7 +533,7 @@ function FillForm({ fill, tradeId, data, onClose }) {
     <h4>${fill ? t(fill.side === 'buy' ? 'Edit this buy' : 'Edit this sale') : t('Add a transaction')}</h4>
     ${!fill && html`<${Seg} options=${SIDES} value=${form.side} onChange=${v => setForm(f => ({ ...f, side: v }))} />`}
     <div class="form-grid" style="margin-top:10px">
-      <${Field} label="Date"><input class="input" type="date" max=${todayISO()} value=${form.date} onInput=${set('date')} required /><//>
+      <${Field} label="Date"><${DateInput} value=${form.date} onInput=${set('date')} /><//>
       <${Field} label="Shares"><input class="input" type="number" min="1" step="1" value=${form.shares} onInput=${set('shares')} required /><//>
       ${sell ? html`<${Field} label="Sell price"><input class="input" type="number" min="0.001" step="any" value=${form.price}
         onInput=${set('price')} required /><//>` : html`<${AmountField} form=${form} setForm=${setForm} />`}
@@ -638,7 +638,7 @@ function DividendForm({ p, onClose }) {
   return html`<form class="preview-box" style="margin-top:12px;gap:10px" onSubmit=${submit}>
     <b>${t('Cash dividend on {sym}', { sym: p.symbol })}</b>
     <div class="form-grid">
-      <${Field} label="Paid on"><input class="input" type="date" value=${form.date} onInput=${set('date')} required /><//>
+      <${Field} label="Paid on"><${DateInput} weekends value=${form.date} onInput=${set('date')} /><//>
       <${Field} label="Amount received (EGP)" help="As your broker paid it, after tax.">
         <input class="input" type="number" min="0.01" step="0.01" value=${form.amount} onInput=${set('amount')} required /><//>
       <${Field} label="Note (optional)"><input class="input" value=${form.note} onInput=${set('note')} maxlength="200" /><//>
@@ -654,7 +654,7 @@ function DividendForm({ p, onClose }) {
 function BuyForm({ data, query }) {
   const stocks = useStore(s => s.stocks);
   const lastDate = useStore(s => s.status && s.status.market && s.status.market.date);
-  const blank = { symbol: '', date: todayISO(), price: '', shares: '', stop: '', notes: '', basis: 'price', value: '', mv: '', pl: '' };
+  const blank = { symbol: '', date: lastSession(), price: '', shares: '', stop: '', notes: '', basis: 'price', value: '', mv: '', pl: '' };
   const [form, setForm] = useState(() => ({ ...blank, symbol: query.buy || '', price: query.price || '', shares: query.shares || '' }));
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -714,7 +714,7 @@ function BuyForm({ data, query }) {
     <div class="buy-grid">
       <${Field} label="Stock"><${StockPicker} value=${form.symbol} onChange=${pick} starred=${signals}
         placeholder=${t('Search symbol or name…')} /><//>
-      <${Field} label="Buy date"><input class="input" type="date" value=${form.date} onInput=${set('date')} required /><//>
+      <${Field} label="Buy date"><${DateInput} value=${form.date} onInput=${set('date')} /><//>
       <${AmountField} form=${form} setForm=${setForm} />
       <${Field} label="Shares"><input class="input" type="number" min="1" step="1" value=${form.shares}
         onInput=${set('shares')} placeholder="0" required /><//>
@@ -787,7 +787,6 @@ function ImportPanel({ data }) {
   const [linked, setLinked] = useState(null);
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState(null);
-  const [date, setDate] = useState(todayISO());
   useEffect(() => { import('../local/api.js').then(m => setLinked(m.botStatus() === 'linked')); }, []);
   if (linked === null) return null;
   if (!linked) {
@@ -816,7 +815,7 @@ function ImportPanel({ data }) {
         const shares = h.shares || (cost && now(symbol) ? Math.round(h.value / now(symbol)) : null);
         const price = cost && shares ? cost / shares : h.avg_price || h.last;
         return { id: i, symbol, name: h.name || '', shares: String(shares || ''), price: price ? String(+price.toFixed(4)) : '',
-          cost, value: h.value, pnl: h.pnl, est: !h.shares && !!shares, at: now(symbol),
+          cost, value: h.value, pnl: h.pnl, est: !h.shares && !!shares, at: now(symbol), date: lastSession(),
           guessed: !cost && !h.avg_price, on: known(symbol) && !held(symbol) && !!(cost || h.avg_price) };
       }));
     } catch (err) {
@@ -839,7 +838,7 @@ function ImportPanel({ data }) {
     let done = 0;
     for (const r of chosen) {
       try {
-        await api('/portfolio/buy', { method: 'POST', body: { symbol: r.symbol, date, price: parseFloat(r.price),
+        await api('/portfolio/buy', { method: 'POST', body: { symbol: r.symbol, date: r.date, price: parseFloat(r.price),
           shares: parseInt(r.shares, 10), stop: null, notes: t('Added from a screenshot'), fees_in: !r.guessed } });
         done += 1;
         setRows(rs => rs.filter(x => x.id !== r.id));
@@ -867,15 +866,17 @@ function ImportPanel({ data }) {
           <td class="r"><input class="input sm" type="number" min="1" step="1" value=${r.shares} onInput=${edit(r.id, 'shares')} style="width:80px" /></td>
           <td class="r"><input class="input sm" type="number" min="0.001" step="any" value=${r.price} onInput=${edit(r.id, 'price')} style="width:86px" />
             ${r.cost && html`<div class="faint" dir="auto" style="font-size:11.5px;white-space:nowrap">${t('{v} worth', { v: fmt.int(r.value) })}${' · '}<span class="num">${r.pnl >= 0 ? '+' : '−'}${fmt.int(Math.abs(r.pnl))}</span></div>`}</td>
-          </tr><tr key=${`${r.id}n`} class="import-note"><td></td><td colspan="3" style="font-size:12px">${!known(r.symbol) ? html`<span class="warn">${t("Not an EGX symbol the agent knows: type it.")}</span>`
+          </tr><tr key=${`${r.id}n`} class="import-note"><td></td><td colspan="3" style="font-size:12px">
+            ${r.on && html`<div class="import-date"><span class="muted">${t('Bought on')}</span>
+              <${DateInput} small value=${r.date} onInput=${edit(r.id, 'date')} /></div>`}
+            ${!known(r.symbol) ? html`<span class="warn">${t("Not an EGX symbol the agent knows: type it.")}</span>`
             : held(r.symbol) && r.cost ? html`<${HeldCheck} r=${r} p=${held(r.symbol)} />`
             : held(r.symbol) ? html`<span class="warn">${t('Already in My Portfolio ({n} shares): adding joins it.', { n: fmt.int(held(r.symbol).shares) })}</span>`
             : r.guessed ? html`<span class="warn">${t('No average price on the picture: this is the last price. Type what you paid.')}</span>`
             : r.est ? html`<span class="warn">${t('Shares worked out from the market value ÷ the price now ({p}): check the units in your broker\'s app.', { p: fmt.price(r.at) })}</span>`
             : html`<span class="faint">${t('New position')}</span>`}</td></tr>`)}</tbody></table></div>
-      <div class="row" style="margin-top:12px;gap:12px;flex-wrap:wrap;align-items:end">
-        <${Field} label="Bought on" help="Sets each stop and target from the chart on that day. Change it if you bought earlier.">
-          <input class="input" type="date" value=${date} onInput=${e => setDate(e.target.value)} /><//>
+      <div class="row" style="margin-top:12px;gap:12px;flex-wrap:wrap;align-items:center">
+        <span class="faint" style="flex:1;min-width:220px;font-size:12.5px">${t("Each stock's date sets its stop and target from the chart on that day: change it if you bought earlier.")}</span>
         <button class="btn primary" disabled=${busy || !chosen.length} onClick=${add}>
           ${t('Add {n} to My Portfolio', { n: chosen.length })}</button>
       </div>` : html`<p class="muted" style="margin-top:12px;font-size:13px">${t('No holdings found on that picture. Try a screenshot of the portfolio screen itself.')}</p>`)}

@@ -1088,3 +1088,44 @@ ul.checkup li span { color: var(--text-2); font-size: 13px; }
 /* the stock page's summary: the verdict, then the model's rating and its reason (stock.js Verdict) */
 .verdict-rating { display: flex; gap: 12px; align-items: flex-start; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; }
 .live-now { display: flex; gap: 6px; align-items: center; justify-content: flex-end; font-size: 13px; margin-top: 4px; }
+
+/* ------------------------------------------------------------------ the date picker (ui.js DateInput) */
+.date-btn { display: inline-flex; align-items: center; gap: 8px; text-align: start; cursor: pointer; }
+.date-btn:hover { border-color: var(--text-3); }
+.date-btn .icon { color: var(--accent); flex: none; }
+.date-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.date-btn.sm { width: auto; gap: 6px; }
+.dp-scrim { position: fixed; inset: 0; z-index: 94; }
+.dp-scrim.dim { background: rgba(0, 0, 0, .55); backdrop-filter: blur(2px); }
+.dp {
+  position: fixed; z-index: 95; width: 300px; padding: 12px; background: var(--panel); border: 1px solid var(--border-2);
+  border-radius: var(--r-lg); box-shadow: var(--shadow); font-variant-numeric: tabular-nums;
+}
+.dp.sheet { inset: auto 0 0 0; width: auto; border-radius: var(--r-lg) var(--r-lg) 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+.dp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.dp-head b { font-size: 15px; }
+.dp-nav {
+  width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--border-2);
+  background: var(--panel-2); color: var(--text); cursor: pointer;
+}
+.dp-nav:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.dp-nav:disabled { opacity: .35; cursor: default; }
+.dp-nav.prev .icon { transform: scaleX(-1); }
+[dir="rtl"] .dp-nav.prev .icon { transform: none; }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-wd { text-align: center; font-size: 11.5px; font-weight: 600; color: var(--text-3); padding: 4px 0 6px; }
+.dp-wd.off { opacity: .5; }
+.dp-day {
+  height: 36px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font: inherit; font-size: 14px;
+  cursor: pointer;
+}
+.dp-day:hover:not(:disabled) { background: var(--panel-2); }
+.dp-day.today { box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+.dp-day.on { background: var(--accent); color: var(--on-accent); font-weight: 700; box-shadow: none; }
+.dp-day:disabled { color: var(--text-3); opacity: .35; cursor: default; }
+.dp.sheet .dp-day { height: 44px; font-size: 16px; }
+.dp-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--border); font-size: 12px;
+}
+.import-date { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }

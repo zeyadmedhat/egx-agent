@@ -1,7 +1,7 @@
 // Shared building blocks: icons, Shariah badges, KPI tiles, tables, forms, the stock picker, dialogs.
 import {
   html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
-  stockHref, watchForData, toggleWatch, STATIC, api,
+  stockHref, watchForData, toggleWatch, STATIC, api, todayISO,
 } from './lib.js';
 import { t, term, tn, tw } from './i18n.js';
 
@@ -22,6 +22,7 @@ const ICONS = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
+  calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   pencil: '<path d="M21.2 6.8a2.8 2.8 0 0 0-4-4L4 16v4h4Z"/><path d="m15 5 4 4"/>',
@@ -520,6 +521,74 @@ export function Switch({ checked, onChange, label }) {
   return html`<label class="switch"><input type="checkbox" checked=${checked} onChange=${e => onChange(e.target.checked)} />
     <span class="track"></span>${label && html`<span>${label}</span>`}</label>`;
 }
+// ------------------------------------------------------------------ a date, picked on the site's own calendar
+// (the browser's own can't be styled). EGX trades Sunday–Thursday, so trade dates skip Friday and Saturday
+// (`weekends` lets them through, e.g. a dividend's payday) and nothing after `max` (today). A drop-in for
+// <input type="date">: onInput gets {target: {value: 'YYYY-MM-DD'}}. On a phone it opens as a sheet at the bottom.
+const isoOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const dayOf = s => new Date(`${s}T00:00:00`);
+const offDay = d => d.getDay() === 5 || d.getDay() === 6;
+export function lastSession(day = todayISO()) {
+  const d = dayOf(day);
+  while (offDay(d)) d.setDate(d.getDate() - 1);
+  return isoOf(d);
+}
+const DP_W = 300;
+
+export function DateInput({ value, onInput, max = todayISO(), weekends = false, small }) {
+  const [view, setView] = useState(null);        // the month shown (its 1st) while open, else null
+  const [pos, setPos] = useState(null);          // where the calendar sits; null on a phone (a sheet)
+  const btn = useRef(null);
+  const ar = store.lang === 'ar', locale = ar ? 'ar-EG-u-nu-latn' : 'en-GB';
+  const close = () => { setView(null); btn.current && btn.current.focus(); };
+  useEffect(() => {
+    if (!view) return undefined;
+    const onKey = e => e.key === 'Escape' && close();
+    const onMove = e => !(e.target.closest && e.target.closest('.dp')) && close();
+    addEventListener('keydown', onKey); addEventListener('resize', onMove); addEventListener('scroll', onMove, true);
+    return () => { removeEventListener('keydown', onKey); removeEventListener('resize', onMove); removeEventListener('scroll', onMove, true); };
+  }, [!view]);
+  const open = () => {
+    const r = btn.current.getBoundingClientRect(), h = 372;
+    const left = Math.max(8, Math.min(ar ? r.right - DP_W : r.left, innerWidth - DP_W - 8));
+    setPos(innerWidth < 560 ? null : { left, top: r.bottom + h + 8 > innerHeight && r.top > h ? r.top - h - 6 : r.bottom + 6 });
+    const d = dayOf(value || max);
+    setView(new Date(d.getFullYear(), d.getMonth(), 1));
+  };
+  const pick = day => { onInput({ target: { value: day } }); close(); };
+  const shown = value ? dayOf(value).toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : t('Pick a date');
+  const trigger = html`<button type="button" ref=${btn} class=${cls('input', 'date-btn', small && 'sm')} onClick=${() => (view ? close() : open())}
+    aria-haspopup="dialog" aria-expanded=${!!view}><${Icon} name="calendar" size=${small ? 14 : 16} /><span>${shown}</span></button>`;
+  if (!view) return trigger;
+  const y = view.getFullYear(), m = view.getMonth(), today = todayISO(), quick = weekends ? max : lastSession(max);
+  const cells = [...Array(view.getDay()).fill(null), ...Array.from({ length: new Date(y, m + 1, 0).getDate() }, (_, i) => new Date(y, m, i + 1))];
+  const heads = Array.from({ length: 7 }, (_, i) => new Date(2026, 0, 4 + i)       // 4 Jan 2026 was a Sunday
+    .toLocaleDateString(locale, { weekday: ar ? 'narrow' : 'short' }).slice(0, ar ? 3 : 2));
+  const later = isoOf(new Date(y, m + 1, 1)) > max;
+  return html`${trigger}<div class=${cls('dp-scrim', !pos && 'dim')} onMouseDown=${close}></div>
+    <div class=${cls('dp', !pos && 'sheet')} role="dialog" aria-label=${t('Pick a date')} style=${pos ? `left:${pos.left}px;top:${pos.top}px` : undefined}>
+      <div class="dp-head">
+        <button type="button" class="dp-nav prev" onClick=${() => setView(new Date(y, m - 1, 1))} aria-label=${t('Previous month')}><${Icon} name="chevron" size=${16} /></button>
+        <b>${view.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}</b>
+        <button type="button" class="dp-nav" disabled=${later} onClick=${() => setView(new Date(y, m + 1, 1))} aria-label=${t('Next month')}><${Icon} name="chevron" size=${16} /></button>
+      </div>
+      <div class="dp-grid">
+        ${heads.map((h, i) => html`<span class=${cls('dp-wd', !weekends && i >= 5 && 'off')}>${h}</span>`)}
+        ${cells.map((d, i) => {
+          if (!d) return html`<span key=${`b${i}`}></span>`;
+          const s = isoOf(d), off = s > max || (!weekends && offDay(d));
+          return html`<button type="button" key=${s} class=${cls('dp-day', s === value && 'on', s === today && 'today')} disabled=${off}
+            aria-pressed=${s === value} aria-label=${d.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            onClick=${() => pick(s)}>${d.getDate()}</button>`;
+        })}
+      </div>
+      <div class="dp-foot">
+        <button type="button" class="btn sm" onClick=${() => pick(quick)}>${t(quick === today ? 'Today' : 'Last session')}</button>
+        ${!weekends && html`<span class="faint">${t('Fri and Sat: no trading')}</span>`}
+      </div>
+    </div>`;
+}
+
 export function Field({ label, help, error, children, className }) {
   return html`<div class=${cls('field', className)}>
     ${label && html`<label>${tx(label)}</label>`}${children}
