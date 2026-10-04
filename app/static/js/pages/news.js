@@ -1,5 +1,6 @@
 // News: the last month's headlines about EGX stocks and the market from reliable sources (Mubasher, Reuters, Zawya,
-// Al Borsa News, Daily News Egypt), and the dividends, bonus shares and rights issues coming up. Headlines link to the
+// Al Borsa News, Daily News Egypt), and what companies announced this month (the coming ex-dates are on Dividends &
+// results). Headlines link to the
 // publisher; the good/bad dot is a rough keyword guess. Filters are remembered on this device.
 import { html, useApi, useState, useMemo, useStore, fmt, stockHref, remember } from '../lib.js';
 import { Icon, PageHead, PageLoading, Seg, Callout, NewsList, TAG_LABELS, More } from '../ui.js';
@@ -39,7 +40,6 @@ export function NewsPage() {
   }, [data, f, mine, names]);
 
   if (!data) return html`<${PageHead} title="News" /><${PageLoading} error=${error} />`;
-  const coming = data.coming.filter(a => f.show !== 'mine' || mine.has(a.symbol));
   const announced = data.announced.filter(a => f.show !== 'mine' || mine.has(a.symbol));
   const changed = Object.keys(DEFAULTS).some(k => f[k] !== DEFAULTS[k]);
   const sourcesUsed = [...new Set(data.items.map(n => n.source))];
@@ -72,14 +72,6 @@ export function NewsPage() {
         <${More} label="About these headlines"><p>${t("Only headlines are kept here: each links to the publisher's article. The topics and the green/red dot come from keyword rules in Arabic and English. They're a quick guide, not a reading of the article. The agent reads each stock's Mubasher page every few days, and Reuters and Zawya every run.")}</p><//>
       </div>
       <aside class="stack">
-        <div class="card"><div class="card-title"><${Icon} name="coins" size=${15} />${t('Coming ex-dates')}</div>
-          ${coming.length ? html`<div class="stat-list">${coming.slice(0, 25).map(a => html`
-            <span class="k"><b>${fmt.date(a.effective)}</b></span>
-            <span class="v" style="font-weight:500"><a href=${stockHref(a.symbol)}>${a.symbol}</a> · ${tn(a.label)}${
-              mine.has(a.symbol) ? html` <span class="tag">${t('yours')}</span>` : ''}</span>`)}</div>`
-            : html`<p class="muted" style="font-size:13px">${t('Nothing announced for the coming weeks.')}</p>`}
-          <p class="faint" style="font-size:12px;margin-top:10px">${t("On a cash dividend's ex-date the price drops by about the dividend. Bonus shares and splits re-base it.")}
-            <a href="#/dividends">${t('Dividend amounts →')}</a></p></div>
         <div class="card"><div class="card-title"><${Icon} name="info" size=${15} />${t('Announced this month')}</div>
           ${announced.length ? html`<div class="stat-list">${announced.slice(0, 25).map(a => html`
             <span class="k">${fmt.date(a.announced)}</span>

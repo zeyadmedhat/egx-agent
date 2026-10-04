@@ -1298,7 +1298,7 @@ SETTINGS_SECTIONS = [
         {"key": "shariah_filter", "label": "Shariah filter for BUY signals", "kind": "select",
          "options": [{"value": k, "label": v} for k, v in config.SHARIAH_MODES.items()],
          "help": "The EGX33 and Kashif badges always show. This decides which stocks can get BUY signals, and "
-                 "which show in Close to a BUY and the model's ranking."},
+                 "which show in Getting close and the model's ranking."},
     ]},
     {"title": "Paper trading", "fields": [
         {"key": "auto_paper", "label": "Place paper trades automatically after each scan", "kind": "toggle"},

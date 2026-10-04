@@ -51,7 +51,7 @@ export function MarketPage() {
         : '{pct} of {n} stocks are above their 50-day average, down {pts} points in a week.',
       { pct: fmt.pct(b.above50, 0, false), n: b.stocks, pts: fmt.int(Math.abs(change * 100)) })
       : ''}<//>
-    ${v.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${v.switch} /></div>`}
+    ${v.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${v.switch} compact /></div>`}
     <div class="kpis" style="margin-top:14px">
       <${Kpi} label=${html`<${Term} k="breadth">${t('Above 50-day average')}<//>`} value=${fmt.pct(b.above50, 0, false)}
         valueClass=${b.above50 >= 0.6 ? 'up' : b.above50 < 0.4 ? 'down' : 'warn'}

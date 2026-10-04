@@ -49,7 +49,7 @@ export function PredictPage() {
       <${Kpi} label="Years it beat the average stock" value=${`${r.good_years} / ${(r.years || []).length}`}
         sub=${t('tested {a} – {b}', { a: fmt.date(r.from), b: fmt.date(r.to) })} />
     </div>
-    <div class="stack" style="margin-top:12px"><${Health} h=${data.health} /><${Recent} rec=${(data.recent || {})[String(HZ)]} /></div>
+    ${data.health && ['weak', 'bad'].includes(data.health.status) && html`<div style="margin-top:12px"><${Health} h=${data.health} /></div>`}
 
     <section class="section">
       <${SectionHead} title="Today's ranking" count=${data.rows.length}
@@ -84,7 +84,6 @@ function Week({ data, rows, filters }) {
       <${Kpi} label="Years they beat the average stock" value=${`${tst.good_years} / ${years.length}`}
         sub=${years.length ? t('tested {a} – {b}', { a: years[0].year, b: years[years.length - 1].year }) : ''} />
     </div>
-    <div class="stack" style="margin-top:12px"><${Recent} rec=${(data.recent || {})[String(WK)]} /></div>
 
     <section class="section">
       <${SectionHead} title="Next week's ranking" count=${data.rows.length}

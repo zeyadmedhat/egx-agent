@@ -3,7 +3,7 @@ import {
   html, useApi, useState, useEffect, useStore, api, toast, refreshAll, startJob, fmt, cls, todayISO, setOwner, watchForData,
 } from '../lib.js';
 import {
-  Icon, Kpi, Callout, PageHead, PageLoading, Field, Switch, Confirm, JobProgress, useJob,
+  Icon, Kpi, Callout, PageHead, PageLoading, Field, Switch, Confirm, JobProgress, useJob, More,
 } from '../ui.js';
 import { t, tp } from '../i18n.js';
 
@@ -159,10 +159,10 @@ function DataCard({ d, running, admin }) {
       <${Kpi} compact label="Latest price bar" value=${fmt.date(d.last_bar)} />
       <${Kpi} compact label="Kashif checked" value=${d.kashif_checked ? fmt.date(d.kashif_checked) : t('never')} />
     </div>
-    ${d.missing.length > 0 && html`<div class="missing-list" style="margin-top:16px">
-      <div class="muted">${t("Stocks without usable prices. They're checked again weekly and join the scan by themselves once they trade and build enough history.")}</div>
+    ${d.missing.length > 0 && html`<${More} label="Stocks without usable prices"><div class="missing-list">
+      <div class="muted">${t("They're checked again weekly and join the scan by themselves once they trade and build enough history.")}</div>
       ${d.missing.map(g => html`<div><b>${t(g.note)}</b><div class="syms">${g.symbols.map(s => html`<code>${s}</code>`)}</div></div>`)}
-    </div>`}
+    </div><//>`}
     ${admin ? html`<div class="row" style="margin-top:18px">
       <button class="btn" disabled=${running} onClick=${() => startJob('/jobs/scan', { update_data: false })}>
         <${Icon} name="refresh" />Re-score now (no download)</button>

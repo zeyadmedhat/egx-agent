@@ -91,7 +91,7 @@ export function ScreenerPage() {
   const more = MORE.filter(k => f[k] !== 'any').length + (f.liquid ? 0 : 1);
   return html`<${PageHead} title="Screener"
       sub=${t("Every stock's numbers from the {date} close. Filter, sort, and tap a stock for its chart.", { date: fmt.date(data.date) })} />
-    <div class="row" style="margin-bottom:12px">
+    <div class="row preset-row" style="margin-bottom:12px">
       ${PRESETS.map(([label, p]) => html`<button class=${cls('btn sm', isOn(p) && 'on')} aria-pressed=${isOn(p)}
         onClick=${() => save({ ...DEFAULTS, ...p })}>${t(label)}</button>`)}
       ${changed && html`<button class="linkish" onClick=${() => save({ ...DEFAULTS })}>${t('Clear filters')}</button>`}

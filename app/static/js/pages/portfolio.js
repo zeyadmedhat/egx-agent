@@ -22,9 +22,10 @@ const scrollTo = (id, block = 'start') => document.getElementById(id)?.scrollInt
 export function PortfolioPage({ route }) {
   const { data, error } = useApi('/portfolio');
   const [openId, setOpenId] = useState(route.query.open ? Number(route.query.open) : null);
-  const [add, setAdd] = useState('type');
+  const [add, setAdd] = useState(route.query.buy ? 'type' : null);   // the buy box, open only when asked for
   const [closedId, setClosedId] = useState(null);
   useEffect(() => { if (route.query.open) setOpenId(Number(route.query.open)); }, [route.query.open]);
+  useEffect(() => { if (route.query.buy) setAdd('type'); }, [route.query.buy]);
   useEffect(() => { if (data && route.query.open) setTimeout(() => scrollTo(`pos-${route.query.open}`), 50); }, [!!data, route.query.open]);
   const q = useQuotes(data ? data.positions.map(p => p.symbol) : []);
   if (!data) return html`<${PageLoading} error=${error} />`;
@@ -34,7 +35,7 @@ export function PortfolioPage({ route }) {
   const live = list.some(p => p.live);
   const openPnl = list.reduce((a, p) => a + p.pnl, 0);
   const equity = s.equity + list.reduce((a, p) => a + (p.price - p.last) * p.shares, 0);
-  const startAdd = mode => { setAdd(mode); scrollTo('buy-form'); };
+  const startAdd = mode => { setAdd(mode); setTimeout(() => scrollTo('buy-form'), 0); };
   const closeCard = id => { setOpenId(null); setTimeout(() => scrollTo(`pos-${id}`, 'nearest'), 0); };
   const closedColumns = [
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} sub=${false} />` },
@@ -45,6 +46,16 @@ export function PortfolioPage({ route }) {
     { key: 'exit_reason', label: 'Why sold', render: r => html`<span class="muted">${tn(r.exit_reason) || '–'}</span>` },
   ];
   const cs = data.closed_stats;
+  // Past trades: every closed trade (tap one to edit or delete it on the website), then the journal
+  const closedSection = data.closed.length > 0 && html`    <section class="section">
+      <${SectionHead} title="Closed trades" count=${cs.count}
+        hint=${cs.count ? t('Won {pct} · total {v} EGP', { pct: fmt.pct(cs.win_rate, 0, false), v: fmt.signed(cs.total) }) : ''} />
+      <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
+        empty="Nothing closed yet." onRowClick=${STATIC ? r => setClosedId(id => (id === r.id ? null : r.id)) : undefined}
+        expandedKey=${closedId} /></div>
+      ${STATIC && data.closed.length > 0 && !openClosed && html`<p class="faint" style="font-size:12.5px;margin-top:8px">${t('Tap a closed trade to edit or delete it.')}</p>`}
+      ${openClosed && html`<${ClosedDetail} r=${openClosed} data=${data} onClose=${() => setClosedId(null)} />`}
+    </section>`;
   const tab = TABS.some(x => x.value === route.query.tab) ? route.query.tab : 'positions';
   const pickTab = v => go(v === 'positions' ? '#/portfolio' : `#/portfolio?tab=${v}`);
   return html`
@@ -54,6 +65,15 @@ export function PortfolioPage({ route }) {
     ${data.nothing_saved && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>${t('Nothing is saved in this browser yet.')}</b>${' '}
       ${tp('Your portfolio is kept only in the browser where you entered it, and links opened from Telegram or another app can open a different browser. Open the site there, or bring your portfolio here with {link}.',
         { link: html`<a href="#/settings">${t('Settings → Restore from a backup')}</a>` })}<//></div>`}
+    ${add && html`<section class="section" id="buy-form" style="margin-top:0;margin-bottom:24px;scroll-margin-top:80px">
+      <${SectionHead} title="Log a buy" hint=${add === 'shot'
+        ? "A picture of your broker's portfolio screen (Thndr or another): the holdings fill in by themselves."
+        : 'Record a buy you placed at your broker.'}>
+        ${STATIC && html`<${Seg} options=${ADD} value=${add} onChange=${setAdd} />`}
+        <button class="btn sm ghost" onClick=${() => setAdd(null)}><${Icon} name="x" size=${14} />${t('Close')}</button><//>
+      ${STATIC && add === 'shot' ? html`<div class="card"><${ImportPanel} data=${data} /></div>`
+        : html`<${BuyForm} data=${data} query=${route.query} onDone=${() => setAdd(null)} />`}
+    </section>`}
     <div class="kpis">
       <${Kpi} label="Account value" value=${fmt.short(equity)}
         sub=${`${fmt.pct(equity / s.start - 1)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
@@ -66,7 +86,7 @@ export function PortfolioPage({ route }) {
         sub=${s.equity ? t('{pct} of your account', { pct: fmt.pct(s.open_risk / s.equity, 1, false) }) : ''} />
     </div>
     <div style="margin-top:16px"><${Seg} options=${TABS} value=${tab} onChange=${pickTab} /></div>
-    ${tab === 'health' ? html`<${HealthTab} data=${data} />` : tab === 'journal' ? html`<${JournalTab} data=${data} />` : html`
+    ${tab === 'health' ? html`<${HealthTab} data=${data} />` : tab === 'journal' ? html`${closedSection}<${JournalTab} data=${data} />` : html`
     <section class="section">
       <${SectionHead} title="Open positions" count=${data.positions.length}
         hint=${data.positions.length ? 'Sell or edit opens the sale form and the position\'s history.' : ''} />
@@ -76,26 +96,10 @@ export function PortfolioPage({ route }) {
           ${openId === p.id && html`<${PositionDetail} p=${p} data=${data} onDone=${() => setOpenId(null)}
             onClose=${() => closeCard(p.id)} />`}<//>`)}</div>`
         : html`<div class="card"><${Empty} icon="briefcase" title="No open positions"
-          text="After you buy at your broker, log it below." /></div>`}
-    </section>
-
-    <section class="section" id="buy-form" style="scroll-margin-top:80px">
-      <${SectionHead} title="Log a buy" hint=${add === 'shot'
-        ? "A picture of your broker's portfolio screen (Thndr or another): the holdings fill in by themselves."
-        : 'Record a buy you placed at your broker.'}>
-        ${STATIC && html`<${Seg} options=${ADD} value=${add} onChange=${setAdd} />`}<//>
-      ${STATIC && add === 'shot' ? html`<div class="card"><${ImportPanel} data=${data} /></div>`
-        : html`<${BuyForm} data=${data} query=${route.query} />`}
+          text="After you buy at your broker, press Log a buy above." /></div>`}
     </section>
 
     <section class="section">
-      <${SectionHead} title="Closed trades" count=${cs.count}
-        hint=${cs.count ? t('Won {pct} · total {v} EGP', { pct: fmt.pct(cs.win_rate, 0, false), v: fmt.signed(cs.total) }) : ''} />
-      <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
-        empty="Nothing closed yet." onRowClick=${STATIC ? r => setClosedId(id => (id === r.id ? null : r.id)) : undefined}
-        expandedKey=${closedId} /></div>
-      ${STATIC && data.closed.length > 0 && !openClosed && html`<p class="faint" style="font-size:12.5px;margin-top:8px">${t('Tap a closed trade to edit or delete it.')}</p>`}
-      ${openClosed && html`<${ClosedDetail} r=${openClosed} data=${data} onClose=${() => setClosedId(null)} />`}
       <p class="faint" style="font-size:12.5px;margin-top:10px">${t('Starting capital {v}', { v: fmt.egp(s.start) })}${' '}
         (<a href="#/settings">${t('change it in Settings')}</a>). ${data.fee_cfg.broker === 'other' ? t('Profit and loss include {fee}% fees each way.', { fee: data.fee_pct })
           : t("Profit and loss include Thndr's fees each way.")} ${t('Open positions count the buy fees only, like your broker: the selling fees count once you sell.')}</p>
@@ -681,7 +685,7 @@ function DividendForm({ p, onClose }) {
   </form>`;
 }
 
-function BuyForm({ data, query }) {
+function BuyForm({ data, query, onDone }) {
   const stocks = useStore(s => s.stocks);
   const lastDate = useStore(s => s.status && s.status.market && s.status.market.date);
   const blank = { symbol: '', date: lastSession(), price: '', shares: '', stop: '', notes: '', basis: 'price', value: '', mv: '', pl: '' };
@@ -733,6 +737,7 @@ function BuyForm({ data, query }) {
       setForm(blank);
       if (query.buy) go('#/portfolio');
       refreshAll();
+      if (onDone) onDone();          // the buy box closes once the buy is saved
     } catch (err) {
       toast(err.message, 'error', 9000);
     } finally {

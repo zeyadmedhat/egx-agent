@@ -1201,3 +1201,7 @@ ul.checkup li span { color: var(--text-2); font-size: 13px; }
   .wk-move { display: none; }
   .near-who .faint { display: none; }
 }
+@media (max-width: 600px) {   /* the Screener's ready-made lists: one row, swiped sideways */
+  .preset-row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -16px; padding-inline: 16px; }
+  .preset-row > * { flex: none; }
+}

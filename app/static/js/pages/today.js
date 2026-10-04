@@ -1,12 +1,11 @@
-// Home → Summary: the day in a few sentences, the orders for the next session, your positions and the market. The BUY
-// signals are on Picks (pages/picks.js), which reads the same /today.
+// Home → Summary: the day in a few sentences, the orders for the next session and your positions. The market has its
+// own tabs (Market, EGX30) and the BUY signals are on Picks (pages/picks.js), which reads the same /today.
 import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, todayISO, copyText, STATIC } from '../lib.js';
 import {
-  Icon, Badges, Empty, Callout, PageHead, SectionHead, PageLoading, JobControl, MarketSwitch, Change, Term,
-  SessionBadge, useQuotes, livePosition, PositionCard,
+  Icon, Badges, Empty, Callout, PageHead, SectionHead, PageLoading, JobControl, SessionBadge, useQuotes, livePosition,
+  PositionCard,
 } from '../ui.js';
-import { t, tp, isAr, tn } from '../i18n.js';
-import { Sparkline } from '../charts.js';
+import { t, isAr, tn } from '../i18n.js';
 
 // Summary, Picks and Track record read /today; before the first scan they explain how to get one.
 export function useToday(title) {
@@ -34,11 +33,7 @@ export function TodayPage() {
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
       ${m.warnings.map(w => html`<${Callout} tone="warn">${tn(w)}<//>`)}</div>`}
     ${data.orders && html`<${OrdersCard} o=${data.orders} />`}
-    ${data.positions.length > 0 && html`<${Positions} positions=${data.positions} cfg=${data.cfg} alerts=${alerts} />`}
-    <section class="section">
-      <${SectionHead} title="Market" />
-      <${MarketCard} m=${m} spark=${data.spark} blocked=${blocked} b=${data.breadth} />
-    </section>`;
+    ${data.positions.length > 0 && html`<${Positions} positions=${data.positions} cfg=${data.cfg} alerts=${alerts} />`}`;
 }
 
 // "Today in one minute": the market, the signals and your positions in a few plain sentences, from this page's data.
@@ -76,40 +71,6 @@ function Brief({ data, blocked, alerts }) {
     <ul>${lines.map(l => html`<li>${l}</li>`)}</ul>
     ${data.buys.length > 0 && html`<a class="btn sm primary brief-go" href="#/signals">${t('See the picks')}
       <${Icon} name="chevron" size=${14} /></a>`}
-  </div>`;
-}
-
-function MarketCard({ m, spark, blocked, b }) {
-  const gap = m.egx30_close / m.egx30_ema50 - 1;
-  const text = blocked
-    ? t('EGX30 is below its 50-day average, so the agent makes no new BUY calls until it recovers. Focus on managing your open positions.')
-    : m.risk_off
-      ? t('Weak market: only very strong signals (score ≥ {n}) and at most half the usual number of positions.', { n: fmt.int(m.buy_threshold) })
-      : t('EGX30 is above its 50-day average, so new BUY signals are allowed.');
-  return html`<div class="card market">
-    <div class="market-main">
-      <div class="row" style="justify-content:space-between"><span class="eyebrow">${t('EGX30 index')}</span>
-        ${m.risk_off
-          ? html`<span class="chip riskoff"><span class="dot"></span><${Term} k="riskoff">${t('Weak market')}<//></span>`
-          : html`<span class="chip riskon"><span class="dot"></span>${t('Market OK')}</span>`}</div>
-      <div class="market-price">${fmt.int(m.egx30_close)}<${Change} value=${m.egx30_change} pill /></div>
-      <div class="market-meta"><${Term} k="ema50">${t('50-day average')}<//> ${fmt.int(m.egx30_ema50)} ·${' '}
-        ${tp(gap >= 0 ? 'the index is {pct} above it' : 'the index is {pct} below it',
-          { pct: html`<b class=${tone(gap)}>${fmt.pct(Math.abs(gap), 1, false)}</b>` })}</div>
-      <p class="market-text">${text}</p>
-      ${b && b.switch && html`<div style="margin-top:8px"><${MarketSwitch} sw=${b.switch} compact /></div>`}
-    </div>
-    <div class="market-spark">
-      <div class="spark-legend">
-        <span><span class="legend-dot" style=${`background:var(--${m.risk_off ? 'down' : 'up'})`}></span>${t('EGX30, 6 months')}</span>
-        <span><span class="legend-dot" style="background:var(--warn)"></span>${t('50-day average')}</span></div>
-      <${Sparkline} spark=${spark} />
-    </div>
-    <div class="market-stats">
-      ${b && html`<a href="#/market"><${Term} k="breadth">${t('Stocks in uptrend')}<//>${' '}<b class=${b.tone === 'ok' ? 'up' : b.tone === 'bad' ? 'down' : 'warn'}>${fmt.pct(b.above50, 0, false)}</b>
-        <${Icon} name="chevron" size=${13} /></a>`}
-      <span>${t('Data')}: <b>${fmt.date(m.date)}</b> ${t('close')}</span><span>${t('Last run')} <b>${fmt.datetime(m.finished)}</b></span>
-    </div>
   </div>`;
 }
 
