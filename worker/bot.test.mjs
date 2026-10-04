@@ -82,6 +82,7 @@ assert.match(portfolioText({ ...book, positions: [{ ...book.positions[1], status
   sent: "2026-09-29" }, st.info), /· Sell on a bounce[\s\S]*Stop 51.00[\s\S]*Big loss \(-35.0%\)/)
 assert.match(pt, /Closed trades: 2 · 50.0% won · \+1,500 EGP/)
 assert.match(watchlistText(book, st.info), /COMI<\/b> 128.01  ▼ -0.4% · 13.4% chance in 10 days\n<b>ZZZZ<\/b>/)
+assert.match(watchlistText(book, st.info, "en", ["COMI"]), /<b>COMI<\/b> 🔔 128.01/)              // its BUY bell is on
 console.log("portfolio ok")
 
 // The whole link, on a stand-in for Cloudflare's storage and Telegram

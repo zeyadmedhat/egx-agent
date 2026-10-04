@@ -164,7 +164,8 @@ const EN = {
   wlEmpty: "Your watchlist is empty. Star stocks (☆) on the website.",
   wl: "⭐ <b>Your watchlist</b>",
   wlChance: p => ` · ${p} chance in 10 days`,
-  wlFoot: "<i>Tap a stock, or send its symbol, for more.</i>",
+  wlFoot: "<i>🔔 = a message when it gets a BUY. Tap a bell to turn it on or off, or a stock for more.</i>",
+  bOn: "🔔 On", bOff: "🔕 Off",
   // next week (the website's Predictions → Next week)
   bWeek: "📅 Next week", bX30: "📈 EGX30",
   week: d => `📅 <b>Next week's best chances</b> · from the ${d} close`,
@@ -323,7 +324,8 @@ const AR = {
   wlEmpty: "قائمة متابعتك فارغة. ميّز الأسهم بنجمة (☆) على الموقع.",
   wl: "⭐ <b>قائمة متابعتك</b>",
   wlChance: p => ` · فرصة ${p} خلال 10 أيام`,
-  wlFoot: "<i>اضغط على سهم أو أرسل رمزه للمزيد.</i>",
+  wlFoot: "<i>🔔 = رسالة عندما يحصل على إشارة شراء. اضغط على الجرس لتشغيله أو إيقافه، أو على سهم للمزيد.</i>",
+  bOn: "🔔 مفعّل", bOff: "🔕 متوقف",
   bWeek: "📅 الأسبوع القادم", bX30: "📈 EGX30",
   week: d => `📅 <b>أفضل فرص الأسبوع القادم</b> · من إغلاق ${d}`,
   weekLine: (i, sym, p, tgt, up, stop, strong) => `${i}. <b>${sym}</b> · ${p}${strong ? " · 💪 قوي" : ""}\n` +
@@ -787,15 +789,21 @@ export function shotText(holdings, book, info, lang = "en") {
   return lines.join("\n") + "\n\n" + T.shotFoot(missing > 0)
 }
 
-export function watchlistText(book, info, lang = "en") {
+// bells: the stocks whose BUY alert is on (🔔 beside them; watchButtons turns each on or off).
+export function watchlistText(book, info, lang = "en", bells = []) {
   const T = L(lang), stocks = (info && info.stocks) || {}
   if (!book.watchlist || !book.watchlist.length) return T.wlEmpty
   return T.wl + "\n\n" + book.watchlist.map(sym => {
-    const s = stocks[sym]
-    if (!s) return `<b>${esc(sym)}</b>`
-    return `<b>${esc(sym)}</b> ${px(s.c)}${move(s.ch)}` +
+    const s = stocks[sym], name = `<b>${esc(sym)}</b>${bells.includes(sym) ? " 🔔" : ""}`
+    if (!s) return name
+    return `${name} ${px(s.c)}${move(s.ch)}` +
       (s.a === "BUY" ? " · 🟢 BUY" : "") + (s.p10 != null ? T.wlChance(pct(s.p10)) : "")
   }).join("\n") + "\n\n" + T.wlFoot
+}
+
+// Each starred stock: its card, and its bell (lit 🔔: a tap stops its BUY alert; 🔕: a tap turns it on).
+function watchButtons(syms, bells, T) {
+  return syms.map(sym => [cb(sym, `s:${sym}`), bells.includes(sym) ? cb(T.bOn, `n:${sym}`) : cb(T.bOff, `w:${sym}`)])
 }
 
 // ------------------------------------------------------------------ a broker screenshot, read (the website's import)
@@ -1076,10 +1084,11 @@ export class Bot {
       const book = await store.get("book:" + cid)
       if (!book) return reply(T.notLinked)
       const mine = PORTFOLIO_RE.test(text), app = appButton(state.info, lang, mine ? "portfolio" : "watchlist")
+      const bells = (state.alerts[cid] || []).filter(a => a.kind === "buy").map(a => a.symbol)
       return mine
         ? reply(portfolioText(book, state.info, lang, state.mine && state.mine[cid]), app ? [[app]] : null)
-        : reply(watchlistText(book, state.info, lang), [...symbolButtons((book.watchlist || []).slice(0, 12)),
-                                                        ...(app ? [[app]] : [])])
+        : reply(watchlistText(book, state.info, lang, bells), [...watchButtons((book.watchlist || []).slice(0, 12), bells, T),
+                                                               ...(app ? [[app]] : [])])
     }
     if (STOP_RE.test(text)) await this.forget(cid)       // /stop deletes the copy too; the usual reply follows
     return null
