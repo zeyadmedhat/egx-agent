@@ -13,6 +13,8 @@ on:
     - cron: "20 16 * * 0-4"
     - cron: "20 19 * * 0-4"
     - cron: "40 */3 * * *"      # every 3 hours, every day: connects friends who pressed Start in Telegram
+    - cron: "*/30 7-12 * * 0-4" # during the session (10:00–14:30 Cairo, summer or winter time): the live prices
+                                # scanned every half hour (scan.session_scan_due), scanned again after the close
   workflow_dispatch:            # "Run workflow": the Run scan button on the site opens this page for the owner
     inputs:
       force_scan:

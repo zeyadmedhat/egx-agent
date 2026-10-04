@@ -347,6 +347,8 @@ without a server and without your Mac being on.
 - **Every trading day** GitHub runs the scan by itself after the close (`.github/workflows/site.yml` →
   `app/site_daily.py`): new prices, signals and the prediction model (monthly), then it publishes the site.
   Nothing to do on your side. The run's page on GitHub shows a one-line summary (counts only).
+  During the session (10:00–14:30 Cairo) it also scans the live prices about every half hour
+  (`scan.session_scan_due`; GitHub's timer can start a run late), and an open page shows the new data by itself.
   A scan during trading hours is redone after the close; Telegram waits for that one.
   The site has no Paper Trading or Backtest pages: those stay in the Mac app.
 - **On time.** GitHub starts its timed runs late, or skips them, when it's busy (on 29 Sep 2026 nothing ran between

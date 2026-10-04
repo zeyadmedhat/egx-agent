@@ -42,6 +42,20 @@ def scan_is_final(conn: sqlite3.Connection) -> bool:
     return not (t.date().isoformat() == data_date and t.time() < DATA_READY)
 
 
+SESSION = (time(10, 15), time(14, 45))   # EGX trades 10:00–14:30 Cairo; prices come about 15 minutes late
+
+
+def session_scan_due(conn: sqlite3.Connection, now: datetime | None = None,
+                     every: timedelta = timedelta(minutes=25)) -> bool:
+    """During a session, a scan of the live prices every half hour (the site's runs ask about every 30 minutes). It
+    isn't final (scan_is_final), so it's scanned again after the close and Telegram waits for that one."""
+    now = now or datetime.now(CAIRO)
+    if now.weekday() not in TRADING_WEEKDAYS or not SESSION[0] <= now.time() <= SESSION[1]:
+        return False
+    finished = json.loads(db.get_meta(conn, "market") or "{}").get("finished")
+    return not finished or now - datetime.fromisoformat(finished).astimezone(CAIRO) >= every
+
+
 def scan_is_stale(conn: sqlite3.Connection, retry: timedelta = timedelta(hours=2)) -> bool:
     """Is a newer close due than the last scan? A try that found no new close waits `retry` before the next one."""
     data_date = db.get_meta(conn, "scan_data_date")

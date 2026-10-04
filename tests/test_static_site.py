@@ -374,6 +374,7 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     static_site.export_strategy(dict(config.DEFAULTS), strategy)
     monkeypatch.setattr(config, "CONFIG_PATH", strategy)
     monkeypatch.setattr(scan, "scan_is_stale", lambda conn, *_: False)          # no downloads in tests
+    monkeypatch.setattr(scan, "session_scan_due", lambda conn, *_: False)
     scans = []
     monkeypatch.setattr(scan, "run_scan", lambda conn, cfg, progress=None, update_data=True: scans.append(update_data)
                         or {"date": "x", "buys": 1, "watches": 0})
@@ -452,6 +453,7 @@ def test_scheduled_runs_publish_only_when_something_changed(tmp_path, monkeypatc
     static_site.export_strategy(dict(config.DEFAULTS), strategy)
     monkeypatch.setattr(config, "CONFIG_PATH", strategy)
     monkeypatch.setattr(scan, "scan_is_stale", lambda conn, *_: False)
+    monkeypatch.setattr(scan, "session_scan_due", lambda conn, *_: False)
     monkeypatch.setattr(scan, "run_scan", lambda *a, **k: {"date": "x", "buys": 1, "watches": 0})
     monkeypatch.setattr(jobs, "train_job", lambda conn, say: None)
     first = site_daily.run(src, tmp_path / "site", PASSWORD, "me/egx")

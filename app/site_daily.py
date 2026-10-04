@@ -173,7 +173,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         changed = db.get_meta(conn, "site_strategy") != strategy
 
         # 1. prices and signals
-        if fresh or force_scan or scan.scan_is_stale(conn, RETRY):
+        if fresh or force_scan or scan.scan_is_stale(conn, RETRY) or scan.session_scan_due(conn):
             first = {**cfg, "history_years": prices.DEEP_YEARS} if fresh else cfg
             log("First run: downloading 10 years of prices for every stock." if fresh else "Downloading new prices.")
             market = scan.run_scan(conn, first, progress=_progress("Scan"))
