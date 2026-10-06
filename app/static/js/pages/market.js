@@ -3,7 +3,7 @@
 import { html, useApi, useState, useStore, fmt, tone, stockHref } from '../lib.js';
 import {
   Kpi, Callout, PageHead, SectionHead, PageLoading, DataTable, Empty, MarketSwitch, Seg, Term, SessionBadge,
-  Fold,
+  Fold, More,
 } from '../ui.js';
 import { t, tp, tn } from '../i18n.js';
 import { BreadthChart } from '../charts.js';
@@ -46,6 +46,7 @@ export function MarketPage() {
   return html`
     <${PageHead} title="Market" sub=${t('How many stocks rise with the index, from the {date} close.', { date: fmt.date(b.date) })}>
       <${SessionBadge} dataDate=${b.date} /><//>
+    ${data.mood && html`<${Mood} m=${data.mood} />`}
     <${Callout} tone=${TONE[v.tone]}><b>${t(v.text)}</b>${change != null
       ? ' ' + t(change >= 0 ? '{pct} of {n} stocks are above their 50-day average, up {pts} points in a week.'
         : '{pct} of {n} stocks are above their 50-day average, down {pts} points in a week.',
@@ -107,4 +108,36 @@ function Movers({ data }) {
         <div class="card"><div class="card-title up">${t('1-year highs')} · ${data.highs.length}</div>${chips(data.highs)}</div>
         <div class="card"><div class="card-title down">${t('1-year lows')} · ${data.lows.length}</div>${chips(data.lows)}</div>
       </div><//>`;
+}
+
+// Market mood (egx_agent/mood.py): a fear & greed gauge built like CNN's from six EGX measures, each scored against
+// the last two years. Context only: tested since 2018, it didn't tell where EGX30 went next.
+const MOOD_TONE = s => (s < 45 ? 'down' : s < 56 ? 'warn' : 'up');
+function partValue(p) {
+  if (p.value == null) return '–';
+  return p.key === 'calm' ? t('{x}× its usual swings', { x: fmt.num(-p.value, 2) }) : fmt.pct(p.value, 1);
+}
+function Mood({ m }) {
+  const s = Math.round(m.score);
+  const past = [
+    { key: 'label', label: 'Mood', render: r => html`<b>${t(r.label)}</b>` },
+    { key: 'sessions', label: 'Sessions', align: 'r' },
+    { key: 'up', label: 'Up after a month', align: 'r', fmt: v => fmt.pct(v, 0, false) },
+    { key: 'median', label: 'Typical month', align: 'r', render: r => html`<${Heat} v=${r.median} />` },
+  ];
+  return html`<div class="card mood">
+    <div class="card-title">${t('Market mood')}</div>
+    <div class="mood-head"><b class=${`mood-score ${MOOD_TONE(m.score)}`}>${s}</b>
+      <span><b class=${MOOD_TONE(m.score)}>${t(m.label)}</b><span class="faint"> · ${t('0 = extreme fear, 100 = extreme greed')}</span>
+      ${m.week_ago != null && html`<br /><span class="faint">${t('{n} a week ago', { n: Math.round(m.week_ago) })}</span>`}</span></div>
+    <div class="mood-scale"><span style=${`inset-inline-start:${Math.max(0, Math.min(100, m.score))}%`}></span></div>
+    <div class="mood-parts">${m.parts.map(p => html`<div class="mood-part">
+      <span>${t(p.text)} <span class="faint">${partValue(p)}</span></span>
+      ${p.score == null ? html`<span class="faint">–</span>` : html`<div class="gauge"><b class="gauge-v">${Math.round(p.score)}</b>
+        <div class=${`bar ${MOOD_TONE(p.score)}`}><span style=${`width:${p.score}%`}></span></div></div>`}</div>`)}</div>
+    <${More} label="How it's made, and what it told in the past">
+      <p>${t("Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk.")}</p>
+      <p>${t("Tested since {date}: it didn't tell where EGX30 went next. The differences below are small and changed from one period to another, so use it to know the mood, not to time a buy or a sale.", { date: fmt.date(m.since) })}</p>
+      <${DataTable} columns=${past} rows=${m.past} rowKey=${r => r.label} /><//>
+  </div>`;
 }

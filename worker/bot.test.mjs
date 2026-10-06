@@ -372,7 +372,7 @@ console.log("why, morning, screenshots ok")
 
 { // next week (Predictions → Next week) and EGX30 (Market → EGX30)
   const info = { ...st.info, week: { strong: 0.4815, all: 0.3106, top: 1, weak: false },
-    x30: { d: "2026-10-01", c: 53055, ch: 0.0224, e50: 54220.17, r: { "1W": -0.0134, "1M": -0.0471, YTD: 0.2684, "1Y": 0.5068 },
+    x30: { md: [20, "Extreme fear"], d: "2026-10-01", c: 53055, ch: 0.0224, e50: 54220.17, r: { "1W": -0.0134, "1M": -0.0471, YTD: 0.2684, "1Y": 0.5068 },
            u: { YTD: 0.1563, "1Y": 0.3883 }, ath: -0.0639, hi: 56937.2, lo: 35207.5, off: true, blk: true, b50: 0.324 },
     stocks: { COMI: { ...st.info.stocks.COMI, w: 0.42, wr: 2, wm: 0.05, wl: "good" },
               ABUK: { ...st.info.stocks.ABUK, w: 0.48, wr: 1, wm: 0.06, wl: "good" } } }
@@ -386,6 +386,7 @@ console.log("why, morning, screenshots ok")
   assert.match(await q("/stock comi"), /No signal today<\/b>\n\n📅 <b>Next week<\/b>\n42.0% chance to reach 134.41 before 121.61 · rank 2\n\n🎲 <b>Chance to reach/)
   assert.match(await q("/egx30"), /📈 <b>EGX30<\/b> · 1 Oct\n💰 <b>53,055<\/b>  ▲ \+2.2%\n\n📊 <b>Returns<\/b>\nWeek -1.3% · month -4.7%\nThis year \+26.8% · a year \+50.7%\nIn dollars: this year \+15.6% · a year \+38.8%\n\n📏 <b>1-year range<\/b>\n35,208 – 56,937 · 6.4% under its record\n\n🔴 <b>Under its 50-day average<\/b> \(54,220\)\nThe agent makes no new BUYs.\n32.4% of stocks/)
   assert.equal(callbackText("k"), "/week")
+  assert.match(await q("/egx30"), /\n\n😱 <b>Market mood: Extreme fear<\/b> \(20 of 100\)/)
   assert.equal(callbackText("e"), "/egx30")
   assert.match(await q("/help"), /\/week[\s\S]*\/egx30[\s\S]*📷 Send a screenshot/)
   assert.match(await handle({ ...st, info: { ...st.info, x30: null } }, u("/egx30")), /hasn't reached me/)

@@ -861,6 +861,40 @@ export const AR = {
   "Read these numbers with care.": "اقرأ هذه الأرقام بحذر.",
   "Even its best picks reach the target first only about {pct} of the time, so always use the stop.": "حتى أفضل اختياراته تبلغ الهدف أولًا في نحو {pct} من المرات فقط، لذلك استخدم الوقف دائمًا.",
   "Three more caveats": "ثلاثة تحفظات أخرى",
+  // the fear & greed gauge (egx_agent/mood.py, pages/market.js)
+  "Market mood": "مزاج السوق",
+  "Market mood: {label} ({score} of 100).": "مزاج السوق: {label} ({score} من 100).",
+  "Extreme fear": "خوف شديد", "Fear": "خوف", "Neutral": "محايد", "Greed": "طمع", "Extreme greed": "طمع شديد",
+  "Any mood": "أي مزاج",
+  "0 = extreme fear, 100 = extreme greed": "0 = خوف شديد، 100 = طمع شديد",
+  "{n} a week ago": "{n} قبل أسبوع",
+  "{x}× its usual swings": "{x}× تذبذبه المعتاد",
+  "EGX30 against its 125-day average": "EGX30 مقابل متوسط 125 يومًا",
+  "Stocks at a 1-year high against those at a 1-year low": "الأسهم عند أعلى سعر في عام مقابل الأسهم عند أدنى سعر في عام",
+  "Money traded in rising stocks against falling ones, last 20 sessions": "قيمة التداول في الأسهم الصاعدة مقابل الهابطة، آخر 20 جلسة",
+  "How calm EGX30 is against its usual swings": "هدوء EGX30 مقارنة بتذبذبه المعتاد",
+  "Stocks against gold in pounds, last 20 sessions": "الأسهم مقابل الذهب بالجنيه، آخر 20 جلسة",
+  "Small companies (EGX70) against EGX30, last 20 sessions": "الشركات الصغيرة (EGX70) مقابل EGX30، آخر 20 جلسة",
+  "Mood": "المزاج", "Sessions": "الجلسات", "Up after a month": "صعد بعد شهر", "Typical month": "الشهر المعتاد",
+  "How it's made, and what it told in the past": "كيف يُحسب، وماذا قال في الماضي",
+  "Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk.":
+    "مبني مثل مؤشر الخوف والطمع من CNN. كل مقياس يأخذ درجة من 0 إلى 100 حسب موقع قيمة اليوم بين قيم آخر عامين، والمزاج هو متوسطها. مقاييس الخيارات والسندات عالية المخاطر في CNN غير موجودة في البورصة المصرية؛ لذلك تحل الشركات الصغيرة مقابل EGX30 محل الإقبال على المخاطرة.",
+  "Tested since {date}: it didn't tell where EGX30 went next. The differences below are small and changed from one period to another, so use it to know the mood, not to time a buy or a sale.":
+    "اختُبر منذ {date}: لم يُخبر إلى أين اتجه EGX30 بعدها. الفروق أدناه صغيرة وتغيرت من فترة لأخرى، فاستخدمه لمعرفة المزاج، لا لتوقيت شراء أو بيع.",
+  // past rights issues (egx_agent/corporate.py rights_history, pages/dividends.js)
+  "not set yet": "لم يُحدد بعد",
+  "What happened around {n} past rights issues on EGX (since {year})": "ماذا حدث حول {n} زيادة رأس مال بحق اكتتاب سابقة في البورصة المصرية (منذ {year})",
+  "Bought at the close before the ex-date (the last day that gets the rights): up on the ex-date {up} of the time, typically {median}.":
+    "الشراء عند إغلاق اليوم السابق لتاريخ الاستحقاق (آخر يوم يمنح حق الاكتتاب): ارتفع السهم يوم الاستحقاق في {up} من المرات، عادةً {median}.",
+  "A week later most of that was gone: up {up} of the time, typically {median}.": "بعد أسبوع اختفى معظم ذلك: صاعد في {up} من المرات، عادةً {median}.",
+  "Three months later: up {up} of the time, typically {median}, and ahead of EGX30 {beat} of the time. 1 in 10 lost {p10} or more; 1 in 10 gained {p90} or more.":
+    "بعد ثلاثة أشهر: صاعد في {up} من المرات، عادةً {median}، وأفضل من EGX30 في {beat} من المرات. واحدة من كل 10 خسرت {p10} أو أكثر؛ وواحدة من كل 10 ربحت {p90} أو أكثر.",
+  "Bought on the announcement instead and held to the same day: ahead of EGX30 only {beat} of the time.":
+    "الشراء عند الإعلان بدلًا من ذلك والاحتفاظ حتى نفس اليوم: أفضل من EGX30 في {beat} فقط من المرات.",
+  "Bought on the ex-date itself (no rights then): down a week later {down} of the time, typically {median}.":
+    "الشراء يوم الاستحقاق نفسه (بلا حق اكتتاب): هابط بعد أسبوع في {down} من المرات، عادةً {median}.",
+  "These count the rights at their worth: you get that only if you subscribe and pay for the new shares, or sell the rights while they trade (they can sell for less). New shares can't be sold until they're listed, weeks after the subscription. Past rights issues, not a forecast for any one stock.":
+    "هذه الأرقام تحسب حق الاكتتاب بقيمته: تحصل عليها فقط إذا اكتتبت ودفعت ثمن الأسهم الجديدة، أو بعت الحقوق أثناء تداولها (وقد تُباع بأقل). لا يمكن بيع الأسهم الجديدة حتى تُقيد، بعد أسابيع من الاكتتاب. هذه زيادات سابقة، وليست توقعًا لسهم بعينه.",
   // market mood (egx_agent/breadth.py texts)
   "Broad strength: most stocks are in uptrends.": "قوة واسعة: معظم الأسهم في اتجاه صاعد.",
   "Mixed: only about half of stocks are above their 50-day average.": "أداء مختلط: نحو نصف الأسهم فقط فوق متوسط 50 يومًا.",

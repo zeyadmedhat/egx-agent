@@ -46,7 +46,8 @@ export function DividendsPage() {
     { key: 'text', label: 'What happened', render: r => html`<span class="muted">${r.text}</span>` },
   ];
   const actionCols = [
-    { key: 'effective', label: 'Ex-date', title: 'The price adjusts at the open that day', fmt: v => html`<b>${fmt.date(v)}</b>` },
+    { key: 'effective', label: 'Ex-date', title: 'The price adjusts at the open that day',
+      fmt: v => (v ? html`<b>${fmt.date(v)}</b>` : html`<span class="faint">${t('not set yet')}</span>`) },
     stock,
     { key: 'label', label: 'What', render: r => html`${r.label}${r.kind === 'dividend'
       ? html`<span class="faint"> · amount not in yet</span>` : ''}` },
@@ -71,6 +72,7 @@ export function DividendsPage() {
         hint="From Mubasher's list of the exchange's filings. Bonus shares and splits re-base the price (you get more shares); a rights issue usually adjusts it. Cash dividends here don't have an amount on TradingView yet." />
       <div class="card flush"><${DataTable} columns=${actionCols} rows=${actions} rowKey=${r => r.symbol + r.type + r.effective}
         onRowClick=${open} empty="Nothing else announced for the coming weeks." /></div>
+      ${data.rights_history && html`<${RightsPast} h=${data.rights_history} open=${actions.some(a => a.kind === 'rights')} />`}
     </section>
     <section class="section">
       <${SectionHead} title=${show === 'mine' ? 'Yields of your stocks' : 'Highest yields'}
@@ -110,4 +112,18 @@ function Results({ rows }) {
     <${More} label="Where these dates come from">
       <p>${t("TradingView estimates each company's next results date from when it reported before; EGX companies often publish a few days earlier or later. Only companies that reported on TradingView in the last 13 months are listed.")}</p><//>
   </section>`;
+}
+
+// What EGX stocks did around their past rights issues (egx_agent/corporate.py rights_history). Facts, not a forecast.
+function RightsPast({ h, open }) {
+  const p = v => fmt.pct(v, 0, false), r = v => fmt.pct(v, 1);
+  return html`<${More} label=${t('What happened around {n} past rights issues on EGX (since {year})', { n: h.n, year: h.since })} open=${open}>
+    <ul class="reasons">
+      <li>${t('Bought at the close before the ex-date (the last day that gets the rights): up on the ex-date {up} of the time, typically {median}.', { up: p(h.ex_day.up), median: r(h.ex_day.median) })}</li>
+      <li>${t('A week later most of that was gone: up {up} of the time, typically {median}.', { up: p(h.week.up), median: r(h.week.median) })}</li>
+      <li>${t('Three months later: up {up} of the time, typically {median}, and ahead of EGX30 {beat} of the time. 1 in 10 lost {p10} or more; 1 in 10 gained {p90} or more.', { up: p(h.quarter.up), median: r(h.quarter.median), beat: p(h.quarter.beat), p10: fmt.pct(-h.quarter.p10, 0, false), p90: fmt.pct(h.quarter.p90, 0, false) })}</li>
+      <li>${t('Bought on the announcement instead and held to the same day: ahead of EGX30 only {beat} of the time.', { beat: p(h.announced.beat) })}</li>
+      <li>${t('Bought on the ex-date itself (no rights then): down a week later {down} of the time, typically {median}.', { down: p(1 - h.after.up), median: r(h.after.median) })}</li>
+    </ul>
+    <p class="faint">${t("These count the rights at their worth: you get that only if you subscribe and pay for the new shares, or sell the rights while they trade (they can sell for less). New shares can't be sold until they're listed, weeks after the subscription. Past rights issues, not a forecast for any one stock.")}</p><//>`;
 }

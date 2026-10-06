@@ -10,7 +10,7 @@ from datetime import date, datetime
 import numpy as np
 import pandas as pd
 
-from egx_agent import breadth, config, corporate, db, levels, portfolio, predict, record, risk, scan, strategy
+from egx_agent import breadth, config, corporate, db, levels, mood, portfolio, predict, record, risk, scan, strategy
 from egx_agent.data import dividends, fundamentals, macro, news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
@@ -400,6 +400,7 @@ def today(d: Data) -> dict:
         "positions": positions, "spark": spark, "orders": orders(d, positions),
         "breadth": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
                     **breadth.verdict(b, m.get("risk_off") if m else None)} if b else None,
+        "mood": mood_brief(d),
         "paper": {"equity": paper["equity"], "return_pct": paper["return_pct"], "open": paper["open_count"],
                   "last_scan": json.loads(paper_scan) if paper_scan else None},
         "model": {k: preds[k] for k in ("base", "count", "date")} if preds["by_symbol"] else None,
@@ -640,8 +641,17 @@ def dividend_calendar(d: Data) -> dict:
         coming = [a for a in news.actions(d.conn, since=today, kinds=("dividend", "bonus", "split", "rights"))
                   if a["symbol"] in d.table.index and a["effective"]
                   and not (a["kind"] == "dividend" and _near(have, a["symbol"], a["effective"]))]
+        # rights issues announced in the last 6 months with no ex-date yet (none since, or it's an older one's row)
+        last_ex = dict(d.conn.execute("SELECT symbol, MAX(effective) FROM corp_actions WHERE kind = 'rights' "
+                                      "AND effective != '' GROUP BY symbol").fetchall())
+        undated = {}
+        for a in news.actions(d.conn, since=(date.today() - pd.Timedelta(days=183)).isoformat(), kinds=("rights",)):
+            if not a["effective"] and a["symbol"] in d.table.index and (last_ex.get(a["symbol"]) or "") < a["announced"]:
+                undated.setdefault(a["symbol"], a)
         return clean({"today": today, "updated": updated, "min_value": d.cfg["min_avg_value_egp"], "dividends": cash,
-                      "yields": yields, "bonus": bonus, "coming": sorted(coming, key=lambda a: a["effective"])})
+                      "yields": yields, "bonus": bonus,
+                      "coming": sorted(coming, key=lambda a: a["effective"]) + list(undated.values()),
+                      "rights_history": corporate.rights_history(d.conn, today)})
     return d.cache.get(d.version, ("dividends",), build)
 
 
@@ -996,6 +1006,17 @@ def breadth_data(d: Data) -> dict | None:
     return d.cache.get(d.version, "breadth", build)
 
 
+def mood_data(d: Data) -> dict | None:
+    """The market mood gauge (egx_agent/mood.py): the Market page's card."""
+    return d.cache.get(d.version, "mood", lambda: clean(mood.compute(mood.load(d.conn))))
+
+
+def mood_brief(d: Data) -> dict | None:
+    """Just the gauge, for Home, the evening message and the bot."""
+    x = mood_data(d)
+    return {k: x[k] for k in ("date", "score", "label", "week_ago")} if x else None
+
+
 JUMP = 0.30   # a one-day move this big can't happen within EGX's daily price limits
 
 
@@ -1055,9 +1076,9 @@ def market_view(d: Data) -> dict:
     b = breadth_data(d)
     m = market_info(d.conn)
     if not b:
-        return {"breadth": None, "market": m or None, "results": results_calendar(d)}
+        return {"breadth": None, "market": m or None, "results": results_calendar(d), "mood": mood_data(d)}
     return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("risk_off") if m else None), "market": m or None,
-                  "results": results_calendar(d), **movers(d)})
+                  "results": results_calendar(d), "mood": mood_data(d), **movers(d)})
 
 
 INDEX_PERIODS = (("1W", 5), ("1M", 21), ("3M", 63), ("6M", 126), ("1Y", 250), ("3Y", 750), ("5Y", 1250))

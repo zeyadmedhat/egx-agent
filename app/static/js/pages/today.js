@@ -51,6 +51,10 @@ function Brief({ data, blocked, alerts }) {
     lines.push(t('{up} stocks rose and {down} fell; {above} are above their 50-day average.',
       { up: b.advancers, down: b.decliners, above: fmt.pct(b.above50, 0, false) }));
   }
+  if (data.mood) {
+    lines.push(html`<a href="#/market">${t('Market mood: {label} ({score} of 100).',
+      { label: t(data.mood.label), score: Math.round(data.mood.score) })}</a>`);
+  }
   if (m.risk_off) lines.push(t(blocked ? 'Weak market: no new BUYs until EGX30 recovers.' : 'Weak market: only very strong BUYs, and fewer of them.'));
   const syms = data.buys.map(x => x.symbol).join(isAr() ? '، ' : ', ');
   if (!data.buys.length) { if (!blocked) lines.push(t('No BUY signals for the next session.')); } else {

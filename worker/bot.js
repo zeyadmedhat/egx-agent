@@ -184,6 +184,7 @@ const EN = {
   x30Up: e => `🟢 <b>Above its 50-day average</b> (${e})\nThe BUY rules are on.`,
   x30Down: (e, blk) => `🔴 <b>Under its 50-day average</b> (${e})` + (blk ? "\nThe agent makes no new BUYs." : ""),
   x30Breadth: b => `${b} of stocks are above their own 50-day average.`,
+  x30Mood: (n, l) => `${MOOD_ICON[l] || ""} <b>Market mood: ${l}</b> (${n} of 100)`,
   // a broker screenshot sent here, against the website's portfolio
   shotReading: "📷 Reading your screenshot…",
   shotNone: "I found no holdings on that picture. Send a screenshot of your broker's list of stocks or a stock's screen.",
@@ -341,6 +342,7 @@ const AR = {
   x30Up: e => `🟢 <b>فوق متوسط 50 يومًا</b> (${e})\nقواعد الشراء تعمل.`,
   x30Down: (e, blk) => `🔴 <b>تحت متوسط 50 يومًا</b> (${e})` + (blk ? "\nلا يشتري الوكيل جديدًا." : ""),
   x30Breadth: b => `${b} من الأسهم فوق متوسط 50 يومًا الخاص بها.`,
+  x30Mood: (n, l) => `${MOOD_ICON[l] || ""} <b>مزاج السوق: ${MOOD_AR[l] || l}</b> (${n} من 100)`,
   shotReading: "📷 أقرأ صورتك…",
   shotNone: "لم أجد أسهمًا في هذه الصورة. أرسل صورة لقائمة أسهمك في تطبيق السمسرة أو لشاشة سهم.",
   shotFail: "لم أستطع قراءة الصورة الآن. حاول بعد دقيقة.",
@@ -417,6 +419,9 @@ const menuButtons = T => [[cb(T.bBuys, "b"), cb(T.bWeek, "k")], [cb(T.bTop, "t")
 // Every reply in the same shape: a bold title with an emoji, short sections with a blank line between them, each
 // stock's symbol in bold with its numbers under it, and the fine print in italics at the end.
 const block = (...lines) => lines.filter(Boolean).join("\n")
+// The fear & greed gauge (egx_agent/mood.py) on /egx30
+const MOOD_ICON = { "Extreme fear": "😱", Fear: "😟", Neutral: "😐", Greed: "😀", "Extreme greed": "🤑" }
+const MOOD_AR = { "Extreme fear": "خوف شديد", Fear: "خوف", Neutral: "محايد", Greed: "طمع", "Extreme greed": "طمع شديد" }
 const move = ch => (ch != null ? `  ${ch < 0 ? "▼" : "▲"} ${pct(ch, true)}` : "")
 
 function signalBlock(s, T) {
@@ -528,6 +533,7 @@ function egx30(info, lang) {
     block(T.x30Ret(r), x.u && x.u.YTD != null ? T.x30Usd(pct(x.u.YTD, true), x.u["1Y"] != null ? pct(x.u["1Y"], true) : "–") : null),
     T.x30Range(egp(x.lo), egp(x.hi), x.ath < -0.0005 ? pct(-x.ath) : null),
     block(x.off ? T.x30Down(egp(x.e50), x.blk) : T.x30Up(egp(x.e50)), x.b50 != null ? T.x30Breadth(pct(x.b50)) : null),
+    ...(x.md ? [T.x30Mood(x.md[0], x.md[1])] : []),
   ].join("\n\n")
   const app = appButton(info, lang, "egx30")
   return reply(text, [[cb(T.bWeek, "k"), cb(T.bBuys, "b")], ...(app ? [[app]] : [])])

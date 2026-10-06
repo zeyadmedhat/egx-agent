@@ -195,6 +195,21 @@ def _switch_line(v: dict, lang: str = "en") -> str:
     return f"Market switch: {SWITCH_ICON[sw['state']]} {sw['label']} (for the model's picks)"
 
 
+MOOD_ICON = {"Extreme fear": "😱", "Fear": "😟", "Neutral": "😐", "Greed": "😀", "Extreme greed": "🤑"}
+MOOD_AR = {"Extreme fear": "خوف شديد", "Fear": "خوف", "Neutral": "محايد", "Greed": "طمع", "Extreme greed": "طمع شديد"}
+
+
+def _mood_line(d, lang: str = "en") -> str | None:
+    """The fear & greed gauge (egx_agent/mood.py) in one line, or None before there's enough history."""
+    x = views.mood_brief(d)
+    if not x:
+        return None
+    s = round(x["score"])
+    if lang == "ar":
+        return f"مزاج السوق: {MOOD_ICON[x['label']]} {MOOD_AR[x['label']]} ({s} من 100)"
+    return f"Market mood: {MOOD_ICON[x['label']]} {x['label']} ({s} of 100)"
+
+
 def _caution_lines(items: list[dict], indent: str = "      ", lang: str = "en") -> list[str]:
     """A signal's or position's cautions (views.cautions_map), one short line each."""
     out, ar = [], lang == "ar"
@@ -263,6 +278,8 @@ def build_message(d: views.Data) -> tuple[str, bool]:
         week = f" ({v['change_week'] * 100:+.0f} pts in a week)" if v["change_week"] is not None else ""
         head.append(f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
         head.append(_switch_line(v))
+    if line := _mood_line(d):
+        head.append(line)
 
     preds = views.predictions(d)
     warn = views.cautions_map(d)
@@ -341,6 +358,8 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
         lines.append(f"الاتساع: {b['above50']:.0%} من الأسهم فوق متوسط 50 يومًا{week}" if ar else
                      f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
         lines.append(_switch_line(v, lang))
+    if line := _mood_line(d, lang):
+        lines.append(line)
     preds = views.predictions(d)
     warn = views.cautions_map(d)
     if ar:
@@ -883,7 +902,8 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
                "r": {k: _r((per.get(k) or {}).get("egp"), 4) for k in ("1W", "1M", "YTD", "1Y")},
                "u": {k: _r((per.get(k) or {}).get("usd"), 4) for k in ("YTD", "1Y")},
                "ath": _r(x["from_ath"], 4), "hi": _r(x["high52"], 2), "lo": _r(x["low52"], 2),
-               "off": x["close"] < x["ema50"], "blk": bool(cfg.get("riskoff_block_buys")), "b50": _r(x["above50"], 3)}
+               "off": x["close"] < x["ema50"], "blk": bool(cfg.get("riskoff_block_buys")), "b50": _r(x["above50"], 3),
+               "md": [round(md["score"]), md["label"]] if (md := views.mood_brief(d)) else None}
     # final: False while the scan is one taken during the session (the Worker then still asks for the one after it)
     return {"scan": scan_date, "final": scan.scan_is_final(conn), "pred": db.get_meta(conn, "prediction_date"),
             "stocks": stocks, "bands": [[b["from"], b["to"], _r(b["hit"], 4), _r(b["ret"], 4)] for b in preds.get("bands") or []],
@@ -991,6 +1011,8 @@ def build_weekly(d: views.Data, site_url: str = "", mine: bool = True, lang: str
     m = views.market_info(d.conn)
     if b:
         lines.append(_switch_line(breadth.verdict(b, m.get("risk_off") if m else None), lang))
+    if line := _mood_line(d, lang):
+        lines.append(line)
 
     week_rows = d.conn.execute("SELECT scan_date, symbol, source FROM scans WHERE action='BUY' AND scan_date >= ? "
                                "ORDER BY scan_date", (week,)).fetchall()

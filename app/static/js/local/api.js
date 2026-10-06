@@ -241,7 +241,7 @@ async function today(c) {
   return {
     market: core.market ? { ...core.market, buys: buys.length, warnings: [...early, ...(core.market.warnings || [])] } : null,
     scan_date: scanDate, buys, watch, positions,
-    spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today, paper: null,
+    spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today, mood: core.mood_today || null, paper: null,
     model: Object.keys(preds.by_symbol).length ? { base: preds.base, count: preds.count, date: preds.date } : null,
     cfg: { ...Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
       'shariah_filter'].map(k => [k, cfg[k]])), fee_pct_per_side: E.feePct(cfg) },

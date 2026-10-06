@@ -1036,6 +1036,17 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 [dir="rtl"] .k-value, [dir="rtl"] .l-value, [dir="rtl"] .l-sub { text-align: right; }
 [dir="rtl"] .stat-list .v, [dir="rtl"] .table td.r { text-align: left; }
 .gauge-v { width: 42px; flex: none; text-align: end; }
+/* Market mood (pages/market.js): the score, a fear-to-greed scale with a marker, and its six parts */
+.mood { margin-bottom: 14px; }
+.mood-head { display: flex; align-items: center; gap: 14px; }
+.mood-score { font-size: 40px; line-height: 1; font-variant-numeric: tabular-nums; }
+.mood-scale { position: relative; height: 8px; margin: 14px 0 16px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--down), var(--warn) 50%, var(--up)); }
+[dir="rtl"] .mood-scale { background: linear-gradient(270deg, var(--down), var(--warn) 50%, var(--up)); }
+.mood-scale > span { position: absolute; top: -4px; width: 4px; height: 16px; margin-inline-start: -2px;
+  border-radius: 2px; background: var(--text); }
+.mood-parts { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.mood-part { display: grid; grid-template-columns: 1fr minmax(120px, 34%); gap: 12px; align-items: center; }
 .shariah-note { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .shariah-note svg.icon { color: var(--up); }
 

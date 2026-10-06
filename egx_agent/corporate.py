@@ -193,3 +193,58 @@ def dividends_by_trade(conn: sqlite3.Connection, account: str = "real") -> dict[
 
 def dividends_df(conn: sqlite3.Connection, trade_id: int) -> pd.DataFrame:
     return pd.read_sql_query("SELECT * FROM dividends WHERE trade_id=? ORDER BY date, id", conn, params=(trade_id,))
+
+
+WEEK, QUARTER = 5, 60          # sessions after the ex-date
+
+
+def rights_history(conn: sqlite3.Connection, today: str | None = None) -> dict | None:
+    """What EGX stocks did around their past rights issues (Mubasher's list), for the Dividends page: bought at the close
+    before the ex-date (the last day that gets the rights), at the announcement, or on the ex-date itself. The prices are
+    re-based, which counts each right at its worth, so these are the returns of a holder who subscribed (or sold the
+    rights for what they were worth). A history TradingView didn't re-base (a fall of more than 20% that day) is left
+    out, as is any without 60 sessions after it yet."""
+    today = today or date.today().isoformat()
+    ev = pd.read_sql_query("SELECT DISTINCT symbol, announced, effective FROM corp_actions WHERE kind = 'rights' "
+                           "AND effective != '' AND effective < ?", conn, params=(today,))
+    if ev.empty:
+        return None
+    syms = sorted(set(ev["symbol"]) | {"EGX30"})
+    px = pd.read_sql_query(f"SELECT symbol, date, close FROM prices WHERE symbol IN ({','.join('?' * len(syms))})",
+                           conn, params=syms)
+    px["date"] = pd.to_datetime(px["date"])
+    wide = px.pivot(index="date", columns="symbol", values="close")
+    if "EGX30" not in wide:
+        return None
+    idx = wide.pop("EGX30").dropna()
+    wide = wide.reindex(idx.index).ffill(limit=5)
+    rows = []
+    for e in ev.drop_duplicates(["symbol", "effective"]).itertuples():
+        if e.symbol not in wide:
+            continue
+        c = wide[e.symbol]
+        i = int(c.index.searchsorted(pd.Timestamp(e.effective)))
+        if i < 1 or i + QUARTER >= len(c) or pd.isna(c.iloc[i - 1]) or pd.isna(c.iloc[i]) or pd.isna(c.iloc[i + QUARTER]):
+            continue
+        if c.iloc[i] / c.iloc[i - 1] < 0.8:
+            continue
+        ret = lambda a, b: c.iloc[b] / c.iloc[a] - 1                                      # noqa: E731
+        beat = lambda a, b: ret(a, b) - (idx.iloc[b] / idx.iloc[a] - 1)                  # noqa: E731
+        a = int(c.index.searchsorted(pd.Timestamp(e.announced))) if e.announced else -1
+        rows.append({"year": c.index[i].year, "ex_day": ret(i - 1, i), "week": ret(i - 1, i + WEEK),
+                     "quarter": ret(i - 1, i + QUARTER), "beat": beat(i - 1, i + QUARTER), "after": ret(i, i + WEEK),
+                     "ann_beat": beat(a, i + QUARTER) if 0 <= a < i and pd.notna(c.iloc[a]) else None})
+    if len(rows) < 10:
+        return None
+    df = pd.DataFrame(rows)
+    up = lambda s: float((s.dropna() > 0).mean())                                       # noqa: E731
+    q = df["quarter"]
+    return {
+        "n": len(df), "since": int(df["year"].min()),
+        "ex_day": {"median": float(df["ex_day"].median()), "up": up(df["ex_day"])},
+        "week": {"median": float(df["week"].median()), "up": up(df["week"])},
+        "quarter": {"median": float(q.median()), "up": up(q), "beat": up(df["beat"]),
+                    "p10": float(q.quantile(0.1)), "p90": float(q.quantile(0.9))},
+        "after": {"median": float(df["after"].median()), "up": up(df["after"])},
+        "announced": {"beat": up(df["ann_beat"].astype(float))},
+    }

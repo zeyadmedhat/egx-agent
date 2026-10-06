@@ -191,6 +191,45 @@ def test_breadth_counts_stocks_above_their_averages():
     assert breadth.verdict(b, index_risk_off=False)["tone"] == "ok"
 
 
+def _mood_market(last: np.ndarray) -> dict:
+    """1,000 sessions: a calm, slowly rising market, then `last` daily moves of EGX30 that the stocks follow and
+    small caps (EGX70) follow 1.5 times over; gold stays flat."""
+    rng = np.random.default_rng(7)
+    moves = np.r_[0.0005 + rng.normal(0, 0.01, 1000 - len(last)), last]
+    days = pd.bdate_range("2022-01-02", periods=1000, freq="C", weekmask="Sun Mon Tue Wed Thu")
+    index = pd.Series(1000 * np.cumprod(1 + moves), index=days)
+    close = pd.DataFrame({f"S{k}": index * (k + 1) * (1 + rng.normal(0, 0.002, 1000)) for k in range(5)}, index=days)
+    return {"close": close, "volume": pd.DataFrame(1e6, index=days, columns=close.columns), "index": index,
+            "gold": pd.Series(100.0, index=days), "egx70": pd.Series(500 * np.cumprod(1 + 1.5 * moves), index=days)}
+
+
+def test_market_mood_is_fear_after_a_fall_and_greed_after_a_steady_climb():
+    from egx_agent import mood
+    fall = mood.compute(_mood_market(np.tile([-0.05, 0.01], 10)))
+    climb = mood.compute(_mood_market(np.full(20, 0.015)))
+    assert fall["score"] < 25 and fall["label"] == "Extreme fear"
+    assert climb["score"] >= 76 and climb["label"] == "Extreme greed"
+    assert [p["key"] for p in fall["parts"]] == list(mood.PARTS)
+    assert fall["past"][-1]["label"] == "Any mood" and len(fall["history"]["time"]) == 250
+    assert [mood.label(s) for s in (0, 24.9, 25, 50, 56, 75.9, 76, 100)] == [
+        "Extreme fear", "Extreme fear", "Fear", "Neutral", "Greed", "Greed", "Extreme greed", "Extreme greed"]
+
+
+def test_past_rights_issues_are_measured_from_the_close_before_the_ex_date(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    days = make_ohlcv(np.ones(120), start="2026-01-04").index
+    db.upsert_prices(conn, "EGX30", _frame(np.full(120, 1000.0)))
+    for k in range(11):          # +5% on the ex-date (R10's history wasn't re-based: −50%, left out)
+        sym = f"R{k:02d}"
+        db.upsert_prices(conn, sym, _frame(np.r_[np.full(40, 10.0), np.full(80, 10.5 if k < 10 else 5.0)]))
+        conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective) VALUES (?, 'rights', 'R', ?, ?)",
+                     (sym, str(days[10].date()), str(days[40].date())))
+    h = corporate.rights_history(conn, today="2026-12-31")
+    assert h["n"] == 10 and h["ex_day"] == {"median": pytest.approx(0.05), "up": 1.0}
+    assert h["quarter"]["beat"] == 1.0 and h["announced"]["beat"] == 1.0 and h["after"]["up"] == 0.0
+    assert corporate.rights_history(conn, today=str(days[40].date())) is None     # not past its ex-date yet
+
+
 def test_market_page_loads(client):  # noqa: F811
     m = client.get("/api/market").json()
     assert m["breadth"]["stocks"] == 2 and m["verdict"]["text"]
