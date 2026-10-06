@@ -27,7 +27,7 @@ const OPS = {
       if (s.op === 'sell') out.push(E.sellReal(book, cfg, s.trade_id, s.date, s.price, s.shares, s.reason));
       if (s.op === 'dividend') out.push(E.addDividend(book, s.trade_id, s.date, s.amount, s.note).per_share);
       if (s.op === 'pending') out.push(E.pending(book, events, 'real'));
-      if (s.op === 'apply') out.push(E.applyEvent(book, s.trade_id, events.find(e => e.id === s.event_id), s.shares, s.today));
+      if (s.op === 'apply') out.push(E.applyEvent(book, s.trade_id, events.find(e => e.id === s.event_id), s.shares, s.today, s.paid || 0));
       // editing transactions (local/api.js editFill / deleteFill / addFillTo): fill is its place in book.fills
       const at = () => ({ atr: s.atr, chart: null });
       if (s.op === 'edit') {

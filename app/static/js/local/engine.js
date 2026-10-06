@@ -336,32 +336,48 @@ export function pending(book, events, account = 'real') {
     for (const t of book.trades) {
       if (t.account !== account || !['open', 'pending'].includes(t.status) || t.symbol !== e.symbol) continue;
       if (!((t.entry_date || t.signal_date) < e.ex_date) || done.has(`${e.id}|${t.id}`) || out[t.id]) continue;
-      out[t.id] = { event_id: e.id, symbol: e.symbol, ex_date: e.ex_date, factor: e.factor, describe: describe(e.factor),
-        shares_now: t.shares, shares_expected: expectedShares(t.shares, e.factor) };
+      // a rights issue (corporate.pending): how many new shares you subscribed to is yours to say
+      out[t.id] = { event_id: e.id, symbol: e.symbol, ex_date: e.ex_date, factor: e.factor, rights: !!e.rights,
+        describe: e.rights ? `a rights issue, past prices divided by ${g(+e.factor.toPrecision(4))}` : describe(e.factor),
+        shares_now: t.shares, shares_expected: e.rights ? t.shares : expectedShares(t.shares, e.factor) };
     }
   }
   return out;
 }
 
-// Update a position to its new share count; prices and levels move by the same ratio, so its cost is unchanged.
-export function applyEvent(book, tradeId, event, newShares, today) {
+// The average price on the new prices (corporate.new_average). Bonus shares or a split: the same cost over more
+// shares. A rights issue: the new shares add what they cost (paid each); kept the old count (sold the rights): the
+// shares are worth ÷ factor and the rest came back as the rights' price, so the cost goes ÷ factor too.
+export function newAverage(avg, old, n, factor, rights, paid = 0) {
+  if (rights && n === old) return avg / factor;
+  return (avg * old + Math.max(n - old, 0) * paid) / n;
+}
+
+// Update a position to its new share count; its levels (your own stop too) move with the prices (÷ the event's factor).
+export function applyEvent(book, tradeId, event, newShares, today, paid = 0) {
   const t = book.trades.find(x => x.id === tradeId && ['open', 'pending'].includes(x.status));
   if (!t || !event || event.symbol !== t.symbol) throw new Error('This position or event no longer exists. Refresh the page.');
   newShares = Math.trunc(newShares);
   if (newShares < 1) throw new Error('Enter how many shares you hold now.');
   const old = Math.trunc(t.shares);
   const ratio = newShares / old;
-  const avg = t.entry_price;
+  const f = +event.factor, rights = !!event.rights;
+  if (!rights) paid = 0;
+  const avg = t.entry_price ? newAverage(t.entry_price, old, newShares, f, rights, paid) : null;
   t.shares = newShares;
-  for (const k of ['entry_price', 'initial_stop', 'stop', 'target', 'highest_close', 'entry_limit']) {
-    if (t[k] !== null && t[k] !== undefined) t[k] /= ratio;
+  t.entry_price = avg;
+  for (const k of ['initial_stop', 'stop', 'target', 'highest_close', 'entry_limit', 'my_stop']) {
+    if (t[k] !== null && t[k] !== undefined) t[k] /= f;
   }
   if (t.account === 'real') {
-    addFill(book, t.id, t.symbol, event.ex_date, 'bonus', newShares - old, 0, 0,
-      `${describe(event.factor)}: ${int(old)} → ${int(newShares)} shares`);
+    const note = !rights ? `${describe(f)}: ${int(old)} → ${int(newShares)} shares`
+      : newShares > old ? `Rights issue: ${int(newShares - old)} new shares at ${g(paid)}, ${int(old)} → ${int(newShares)} shares`
+        : `Rights issue: kept ${int(old)} shares, prices ÷ ${g(+f.toPrecision(4))}`;
+    addFill(book, t.id, t.symbol, event.ex_date, 'bonus', newShares - old, paid, 0, note);
+    if (rights) book.fills.at(-1).factor = f;          // so rebuildTrade can follow it
   }
   setAdjustment(book, event.id, t.id, 'applied', ratio, today);
-  return { symbol: t.symbol, old, new: newShares, ratio, avg: avg ? avg / ratio : null };
+  return { symbol: t.symbol, old, new: newShares, ratio, avg };
 }
 
 export function ignoreEvent(book, tradeId, eventId, today) {
@@ -504,8 +520,10 @@ export function rebuildTrade(book, cfg, tradeId, at) {
       shares += f.shares; fees += f.fees || 0;
       first = first || f.date; lastBuy = f; avgAtBuy = avg; scale = 1;
     } else if (f.side === 'bonus' && shares) {
-      const r = (shares + f.shares) / shares;
-      avg /= r; shares += f.shares; scale *= r;
+      // bonus shares or a split: prices ÷ the share ratio; a rights issue carries its own factor (applyEvent)
+      const r = f.factor || (shares + f.shares) / shares;
+      avg = newAverage(avg, shares, shares + f.shares, r, !!f.factor, f.price || 0);
+      shares += f.shares; scale *= r;
     } else if (f.side === 'sell') {
       if (f.shares > shares) {
         throw new Error(`On ${f.date} you'd sell ${int(f.shares)} shares, but you held ${int(shares)} then.`);

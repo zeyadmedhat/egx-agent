@@ -196,6 +196,57 @@ def test_your_trades_bonus_shares_and_dividends_match(tmp_path, cfg):
 
 
 @needs_node
+def test_a_rights_issue_subscribed_or_not_matches(tmp_path, cfg):
+    """KORA-like: 0.9 new share per share at 0.205 against a 6.50 price re-bases past prices ÷ 1.848. AAA subscribed
+    (1,000 → 1,900 shares, paying 0.205 each), BBB sold its rights (kept 1,000). Python and the browser agree."""
+    conn = db.connect(tmp_path / "real.db")
+    t1 = portfolio.add_real_buy(conn, cfg, "AAA", "2026-01-05", 6.5, 1000, 0.3, "Energy")
+    t2 = portfolio.add_real_buy(conn, cfg, "BBB", "2026-01-05", 6.5, 1000, 0.3, "Energy")
+    for sym in ("AAA", "BBB"):
+        conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) "
+                     "VALUES (?, 'rights', 'Capital Increase - Rights Issue', '2026-01-10', '2026-01-20', '', 'x')", (sym,))
+        conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES (?, '2026-01-20', 1.848, 'x')",
+                     (sym,))
+    conn.commit()
+    events = corporate.events(conn)
+    pend = corporate.pending(conn, "real")
+    assert all(e["rights"] for e in events) and pend[t1]["rights"] and pend[t1]["shares_expected"] == 1000
+    assert corporate.adjust_problem(1000, pend[t1], 900) and corporate.adjust_problem(1000, pend[t1], 1900, 0)
+    before = conn.execute("SELECT * FROM trades WHERE id=?", (t1,)).fetchone()
+    a = corporate.apply(conn, t1, pend[t1]["event_id"], 1900, 0.205)
+    b = corporate.apply(conn, t2, pend[t2]["event_id"], 1000)
+    assert a["avg"] == pytest.approx((before["entry_price"] * 1000 + 900 * 0.205) / 1900)   # what you paid in all
+    assert b["avg"] == pytest.approx(before["entry_price"] / 1.848)
+    aaa = conn.execute("SELECT * FROM trades WHERE id=?", (t1,)).fetchone()
+    assert aaa["stop"] == pytest.approx(before["stop"] / 1.848)                             # follows the prices
+    closes = {"AAA": 3.6, "BBB": 3.6}
+    summary = portfolio.account_summary(conn, "real", cfg, closes)
+    trades = portfolio.trades_df(conn, "real").to_dict("records")
+    fills = [dict(r) for r in conn.execute("SELECT * FROM fills ORDER BY id")]
+
+    buy = {"op": "buy", "sector": "Energy", "stop": None, "notes": "", "date": "2026-01-05", "price": 6.5, "shares": 1000,
+           "atr": 0.3}
+    steps = [{**buy, "symbol": "AAA"}, {**buy, "symbol": "BBB"}, {"op": "pending"},
+             {"op": "apply", "trade_id": 1, "event_id": "AAA:2026-01-20", "shares": 1900, "paid": 0.205, "today": "2026-01-21"},
+             {"op": "apply", "trade_id": 3, "event_id": "BBB:2026-01-20", "shares": 1000, "today": "2026-01-21",
+              "closes": closes}]
+    (js,) = run_js({"op": "real", "args": {"cfg": cfg, "steps": steps, "events": events}})
+    assert_same(pend[t1], js["out"][2]["1"], ("factor", "rights", "describe", "shares_now", "shares_expected"))
+    assert_same(a, js["out"][3], ("old", "new", "ratio", "avg"))
+    assert_same(b, js["out"][4], ("old", "new", "ratio", "avg"))
+    for x, y in zip(trades, js["trades"]):
+        assert_same(x, y, TRADE_KEYS)
+    for x, y in zip(fills, js["fills"]):
+        assert_same(x, y, ("symbol", "date", "side", "shares", "price", "fees", "note"))
+    assert_same(summary, js["summary"], ("cash", "equity", "realized", "unrealized", "open_risk"))
+
+    # Editing a transaction later rebuilds the position from them: the rights issue's cost stays in.
+    (again,) = run_js({"op": "real", "args": {"cfg": cfg, "events": events, "steps": steps + [
+        {"op": "edit", "fill": 0, "set": {"note": "edited"}, "atr": 0.3}]}})
+    assert again["out"][-1] == "ok" and again["trades"][0]["entry_price"] == pytest.approx(a["avg"])
+
+
+@needs_node
 def test_mac_portfolio_backup_restores_on_the_site(tmp_path, cfg):
     """Your Mac portfolio, saved as a site backup: the site shows the same positions, cash and pending bonus shares."""
     conn = db.connect(tmp_path / "mac.db")

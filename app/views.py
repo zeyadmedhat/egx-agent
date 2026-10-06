@@ -242,6 +242,15 @@ def signal_order(r: dict) -> tuple:
     return -(p if p is not None else -1.0), -(r.get("score") or 0)
 
 
+def adjust_reason(ev: dict) -> str:
+    """Why a position waits for its new share count (local/api.js says the same)."""
+    if ev.get("rights"):
+        return (f"Rights issue from {nice_date(ev['ex_date'])}: past prices ÷ {ev['factor']:.4g}. Once you've "
+                "subscribed or sold your rights, enter the shares you hold now so the stop and P&L stay right.")
+    return (f"Bonus shares or split from {nice_date(ev['ex_date'])}: {ev['describe']}. "
+            "Enter the shares you hold now so the stop and P&L stay right.")
+
+
 def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
     pending = corporate.pending(d.conn, "real")
     dividends = corporate.dividends_by_trade(d.conn, "real")
@@ -261,8 +270,7 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
             factor = ev["factor"]
             last = float(ind["close"].iloc[-1]) if len(ind) else float(r.entry_price) / factor
             stt = {"status": "ADJUST", "stop": None, "days_held": int((ind.index >= pd.Timestamp(r.entry_date)).sum()),
-                   "reason": f"Bonus shares or split from {nice_date(ev['ex_date'])}: {ev['describe']}. "
-                             "Enter the shares you hold now so the stop and P&L stay right."}
+                   "reason": adjust_reason(ev)}
         else:
             stt = portfolio.real_status(r, ind, d.cfg)
             last = stt.get("last_close") or float(r.entry_price)
@@ -301,8 +309,7 @@ def book_positions(d: Data, book: dict) -> list[dict]:
     what the exit rules say at the last close: what open_positions gives for yours, as the site works it out
     (app/static/js/local/api.js). Enough for orders(): the evening message tells them what to do."""
     done = {(a.get("event_id"), a.get("trade_id")) for a in book.get("adjustments") or [] if isinstance(a, dict)}
-    events = [{"id": f"{r['symbol']}:{r['ex_date']}", "symbol": r["symbol"], "ex_date": r["ex_date"], "factor": r["factor"]}
-              for r in d.conn.execute("SELECT symbol, ex_date, factor FROM price_events ORDER BY ex_date, id")]
+    events = corporate.events(d.conn)
     out = []
     for t in book.get("trades") or []:
         if not isinstance(t, dict) or t.get("account") != "real" or t.get("status") != "open":
@@ -317,10 +324,10 @@ def book_positions(d: Data, book: dict) -> list[dict]:
         ev = next((e for e in events if e["symbol"] == sym and since < e["ex_date"] and (e["id"], t.get("id")) not in done),
                   None)
         if ev:
-            ev = {**ev, "describe": corporate.describe(ev["factor"])}
+            ev = {**ev, "describe": corporate.what(ev["factor"], ev["rights"])}
             last = float(ind["close"].iloc[-1]) if len(ind) else entry / ev["factor"]
             stt = {"status": "ADJUST", "stop": None, "days_held": int((ind.index >= pd.Timestamp(since)).sum()),
-                   "reason": f"Bonus shares or split from {nice_date(ev['ex_date'])}: {ev['describe']}."}
+                   "reason": adjust_reason(ev)}
         else:
             stt = portfolio.real_status(row, ind, d.cfg)
             last = stt.get("last_close") or entry

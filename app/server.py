@@ -90,6 +90,7 @@ class ScanIn(BaseModel):
 class AdjustIn(BaseModel):
     event_id: int
     shares: int | None = Field(default=None, ge=1)
+    paid: float = Field(default=0.0, ge=0)        # a rights issue: what each new share cost
     ignore: bool = False
 
 
@@ -593,13 +594,11 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
             return JSON({"message": f"Kept your {pos['symbol']} position as it is ({pos['shares']:,} shares)."})
         if not body.shares:
             fail(400, "Enter how many shares you hold now.")
-        expected = pos["shares"] * ev["factor"]
-        if not 0.75 * expected <= body.shares <= 1.25 * expected:
-            fail(400, f"{body.shares:,} shares is far from the expected {ev['shares_expected']:,}. Check the number "
-                      "at your broker. If your shares didn't change, choose 'My shares didn't change'.")
-        res = corporate.apply(conn, trade_id, body.event_id, body.shares)
+        if problem := corporate.adjust_problem(pos["shares"], ev, body.shares, body.paid):
+            fail(400, problem)
+        res = corporate.apply(conn, trade_id, body.event_id, body.shares, body.paid)
         return JSON({"message": f"Updated {res['symbol']}: {res['old']:,} → {res['new']:,} shares at an average of "
-                               f"{res['avg']:.3f}. The stop and target moved by the same ratio."})
+                               f"{res['avg']:.3f}. The stop and target moved with the prices."})
 
     @app.post("/api/portfolio/{trade_id}/dividend")
     def dividend(trade_id: int, body: DividendIn, conn=Depends(get_conn)):

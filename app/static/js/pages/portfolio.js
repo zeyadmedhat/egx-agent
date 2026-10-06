@@ -10,7 +10,7 @@ import {
 } from '../ui.js';
 import { t, tn, tp } from '../i18n.js';
 import { LineChart } from '../charts.js';
-import { orderFee } from '../local/engine.js';
+import { orderFee, newAverage } from '../local/engine.js';
 import { equityCurve, correlations, sectorMix, stopRisk, journal, inMoney, checkup } from '../insights.js';
 
 const TABS = [{ value: 'positions', label: 'My stocks' }, { value: 'health', label: 'Checkup' },
@@ -401,7 +401,7 @@ function PositionDetail({ p, data, onDone, onClose }) {
 
   return html`<div class="pos-detail">
     ${!p.adjust && p.last / p.avg_price - 1 <= -BIG_LOSS && html`<${BigLossPlan} p=${p} data=${data} />`}
-    ${p.adjust ? html`<${AdjustPanel} p=${p} onDone=${onDone} />` : html`<div>${sellForm}${STATIC && p.stop != null && html`<${StopForm} p=${p} />`}</div>`}
+    ${p.adjust ? html`<${p.adjust.rights ? RightsPanel : AdjustPanel} p=${p} onDone=${onDone} />` : html`<div>${sellForm}${STATIC && p.stop != null && html`<${StopForm} p=${p} />`}</div>`}
     <div>
       <h4>${t('Transactions in this position')}${p.n_buys > 1 ? ` · ${t('{n} buys combined at the average price', { n: p.n_buys })}` : ''}</h4>
       <${Fills} fills=${p.fills} tradeId=${p.id} data=${data} onRemoveDividend=${removeDividend} />
@@ -647,6 +647,48 @@ function AdjustPanel({ p, onDone }) {
     <div class="row">
       <button class="btn primary" disabled=${busy || n < 1} onClick=${() => send({ shares: n })}><${Icon} name="check" />${t('Update position')}</button>
       <button class="btn ghost" disabled=${busy} onClick=${() => send({ ignore: true })}>${t("My shares didn't change")}</button>
+    </div>
+  </div>`;
+}
+
+// A rights issue: past prices were divided by the right's value, and you either subscribed to new shares (at the
+// issue price) or sold your rights. Your share count and what each new share cost (local/engine.js newAverage).
+function RightsPanel({ p, onDone }) {
+  const a = p.adjust;
+  const [shares, setShares] = useState(String(p.shares));
+  const [paid, setPaid] = useState('');
+  const [busy, setBusy] = useState(false);
+  const n = parseInt(shares, 10) || 0, cost = parseFloat(paid) || 0;
+  const more = n > p.shares;
+  const ok = n >= p.shares && (!more || cost > 0);
+  const send = async () => {
+    setBusy(true);
+    try {
+      toast((await api(`/portfolio/${p.id}/adjust`, { method: 'POST', body: { event_id: a.event_id, shares: n, paid: cost } })).message);
+      onDone();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 10000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<div class="adjust-panel">
+    <h4><${Icon} name="split" size=${15} /> ${t('{sym}: rights issue from {date}', { sym: p.symbol, date: fmt.date(a.ex_date) })}</h4>
+    <div class="muted" style="font-size:13px">${tp("TradingView divided all past {sym} prices by {factor} for the rights issue. Subscribed? Enter the shares you hold now (your {old} plus the new ones) and what each new share cost. Sold your rights instead? Keep {old}. Until you confirm, this position's stop can't be checked.",
+      { sym: p.symbol, factor: fmt.num(a.factor, 4), old: html`<b>${fmt.int(p.shares)}</b>` })}</div>
+    <div class="row" style="align-items:flex-end">
+      <${Field} label="Shares you hold now (check your broker)">
+        <input class="input" type="number" min=${p.shares} step="1" value=${shares} onInput=${e => setShares(e.target.value)} /><//>
+      ${more && html`<${Field} label="What each new share cost (EGP)">
+        <input class="input" type="number" min="0" step="0.001" value=${paid} onInput=${e => setPaid(e.target.value)} /><//>`}
+      <span class="preview" style="font-size:12.5px;color:var(--text-2);flex:1;min-width:220px">${ok
+        ? tp('Average price {old} → {new}. Stop and target move with the prices.',
+            { old: fmt.price(p.avg_price), new: html`<b>${fmt.price(newAverage(p.avg_price, p.shares, n, a.factor, true, cost))}</b>` })
+        : t(n < p.shares ? 'Enter at least the shares you held before.' : 'Enter what each new share cost.')}</span>
+    </div>
+    <div class="row">
+      <button class="btn primary" disabled=${busy || !ok} onClick=${send}><${Icon} name="check" />${t('Update position')}</button>
     </div>
   </div>`;
 }

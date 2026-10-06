@@ -300,10 +300,21 @@ def save_corporate_actions(conn: sqlite3.Connection, rows: list[dict]) -> int:
     return conn.execute("SELECT COUNT(*) FROM corp_actions").fetchone()[0] - before
 
 
+# Announced by the regulator (FRA) but not on Mubasher's corporate-actions list yet, which runs weeks behind.
+# effective: the first session without the right (holders at the close before get it).
+# ponytail: kept by hand; add one when a stock you hold announces it, drop it once Mubasher lists it.
+KNOWN_ACTIONS = [
+    {"symbol": "KORA", "type": "Capital Increase - Rights Issue", "kind": "rights", "announced": "2026-10-04",
+     "effective": "2026-10-14",
+     "note": "0.9 new share for each share held, at 0.205 EGP each (0.20 + 0.005 fees). Subscription 18 Oct to "
+             "1 Nov 2026; the rights trade on their own 18 to 27 Oct."},
+]
+
+
 def update_actions(conn: sqlite3.Connection, fetcher: Fetcher | None = None) -> int:
     """Only the corporate actions (all of them the first time, about a minute): the prediction model needs them."""
     full = conn.execute("SELECT COUNT(*) FROM corp_actions").fetchone()[0] == 0
-    return save_corporate_actions(conn, fetch_corporate_actions(fetcher or Fetcher(), 20 if full else 1))
+    return save_corporate_actions(conn, fetch_corporate_actions(fetcher or Fetcher(), 20 if full else 1) + KNOWN_ACTIONS)
 
 
 def _checked(conn) -> dict:
@@ -517,7 +528,10 @@ def cautions(conn: sqlite3.Connection, symbol: str, today: str, hold_days: int =
                                 "more shares, so it isn't a loss."})
         else:
             out.append({"kind": "rights", "date": a["effective"], "level": "info",
-                        "text": f"Rights issue, ex-date {a['effective']}: the price usually adjusts that day."})
+                        "text": f"Rights issue, ex-date {a['effective']}: holders at the close before can subscribe to "
+                                f"new shares{': ' + a['note'].rstrip('.') if a.get('note') else ''}. That morning the "
+                                "price drops by the right's value, which isn't a loss. Subscribe or sell the rights in "
+                                "time, or their value is lost."})
     if div and div.get("ex_date") and tomorrow <= div["ex_date"] <= end:
         exes[div["ex_date"]] = div.get("amount")
     for ex, amount in sorted(exes.items()):

@@ -150,7 +150,7 @@ def test_update_reads_every_source_and_one_down_doesnt_stop_the_others(tmp_path)
         # the RSS feeds and Mubasher's latest-news pages are down
     })
     res = news.update(conn, first=["MHOT"], budget_s=60, fetcher=f)
-    assert res["actions"] == 5 and res["stocks"] == 3
+    assert res["actions"] == 5 + len(news.KNOWN_ACTIONS) and res["stocks"] == 3
     assert set(res["failed"]) == {"Al Borsa News", "Daily News Egypt", "Mubasher latest news"}
     kinds = {(r["symbol"], r["kind"], r["announced"], r["effective"]) for r in news.actions(conn)}
     assert ("ABUK", "bonus", "2026-02-24", "2026-10-07") in kinds

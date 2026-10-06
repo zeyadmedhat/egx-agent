@@ -67,6 +67,24 @@ def test_bonus_shares_flag_then_update_a_position(client):  # noqa: F811
     assert client.post(f"/api/portfolio/{pos['id']}/adjust", headers=H, json={"event_id": ev, "shares": 1250}).status_code == 409
 
 
+def test_a_rights_issue_asks_for_the_shares_and_what_the_new_ones_cost(client):  # noqa: F811
+    client.post("/api/portfolio/buy", headers=H, json={"symbol": "AAA", "date": "2025-02-02", "price": 6.5, "shares": 1000})
+    conn = db.connect(client.app_db)
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) "
+                 "VALUES ('AAA', 'rights', 'Capital Increase - Rights Issue', '2025-02-20', '2025-03-02', '', 'x')")
+    conn.commit()
+    db.add_price_event(conn, "AAA", "2025-03-02", 1.848)
+    pos = client.get("/api/portfolio").json()["positions"][0]
+    assert pos["status"] == "ADJUST" and pos["adjust"]["rights"] and pos["reason"].startswith("Rights issue")
+    ev = pos["adjust"]["event_id"]
+    url = f"/api/portfolio/{pos['id']}/adjust"
+    assert client.post(url, headers=H, json={"event_id": ev, "shares": 1900}).status_code == 400   # no price given
+    r = client.post(url, headers=H, json={"event_id": ev, "shares": 1900, "paid": 0.205})
+    assert r.status_code == 200, r.text
+    t = conn.execute("SELECT shares, entry_price FROM trades WHERE id=?", (pos["id"],)).fetchone()
+    assert t["shares"] == 1900 and t["entry_price"] == pytest.approx((pos["avg_price"] * 1000 + 900 * 0.205) / 1900)
+
+
 def test_shares_unchanged_keeps_the_position(client):  # noqa: F811
     client.post("/api/portfolio/buy", headers=H, json={"symbol": "AAA", "date": "2025-02-02", "price": 12, "shares": 100})
     conn = db.connect(client.app_db)

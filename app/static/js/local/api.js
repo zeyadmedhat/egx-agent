@@ -101,8 +101,11 @@ async function openPositions(c, symbol = null) {
       factor = ev.factor;
       last = b.length ? b[b.length - 1].close : r.entry_price / factor;
       stt = { status: 'ADJUST', stop: null, days_held: b.filter(x => x.date >= r.entry_date).length,
-        reason: `Bonus shares or split from ${E.niceDate(ev.ex_date)}: ${ev.describe}. `
-          + 'Enter the shares you hold now so the stop and P&L stay right.' };
+        reason: ev.rights   // views.adjust_reason
+          ? `Rights issue from ${E.niceDate(ev.ex_date)}: past prices ÷ ${E.g(+ev.factor.toPrecision(4))}. Once you've `
+            + 'subscribed or sold your rights, enter the shares you hold now so the stop and P&L stay right.'
+          : `Bonus shares or split from ${E.niceDate(ev.ex_date)}: ${ev.describe}. `
+            + 'Enter the shares you hold now so the stop and P&L stay right.' };
     } else {
       stt = E.realStatus(r, b, cfg);
       last = stt.last_close || r.entry_price;
@@ -536,17 +539,23 @@ function adjust(c, id, body) {
     saveBook(c.book);
     return { message: `Kept your ${pos.symbol} position as it is (${E.int(pos.shares)} shares).` };
   }
-  const shares = Number(body.shares);
+  const shares = Number(body.shares), paid = Number(body.paid) || 0;
   if (!shares) fail(400, 'Enter how many shares you hold now.');
-  const expected = pos.shares * ev.factor;
-  if (!(shares >= 0.75 * expected && shares <= 1.25 * expected)) {
+  // corporate.adjust_problem
+  if (ev.rights) {
+    if (shares < pos.shares) {
+      fail(400, `You held ${E.int(pos.shares)} before the rights issue: enter those plus the new shares you subscribed `
+        + 'to. Sold some? Log that sale first.');
+    }
+    if (shares > pos.shares && !(paid > 0)) fail(400, 'Enter what each new share cost you (the subscription price).');
+  } else if (!(shares >= 0.75 * pos.shares * ev.factor && shares <= 1.25 * pos.shares * ev.factor)) {
     fail(400, `${E.int(shares)} shares is far from the expected ${E.int(ev.shares_expected)}. Check the number at your `
       + "broker. If your shares didn't change, choose 'My shares didn't change'.");
   }
-  const res = E.applyEvent(c.book, id, c.core.events.find(e => e.id === ev.event_id), shares, localToday());
+  const res = E.applyEvent(c.book, id, c.core.events.find(e => e.id === ev.event_id), shares, localToday(), paid);
   saveBook(c.book);
   return { message: `Updated ${res.symbol}: ${E.int(res.old)} → ${E.int(res.new)} shares at an average of `
-    + `${res.avg.toFixed(3)}. The stop and target moved by the same ratio.` };
+    + `${res.avg.toFixed(3)}. The stop and target moved with the prices.` };
 }
 
 // A stop you choose for an open position (e.g. right on a support), counted from the next session (today's before

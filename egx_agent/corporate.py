@@ -4,6 +4,10 @@ EGX companies often hand out bonus shares. When they do, TradingView divides all
 (÷1.25 for 1 free share for every 4 held). A position logged at the old prices would then look like a big
 loss and could trigger a false stop-loss EXIT, so it is flagged until you confirm your new share count.
 Paper trades are updated by themselves.
+
+A rights issue re-bases the prices too (by the right's value), but the shares don't follow by themselves: holders
+subscribe to new shares at the issue price, or sell their rights. So the share count is yours to give, with what
+each new share cost.
 """
 from __future__ import annotations
 
@@ -36,10 +40,27 @@ def expected_shares(shares: int, factor: float) -> int:
     return max(1, math.floor(shares * factor + 1e-6))
 
 
+# A re-base within a week of a rights issue's ex-date (data/news.py's corporate actions) was that rights issue.
+RIGHTS_SQL = """EXISTS (SELECT 1 FROM corp_actions a WHERE a.symbol = e.symbol AND a.kind = 'rights'
+                        AND ABS(julianday(a.effective) - julianday(e.ex_date)) <= 7)"""
+
+
+def what(factor: float, rights: bool) -> str:
+    return f"a rights issue, past prices divided by {factor:.4g}" if rights else describe(factor)
+
+
+def events(conn: sqlite3.Connection) -> list[dict]:
+    """Every re-base of past prices, oldest first, as the website's browser reads them (local/engine.js pending)."""
+    return [{"id": f"{r['symbol']}:{r['ex_date']}", "symbol": r["symbol"], "ex_date": r["ex_date"],
+             "factor": r["factor"], "rights": bool(r["rights"])}
+            for r in conn.execute(f"SELECT e.symbol, e.ex_date, e.factor, {RIGHTS_SQL} AS rights "
+                                  "FROM price_events e ORDER BY e.ex_date, e.id")]
+
+
 def pending(conn: sqlite3.Connection, account: str = "real") -> dict[int, dict]:
     """Open positions bought before their stock was re-based and not updated yet: {trade_id: event}."""
     rows = conn.execute(
-        """SELECT t.id AS trade_id, e.id AS event_id, e.symbol, e.ex_date, e.factor, t.shares
+        f"""SELECT t.id AS trade_id, e.id AS event_id, e.symbol, e.ex_date, e.factor, t.shares, {RIGHTS_SQL} AS rights
            FROM trades t JOIN price_events e ON e.symbol = t.symbol
            WHERE t.account = ? AND t.status IN ('open', 'pending')
              AND COALESCE(t.entry_date, t.signal_date) < e.ex_date
@@ -50,44 +71,73 @@ def pending(conn: sqlite3.Connection, account: str = "real") -> dict[int, dict]:
     out: dict[int, dict] = {}
     for r in rows:
         if r["trade_id"] not in out:  # oldest first; a second event shows after the first is handled
+            rights = bool(r["rights"])
             out[r["trade_id"]] = {
                 "event_id": r["event_id"], "symbol": r["symbol"], "ex_date": r["ex_date"], "factor": r["factor"],
-                "describe": describe(r["factor"]), "shares_now": r["shares"],
-                "shares_expected": expected_shares(r["shares"], r["factor"]),
+                "rights": rights, "describe": what(r["factor"], rights), "shares_now": r["shares"],
+                # how many new shares you subscribed to is yours to say
+                "shares_expected": r["shares"] if rights else expected_shares(r["shares"], r["factor"]),
             }
     return out
 
 
-def apply(conn: sqlite3.Connection, trade_id: int, event_id: int, new_shares: int) -> dict:
-    """Update a position to its new share count; prices and levels move by the same ratio, so its cost is unchanged."""
+def new_average(avg: float, old: int, new: int, factor: float, rights: bool, paid: float = 0.0) -> float:
+    """The average price on the new prices. Bonus shares or a split: the same cost over more shares. A rights issue:
+    the new shares add what they cost (paid each); kept the old count (sold the rights): the shares are worth
+    ÷ factor and the rest came back as the rights' price, so the cost goes ÷ factor too."""
+    # ponytail: subscribing to only part of your rights counts the sold rights' cost in, so the average is a bit high
+    if rights and new == old:
+        return avg / factor
+    return (avg * old + max(new - old, 0) * paid) / new
+
+
+def adjust_problem(shares_now: int, ev: dict, new: int, paid: float = 0.0) -> str | None:
+    """Why a new share count can't be right, or None (local/api.js adjust says the same)."""
+    if ev.get("rights"):
+        if new < shares_now:
+            return (f"You held {shares_now:,} before the rights issue: enter those plus the new shares you subscribed "
+                    "to. Sold some? Log that sale first.")
+        if new > shares_now and not paid > 0:
+            return "Enter what each new share cost you (the subscription price)."
+        return None
+    if not 0.75 * shares_now * ev["factor"] <= new <= 1.25 * shares_now * ev["factor"]:
+        return (f"{new:,} shares is far from the expected {ev['shares_expected']:,}. Check the number at your broker. "
+                "If your shares didn't change, choose 'My shares didn't change'.")
+    return None
+
+
+def apply(conn: sqlite3.Connection, trade_id: int, event_id: int, new_shares: int, paid: float = 0.0) -> dict:
+    """Update a position to its new share count; its levels move with the prices (÷ the event's factor)."""
     t = conn.execute("SELECT * FROM trades WHERE id=? AND status IN ('open', 'pending')", (trade_id,)).fetchone()
-    e = conn.execute("SELECT * FROM price_events WHERE id=?", (event_id,)).fetchone()
+    e = conn.execute(f"SELECT e.*, {RIGHTS_SQL} AS rights FROM price_events e WHERE id=?", (event_id,)).fetchone()
     if t is None or e is None or e["symbol"] != t["symbol"]:
         raise ValueError("This position or event no longer exists. Refresh the page.")
     new_shares = int(new_shares)
     if new_shares < 1:
         raise ValueError("Enter how many shares you hold now.")
-    old = int(t["shares"])
+    old, f, rights = int(t["shares"]), float(e["factor"]), bool(e["rights"])
     ratio = new_shares / old
+    avg = new_average(float(t["entry_price"]), old, new_shares, f, rights, paid) if t["entry_price"] else None
     conn.execute(
-        """UPDATE trades SET shares=?, entry_price=entry_price/?, initial_stop=initial_stop/?, stop=stop/?,
+        """UPDATE trades SET shares=?, entry_price=?, initial_stop=initial_stop/?, stop=stop/?,
                target=target/?, highest_close=highest_close/?, entry_limit=entry_limit/? WHERE id=?""",
-        (new_shares, ratio, ratio, ratio, ratio, ratio, ratio, trade_id),
+        (new_shares, avg, f, f, f, f, f, trade_id),
     )
     today = date.today().isoformat()
     if t["account"] == "real":
+        note = (f"{describe(f)}: {old:,} → {new_shares:,} shares" if not rights
+                else f"Rights issue: {new_shares - old:,} new shares at {paid:g}, {old:,} → {new_shares:,} shares"
+                if new_shares > old else f"Rights issue: kept {old:,} shares, prices ÷ {f:.4g}")
         conn.execute(
             "INSERT INTO fills(trade_id, symbol, date, side, shares, price, fees, note) VALUES (?,?,?,?,?,?,?,?)",
-            (trade_id, t["symbol"], e["ex_date"], "bonus", new_shares - old, 0.0, 0.0,
-             f"{describe(e['factor'])}: {old:,} → {new_shares:,} shares"),
+            (trade_id, t["symbol"], e["ex_date"], "bonus", new_shares - old, paid if rights else 0.0, 0.0, note),
         )
     conn.execute(
         "INSERT OR REPLACE INTO position_adjustments(event_id, trade_id, action, ratio, date) VALUES (?,?,?,?,?)",
         (event_id, trade_id, "applied", ratio, today),
     )
     conn.commit()
-    return {"symbol": t["symbol"], "old": old, "new": new_shares, "ratio": ratio,
-            "avg": float(t["entry_price"]) / ratio if t["entry_price"] else None}
+    return {"symbol": t["symbol"], "old": old, "new": new_shares, "ratio": ratio, "avg": avg}
 
 
 def ignore(conn: sqlite3.Connection, trade_id: int, event_id: int) -> None:

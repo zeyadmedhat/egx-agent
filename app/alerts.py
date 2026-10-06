@@ -213,7 +213,12 @@ def _caution_lines(items: list[dict], indent: str = "      ", lang: str = "en") 
                        if ar else
                        f"{indent}ℹ️ {'Bonus shares' if c['kind'] == 'bonus' else 'Split'} {day}: the price is re-based that day")
         elif c["kind"] == "rights":
-            out.append(f"{indent}ℹ️ {'حق اكتتاب، التاريخ' if ar else 'Rights issue, ex-date'} {day}")
+            out.append(f"{indent}ℹ️ حق اكتتاب {day}: يحق لمن يملك السهم عند إغلاق الجلسة السابقة الاكتتاب في أسهم "
+                       "جديدة، وينخفض السعر بقيمة الحق صباح ذلك اليوم. اكتتب أو بِع الحق في موعده وإلا تضيع قيمته"
+                       if ar else
+                       f"{indent}ℹ️ Rights issue {day}: holders at the close before can subscribe to new shares, and the "
+                       "price drops by the right's value that morning. Subscribe or sell the rights in time, or their "
+                       "value is lost")
     return out
 
 
