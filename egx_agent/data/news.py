@@ -46,6 +46,10 @@ FEEDS = {                     # source: (url, language, the categories kept: Non
 }
 SOURCES = {"mubasher": "Mubasher", "alborsa": "Al Borsa News", "dne": "Daily News Egypt", **TV_PROVIDERS}
 BUDGET_S = 240                # time for Mubasher's stock pages per run (about 45 pages)
+MUBASHER_PAGE = 25            # headlines on one of a stock's news pages
+MUBASHER_PAGES = 3            # a stock's older pages are read too while every headline on one was new (the first time)
+SOON_DAYS = 30                # a stock with a dividend, bonus shares or a rights issue going ex this soon is read early
+REREAD_H = 12                 # ... unless its pages were read in the last 12 hours
 KEEP_DAYS = 730               # market news older than this is dropped; a stock's own news is kept
 
 # Corporate actions: Mubasher's English type -> our kind (anything else is "other")
@@ -356,12 +360,20 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
         if page:
             res["new"] += save_news(conn, parse_mubasher(page, lang))
 
-    # Each stock's own pages: today's signals first, then the ones read longest ago. The first time a stock is
-    # read, its year of Reuters/Zawya news comes too (TradingView doesn't ask for a pause).
+    # Each stock's own pages: today's signals and the stocks with a dividend, bonus shares or a rights issue going ex
+    # soon first (unless read in the last few hours), then the ones read longest ago. The first time a stock is read,
+    # its year of Reuters/Zawya news comes too (TradingView doesn't ask for a pause). Every stock that traded in the
+    # month to the last close is read: one whose download failed once is still listed.
+    today = _now().date()
     symbols = [r[0] for r in conn.execute(
-        "SELECT symbol FROM stocks WHERE price_missing_since IS NULL AND symbol IN (SELECT DISTINCT symbol FROM prices)")]
+        "SELECT symbol FROM stocks WHERE symbol IN (SELECT DISTINCT symbol FROM prices "
+        "WHERE date >= date((SELECT MAX(date) FROM prices), '-30 days'))")]
+    soon = [r[0] for r in conn.execute(
+        "SELECT DISTINCT symbol FROM corp_actions WHERE kind IN ('dividend', 'bonus', 'split', 'rights') "
+        "AND effective BETWEEN ? AND ? ORDER BY effective", (today.isoformat(), (today + timedelta(days=SOON_DAYS)).isoformat()))]
     checked = _checked(conn)
-    first = [s for s in dict.fromkeys(first) if s in symbols]
+    recent = (datetime.now() - timedelta(hours=REREAD_H)).isoformat(timespec="seconds")
+    first = [s for s in dict.fromkeys([*first, *soon]) if s in symbols and checked.get(s, {}).get("mubasher", "") < recent]
     order = first + sorted((s for s in symbols if s not in first),
                            key=lambda s: checked.get(s, {}).get("mubasher", ""))
     start = time.monotonic()
@@ -378,11 +390,17 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
                 state["tv"] = datetime.now().isoformat(timespec="seconds")
         ok = True
         for lang in ("ar", "en"):
-            r = attempt("Mubasher stock pages", lambda: f.get(f"{MUBASHER[lang]}/markets/EGX/stocks/{sym}/news"))
-            if r is None or r.status_code != 200:
-                ok = False
-                continue
-            res["new"] += save_news(conn, parse_mubasher(r.text, lang), sym)
+            for page in range(1, MUBASHER_PAGES + 1):      # .../news, .../news/2, ...
+                url = f"{MUBASHER[lang]}/markets/EGX/stocks/{sym}/news" + (f"/{page}" if page > 1 else "")
+                r = attempt("Mubasher stock pages", lambda: f.get(url))
+                if r is None or r.status_code != 200:
+                    ok = ok and page > 1
+                    break
+                items = parse_mubasher(r.text, lang)
+                new = save_news(conn, items, sym)
+                res["new"] += new
+                if len(items) < MUBASHER_PAGE or new < len(items):     # the last page, or it reached what we have
+                    break
         if ok:
             state["mubasher"] = datetime.now().isoformat(timespec="seconds")
             res["stocks"] += 1
@@ -472,7 +490,7 @@ def _rows(cur) -> list[dict]:
     return out
 
 
-def stock_news(conn: sqlite3.Connection, symbol: str, limit: int = 30) -> list[dict]:
+def stock_news(conn: sqlite3.Connection, symbol: str, limit: int = 50) -> list[dict]:
     """A stock's headlines, newest first."""
     return _rows(conn.execute(
         "SELECT id, source, lang, published, title, url, tags, tone FROM news WHERE symbol = ? "

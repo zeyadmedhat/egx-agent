@@ -590,7 +590,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
                              **{k: preds.get(k) for k in ("base", "count", "date", "top_n", "bands")}}
     out["corporate"] = corporate_history(d.conn, sym, last.close)
     out["fundamentals"] = dividends.company_numbers(d.conn, sym, d.table["sector"])
-    out["news"] = news.stock_news(d.conn, sym, 30)
+    out["news"] = news.stock_news(d.conn, sym)
     out["cautions"] = cautions_map(d).get(sym, [])
     out["ai"] = ai_view(d, sym, ind["close"])
     if {"sup", "ptgt"} & set(cols):

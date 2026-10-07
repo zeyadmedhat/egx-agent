@@ -166,6 +166,29 @@ def test_update_reads_every_source_and_one_down_doesnt_stop_the_others(tmp_path)
     assert not [p for u, p in f.asked if p and "symbol" in p]
 
 
+def _page(ids):
+    return "".join(f'<span class="mi-article-media-block__date">24 September 2026 11:25 AM</span> '
+                   f'<a class="mi-article-media-block__title" href="/news/{i}/x">Headline {i}</a>' for i in ids)
+
+
+def test_a_stock_going_ex_soon_comes_early_and_a_new_stocks_older_pages_are_read(tmp_path):
+    conn = _market(tmp_path)
+    soon = (date.today() + timedelta(days=5)).isoformat()
+    news.save_corporate_actions(conn, [{"symbol": "MHOT", "kind": "rights", "type": "Capital Increase - Rights Issue",
+                                        "announced": "2026-09-01", "effective": soon, "note": ""}])
+    f = FakeFetcher({"corporate-actions": {"rows": [], "numberOfPages": 1}, "news-headlines": _tv([]),
+                     "english.mubasher.info/markets": "<html>no news</html>",
+                     "MHOT/news/2": _page(range(100, 105)), "MHOT/news": _page(range(25)),
+                     "www.mubasher.info/markets": MUBASHER_PAGE})
+    news.update(conn, first=["COMI"], budget_s=60, fetcher=f)
+    pages = [u.split("/stocks/")[1] for u, _ in f.asked if "www.mubasher.info/markets" in u]
+    assert pages == ["COMI/news", "MHOT/news", "MHOT/news/2", "ABUK/news"]     # the signal, then the one going ex
+    assert len(news.stock_news(conn, "MHOT")) == 30
+    f.asked.clear()
+    news.update(conn, first=["COMI"], budget_s=60, fetcher=f)
+    assert not [u for u, _ in f.asked if u.endswith("/news/2")]            # page 1 had nothing new: no need
+
+
 def test_cautions_for_a_buyer(tmp_path):
     conn = _market(tmp_path)
     _load_actions(conn)
