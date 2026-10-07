@@ -69,8 +69,10 @@ export function MarketPage() {
     <section class="section">
       <${SectionHead} title="Sectors" count=${b.sectors.length}
         hint="Median return of the sector's stocks. Sectors with one or two stocks move with those names alone." />
-      <div class="card flush"><${DataTable} columns=${columns} rows=${b.sectors} rowKey=${r => r.sector}
-        sort=${{ key: 'r21', dir: 'desc' }} /></div>
+      <${SectorBars} rows=${b.sectors} />
+      ${data.sector_money && data.sector_money.length > 0 && html`<${SectorMoney} rows=${data.sector_money} />`}
+      <${Fold} title="Every sector in a table" hint="How many of its stocks are above their 50-day average, and its strongest names." flush>
+        <${DataTable} columns=${columns} rows=${b.sectors} rowKey=${r => r.sector} sort=${{ key: 'r21', dir: 'desc' }} /><//>
     </section>
     <${Fold} title="Stocks in uptrend vs EGX30" hint="1 year. When most stocks are above their averages, breakouts have more support." flush>
       <${BreadthChart} h=${b.history} /><//>
@@ -79,6 +81,54 @@ export function MarketPage() {
         <${Kpi} label="Above 20-day average" value=${fmt.pct(b.above20, 0, false)} sub="short-term trend" />
         <${Kpi} label="Above 200-day average" value=${fmt.pct(b.above200, 0, false)} sub="long-term trend" />
       </div><//>`;
+}
+
+// Sectors as bars from a middle line: right and green if its stocks rose (median), left and red if they fell.
+const SECTOR_SPANS = [{ value: 'r5', label: '1 week' }, { value: 'r21', label: '1 month' }, { value: 'r63', label: '3 months' }];
+function SectorBars({ rows }) {
+  const [k, setK] = useState('r21');
+  const list = rows.filter(r => r[k] != null).sort((a, b) => b[k] - a[k]);
+  if (!list.length) return null;
+  const sizes = list.map(r => Math.abs(r[k])).sort((a, b) => b - a);
+  const max = Math.max(0.001, sizes[1] ?? sizes[0]);       // one runaway sector fills its half instead of shrinking the rest
+  const big = list.filter(r => r.stocks >= 3);              // a sector of one or two stocks is those names alone
+  const [top, low] = big.length ? [big[0], big[big.length - 1]] : [list[0], list[list.length - 1]];
+  return html`<div class="card inv sec">
+    <div class="inv-top"><div class="card-title" style="margin:0">${t('Which sectors rose')}</div>
+      <${Seg} options=${SECTOR_SPANS} value=${k} onChange=${setK} /></div>
+    <p class="inv-say">${tp('Strongest: {a} ({x}); weakest: {b} ({y}).', {
+      a: html`<b class=${tone(top[k])}>${tn(top.sector)}</b>`, x: fmt.pct(top[k], 1),
+      b: html`<b class=${tone(low[k])}>${tn(low.sector)}</b>`, y: fmt.pct(low[k], 1) })}</p>
+    <div class="inv-axis"><span></span><div><span>${t('Fell')}</span><span>${t('Rose')}</span></div><span></span></div>
+    ${list.map(r => html`<div class="inv-row"><span class=${r.stocks < 3 ? 'faint' : ''} title=${tn(r.sector)}>${tn(r.sector)}</span>
+      <div class="inv-track"><span class=${`inv-bar ${r[k] >= 0 ? 'up' : 'down'}`}
+        style=${`${r[k] >= 0 ? 'inset-inline-start' : 'inset-inline-end'}:50%;width:${Math.min(1, Math.abs(r[k]) / max) * 50}%`}></span></div>
+      <b class=${`inv-v ${tone(r[k])}`}>${fmt.pct(r[k], 1)}</b></div>`)}
+  </div>`;
+}
+
+// Money by sector: each sector's share of the money traded at the last close (the bar) against its usual share over
+// the 20 sessions before (the line), biggest first (views.movers).
+const SECTORS_SHOWN = 8;
+const VS_USUAL = r => (r.usual == null ? '' : r.share >= r.usual * 1.25 ? 'up' : r.share <= r.usual * 0.8 ? 'down' : '');
+function SectorMoney({ rows }) {
+  const [all, setAll] = useState(false);
+  const max = Math.max(...rows.map(r => Math.max(r.share, r.usual || 0)));
+  const jump = rows.filter(r => r.usual && r.share >= 0.03).sort((a, b) => b.share / b.usual - a.share / a.usual)[0];
+  const sector = r => html`<b>${tn(r.sector)}</b>`;
+  return html`<div class="card inv sec sec-money">
+    <div class="card-title" style="margin:0">${t('Where the money went')}</div>
+    <p class="inv-say">${tp('Most money went to {a} ({x} of the day)', { a: sector(rows[0]), x: fmt.pct(rows[0].share, 0, false) })}${
+      jump && VS_USUAL(jump) === 'up' ? html`; ${tp('{a} got far more than usual ({x}, against {y})', {
+        a: sector(jump), x: fmt.pct(jump.share, 0, false), y: fmt.pct(jump.usual, 0, false) })}` : ''}.</p>
+    ${(all ? rows : rows.slice(0, SECTORS_SHOWN)).map(r => html`<div class="inv-row"><span title=${tn(r.sector)}>${tn(r.sector)}</span>
+      <div class="inv-track"><span class="inv-bar info" style=${`inset-inline-start:0;width:${(r.share / max) * 100}%`}></span>
+        ${r.usual != null && html`<span class="sec-usual" style=${`inset-inline-start:${(r.usual / max) * 100}%`}></span>`}</div>
+      <b class=${`inv-v ${VS_USUAL(r)}`}>${fmt.pct(r.share, 0, false)}${VS_USUAL(r) ? (VS_USUAL(r) === 'up' ? ' ▲' : ' ▼') : ''}</b></div>`)}
+    ${rows.length > SECTORS_SHOWN && html`<button class="btn sm ghost" style="margin-top:8px" onClick=${() => setAll(x => !x)}>
+      ${all ? t('Show fewer') : t('Show all {n}', { n: rows.length })}</button>`}
+    <p class="faint inv-note">${t("Bar: the sector's share of the money traded at the last close. Line: its usual share, over the 20 sessions before. ▲ well above usual, ▼ well below. A single big deal counts too.")}</p>
+  </div>`;
 }
 
 const PERIODS = [{ value: 'chg1', label: 'Last session' }, { value: 'ret5', label: '1 week' }, { value: 'ret21', label: '1 month' }];

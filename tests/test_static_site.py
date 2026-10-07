@@ -707,6 +707,10 @@ def test_market_movers_leave_out_splits_the_prices_dont_show_yet(tmp_path, cfg):
     m = views.movers(views.Data(conn, cfg, views.Cache()))
     week = m["movers"]["ret5"]
     assert [r["symbol"] for r in week["up"]] == ["AAA"] and [r["symbol"] for r in week["down"]] == ["AAA"]
+    money = m["sector_money"]                    # where the money went: shares of the last session, biggest first
+    assert money and sum(r["share"] for r in money) == pytest.approx(1)
+    assert [r["value"] for r in money] == sorted((r["value"] for r in money), reverse=True)
+    assert 0 < sum(r["usual"] for r in money) <= 1 + 1e-9
 
 
 def test_friends_set_alerts_in_telegram_and_get_them_after_a_close(tmp_path, monkeypatch):

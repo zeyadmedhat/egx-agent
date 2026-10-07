@@ -1031,7 +1031,8 @@ def movers(d: Data) -> dict:
         if px.empty:
             return {"movers": None, "highs": [], "lows": []}
         close = px.pivot(index="date", columns="symbol", values="close").sort_index()
-        value = (close * px.pivot(index="date", columns="symbol", values="volume").reindex_like(close)).tail(20).mean()
+        traded = close * px.pivot(index="date", columns="symbol", values="volume").reindex_like(close)
+        value = traded.tail(20).mean()
         today = close.iloc[-1].dropna().index                      # traded at the last close
         c = close.ffill(limit=5)
         year = close.tail(250)
@@ -1056,7 +1057,15 @@ def movers(d: Data) -> dict:
         tiles = [{"symbol": s, "sector": sectors.get(s) or "Other", "cap": (firms.get(s) or {}).get("market_cap"),
                   "value": value.get(s), **{k: m.get(s) for k, m in moves.items()}}
                  for s in today if s in sectors.index]
-        return clean({"movers": out, "highs": sorted(highs), "lows": sorted(lows), "tiles": tiles})
+        # money by sector: each sector's share of the money traded at the last close, and its usual share (the 20
+        # sessions before), so you see where money is going now. One big deal day counts too.
+        by = traded.T.groupby(sectors.reindex(traded.columns).fillna("Other")).sum().T
+        last, usual = by.iloc[-1], by.iloc[-21:-1].sum()
+        sector_money = sorted(({"sector": k, "value": float(last[k]), "share": float(last[k] / last.sum()),
+                                "usual": float(usual[k] / usual.sum()) if usual.sum() else None}
+                               for k in by.columns if last[k] > 0), key=lambda r: -r["value"]) if last.sum() else []
+        return clean({"movers": out, "highs": sorted(highs), "lows": sorted(lows), "tiles": tiles,
+                      "sector_money": sector_money})
     return d.cache.get(d.version, ("movers",), build)
 
 

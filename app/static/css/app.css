@@ -1065,6 +1065,13 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .inv-bar.down { background: var(--down); }
 .inv-v { text-align: end; font-variant-numeric: tabular-nums; }
 .inv-note { font-size: 12px; margin-top: 8px; }
+.sec .inv-axis, .sec .inv-row { grid-template-columns: minmax(6.5em, 11em) 1fr 4.6em; }
+.sec .inv-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec .inv-row { margin-top: 7px; }
+.sec-money .inv-track::before { display: none; }
+.inv-bar.info { background: color-mix(in srgb, var(--info) 70%, transparent); }
+.sec-usual { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-inline-start: -1px; border-radius: 1px;
+  background: var(--text); }
 .mood-parts { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
 .mood-part { display: grid; grid-template-columns: 1fr minmax(120px, 34%); gap: 12px; align-items: center; }
 .shariah-note { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
