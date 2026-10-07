@@ -573,11 +573,12 @@ export const walletEffect = m => (m.kind === 'deposit' ? m.amount - (m.fee || 0)
   ? -m.amount - (m.fee || 0) : m.kind === 'fee' ? -m.amount : m.kind === 'settle' ? -(m.fee || 0) : m.amount);
 export const walletFlow = m => (m.kind === 'deposit' ? m.amount : m.kind === 'withdraw' ? -m.amount : 0);   // put in / took out
 
-// Thndr Trader (book.plan: { since, kind: 'monthly' | 'yearly', price, added, paid_to }). Thndr takes its commission
+// Thndr Trader (book.plan: { since, kind: 'monthly' | 'yearly', price, added, paid_to, used_at }). Thndr takes its commission
 // on every order and gives it back to your wallet at the end of the day ("Commission kickback") on the first 50 buys
 // and sales of each plan month, which starts on the day of the month you subscribed; the price comes out of your
 // wallet when the plan renews (support.thndr.app, Oct 2026). A renewal before you added the plan here is already in
-// the balance you had then (paid_to: the last one taken).
+// the balance you had then (paid_to: the last one taken). used_at { month, n }: the orders Thndr counted that plan
+// month that you didn't log here (you typed Thndr's count), added to the ones you log.
 export const PLAN_FREE = 50;
 export const PLAN_PRICE = { monthly: 245, yearly: 2646 };
 
@@ -601,7 +602,8 @@ export function planTrades(book, plan, day, skip = null) {
   const m = planMonth(plan, day);
   if (!m) return 0;
   const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
-  return book.fills.filter(f => f.id !== skip && real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')
+  const extra = plan.used_at && plan.used_at.month === m[0] ? plan.used_at.n : 0;
+  return extra + book.fills.filter(f => f.id !== skip && real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')
     && f.date >= m[0] && f.date <= day).length;
 }
 export const planFree = (book, plan, day, skip = null) => !!planMonth(plan, day) && planTrades(book, plan, day, skip) < PLAN_FREE;

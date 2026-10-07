@@ -254,7 +254,8 @@ function PlanCard({ p, onEdit }) {
       <span style=${`width:${Math.min(100, (100 * p.used) / p.free)}%`}></span></div>
     <p class="faint">${left
       ? t('{n} left until {date}. Each buy and each sale you log is one: Thndr takes its commission and gives it back to your wallet the same day.', { n: left, date: resets })
-      : t("All used: Thndr's commission stays on your orders until {date}.", { date: resets })}</p>
+      : t("All used: Thndr's commission stays on your orders until {date}.", { date: resets })}
+      ${' '}${t("Doesn't match Thndr's count? Press Edit and type it.")}</p>
     <div class="plan-facts">
       <div><span class="k-label">${t('Member since')}</span><b>${fmt.date(p.since)}</b></div>
       <div><span class="k-label">${t('Next billing date')}</span><b>${fmt.date(p.next)}</b></div>
@@ -266,7 +267,8 @@ function PlanCard({ p, onEdit }) {
 
 function PlanForm({ w, onClose }) {
   const p = w.plan;
-  const [form, setForm] = useState({ since: p ? p.since : '', kind: p ? p.kind : 'monthly', price: String(p ? p.price : w.prices.monthly) });
+  const [form, setForm] = useState({ since: p ? p.since : '', kind: p ? p.kind : 'monthly', price: String(p ? p.price : w.prices.monthly),
+    used: p ? String(Math.min(p.used, p.free)) : '' });
   const [busy, setBusy] = useState(false);
   const [gone, setGone] = useState(false);
   const set = k => e => {
@@ -287,7 +289,7 @@ function PlanForm({ w, onClose }) {
   };
   const submit = e => {
     e.preventDefault();
-    send('POST', { ...form, price: parseFloat(form.price) });
+    send('POST', { ...form, price: parseFloat(form.price), used: form.used === '' ? null : parseInt(form.used, 10) });
   };
   return html`<form class="preview-box" style="margin-top:14px;gap:10px" onSubmit=${submit}>
     <b>${t('Thndr Trader plan')}</b>
@@ -298,6 +300,8 @@ function PlanForm({ w, onClose }) {
         <option value="monthly">${t('Monthly')}</option><option value="yearly">${t('Yearly')}</option></select><//>
       <${Field} label="Plan price (EGP)"><input class="input" type="number" min="0" step="0.01" value=${form.price}
         onInput=${set('price')} required /><//>
+      <${Field} label="Free trades used at Thndr" help="The count on Thndr's plan page now (like 42/50). The orders you log from now on add to it; it starts again at the next billing date.">
+        <input class="input" type="number" min="0" max="50" step="1" value=${form.used} onInput=${set('used')} /><//>
     </div>
     <div class="row">
       ${p && html`<button class="btn sm danger-ghost" type="button" onClick=${() => setGone(true)}>${t('Remove the plan')}</button>`}

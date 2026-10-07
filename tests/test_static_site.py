@@ -900,6 +900,10 @@ def test_thndr_trader_gives_50_orders_a_plan_month_without_commission_and_renews
                                                    "today": "2026-12-01", "cfg": cfg, "value": 10_000}})
     assert js["months"] == [None, ["2026-08-25", "2026-09-25"], ["2026-09-25", "2026-10-25"], ["2026-10-25", "2026-11-25"]]
     assert js["free"] == [False, True, False, True]           # before subscribing; 0 used; all 50 used; a new month
+    typed, = run_js({"op": "thndrPlan", "args": {"plan": {**plan, "used_at": {"month": "2026-08-25", "n": 50}},
+                                                 "book": book, "days": ["2026-09-24", "2026-10-08"], "today": "2026-10-08",
+                                                 "cfg": cfg, "value": 10_000}})
+    assert typed["free"] == [False, False]                    # Thndr counted 50 that month (none logged); this one: 50 logged
     assert js["due"] == ["2026-10-25", "2026-11-25"] and js["next"] == "2026-12-25"
     assert short["months"] == [["2026-02-28", "2026-03-31"], ["2026-02-28", "2026-03-31"]]
     assert short["due"] == ["2026-10-31", "2026-11-30"]

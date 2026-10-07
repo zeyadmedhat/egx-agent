@@ -678,8 +678,15 @@ function savePlan(c, body) {
   const kind = body.kind === 'yearly' ? 'yearly' : 'monthly';
   const price = toNum(body.price, 'Plan price', { strict: false });
   const had = c.book.plan;
-  c.book.plan = { since, kind, price, added: had ? had.added : today,
+  const plan = { since, kind, price, added: had ? had.added : today,
     paid_to: had && had.since === since && had.kind === kind ? had.paid_to : E.planRenewals({ since, kind }, '', today).at(-1) };
+  // Thndr's count this plan month: what you didn't log here is kept beside the ones you log (engine.js planTrades)
+  const month = E.planMonth(plan, today)[0];
+  if (body.used !== undefined && body.used !== null && body.used !== '') {
+    const used = toNum(body.used, 'Free trades used', { strict: false, integer: true });
+    plan.used_at = { month, n: Math.max(0, used - E.planTrades(c.book, plan, today)) };
+  } else if (had && had.used_at && had.used_at.month === month) plan.used_at = had.used_at;
+  c.book.plan = plan;
   c.book.settings = { ...c.book.settings, broker: 'thndr_trader' };
   saveBook(c.book);
   return { message: had ? 'Your Thndr Trader plan is updated.'
