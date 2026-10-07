@@ -33,7 +33,8 @@ from .data.prices import INDEX_SYMBOL
 HORIZON = 20
 STEPS = (1, 5, 20)
 CONTEXT = 512          # sessions each model reads, about two years
-MIN_BARS = 120         # less history than this: no forecast
+MIN_BARS = 60          # less history than this (about 3 months): no forecast. KORA, listed June 2026, has 80
+VERSION = 2            # raise when which stocks or models change: the last close is forecast again at the next run
 BACKFILL = 40          # sessions before the first forecast also forecast (from what was known then): a record at once
 BACK_PER_RUN = 8       # ... this many a run, newest first (about a minute each on GitHub)
 # How the models' middle did before going live (7 Oct 2026): every stock with 120+ sessions, on 34 closes 15 sessions
@@ -55,11 +56,13 @@ MODELS = {             # key → (name, lab)
 
 
 def due(conn: sqlite3.Connection) -> str | None:
-    """The close to forecast from, if it's final (not one taken during the session) and not forecast yet."""
+    """The close to forecast from, if it's final (not one taken during the session) and not forecast yet (or forecast
+    by an older VERSION)."""
     made = db.get_meta(conn, "scan_data_date")
     if not made or not scan.scan_is_final(conn):
         return None
-    return None if conn.execute("SELECT 1 FROM ai_forecasts WHERE made=? LIMIT 1", (made,)).fetchone() else made
+    done = conn.execute("SELECT 1 FROM ai_forecasts WHERE made=? LIMIT 1", (made,)).fetchone()
+    return None if done and db.get_meta(conn, "ai_version") == str(VERSION) else made
 
 
 def inputs(conn: sqlite3.Connection, made: str) -> dict[str, pd.DataFrame]:
@@ -143,6 +146,7 @@ def run(conn: sqlite3.Connection, made: str, models: list[str] | None = None) ->
             report[key] = f"{n} stocks in {time.time() - t0:.0f}s"
         except Exception as exc:  # noqa: BLE001 - the others still run
             report[key] = f"failed ({type(exc).__name__}: {str(exc)[:120]})"
+    db.set_meta(conn, "ai_version", str(VERSION))
     return report
 
 

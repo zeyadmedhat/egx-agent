@@ -42,6 +42,10 @@ def test_forecasts_are_saved_once_a_close_and_graded_against_no_change(tmp_path,
     report = ai_forecast.run(conn, days[150]) | ai_forecast.run(conn, days[130])   # a backfill after
     assert report["up"].startswith("2 stocks") and report["broken"].startswith("failed (RuntimeError")
     assert ai_forecast.due(conn) is None                      # done for that close
+    monkeypatch.setattr(ai_forecast, "VERSION", ai_forecast.VERSION + 1)
+    assert ai_forecast.due(conn) == days[150]                 # ... unless the code changed which stocks get one
+    monkeypatch.undo()
+    _models(monkeypatch)
     assert ai_forecast.backfill_days(conn, days[150]) == days[149:141:-1]   # the sessions before, newest first
     paths = conn.execute("SELECT DISTINCT made FROM ai_paths").fetchall()
     assert [r[0] for r in paths] == [days[150]]               # an older run doesn't replace the newest path
