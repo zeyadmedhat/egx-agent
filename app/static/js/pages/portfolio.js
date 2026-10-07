@@ -242,20 +242,40 @@ function WalletForm({ kind, w, thndr, onClose }) {
 
 // Your Thndr Trader plan, like its page in Thndr's app: the plan month's free orders used, its dates and price.
 function PlanCard({ p, onEdit }) {
-  const left = Math.max(0, p.free - p.used), resets = fmt.date(p.month[1], false);
+  const used = Math.min(p.used, p.free), left = p.free - used, next = fmt.date(p.month[1], false);
+  const [match, setMatch] = useState(null);         // Thndr's count, while you type it
+  const save = async e => {
+    e.preventDefault();
+    try {
+      await api('/portfolio/plan', { method: 'POST', body: { since: p.since, kind: p.kind, price: p.price, used: parseInt(match, 10) } });
+      toast(t('Free trades now match Thndr: {n}/{f}.', { n: match, f: p.free }));
+      setMatch(null);
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
   return html`<div class="card plan-card" style="margin-top:14px">
     <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
       <div><span class="k-label">${t('Your plan')}</span>
         <h3>Thndr Trader <small class="faint">${t(p.kind === 'yearly' ? 'Yearly' : 'Monthly')}</small></h3></div>
       <button class="btn sm ghost" onClick=${onEdit}><${Icon} name="pencil" size=${14} />${t('Edit')}</button>
     </div>
-    <div class="plan-used"><b>${Math.min(p.used, p.free)}</b>/${p.free} ${t('free trades')}</div>
-    <div class="pbar" role="progressbar" aria-valuemin="0" aria-valuemax=${p.free} aria-valuenow=${Math.min(p.used, p.free)}>
-      <span style=${`width:${Math.min(100, (100 * p.used) / p.free)}%`}></span></div>
-    <p class="faint">${left
-      ? t('{n} left until {date}. Each buy and each sale you log is one: Thndr takes its commission and gives it back to your wallet the same day.', { n: left, date: resets })
-      : t("All used: Thndr's commission stays on your orders until {date}.", { date: resets })}
-      ${' '}${t("Doesn't match Thndr's count? Press Edit and type it.")}</p>
+    ${match === null
+      ? html`<div class="row plan-used" style="gap:10px;flex-wrap:wrap"><span><b>${used}</b>/${p.free} ${t('free trades')}</span>
+          <button class="btn sm ghost" onClick=${() => setMatch(String(used))}><${Icon} name="refresh" size=${14} />${t('Match Thndr')}</button></div>`
+      : html`<form class="row plan-used" style="gap:8px;flex-wrap:wrap" onSubmit=${save}>
+          <input class="input" style="width:90px" type="number" min="0" max=${p.free} step="1" value=${match} autofocus
+            aria-label=${t('Free trades used at Thndr')} onInput=${e => setMatch(e.target.value)} required />
+          <span>/${p.free} ${t('free trades')}</span>
+          <button class="btn sm primary" type="submit"><${Icon} name="check" size=${14} />${t('Save')}</button>
+          <button class="btn sm ghost" type="button" onClick=${() => setMatch(null)}>${t('Cancel')}</button></form>`}
+    <div class="pbar" role="progressbar" aria-valuemin="0" aria-valuemax=${p.free} aria-valuenow=${used}>
+      <span style=${`width:${(100 * used) / p.free}%`}></span></div>
+    <p class="faint">${match !== null ? t("Type the count on Thndr's plan page (Account → Subscriptions). The orders you log from now on add to it.")
+      : left ? t('{n} free trades left until your next billing date, {date}. Each buy and each sale is one: Thndr takes its commission and gives it back to your wallet the same day.', { n: left, date: next })
+        : t("All used: Thndr's commission stays on your orders until your next billing date, {date}.", { date: next })}</p>
+    <h4 class="plan-head">${t('Membership details')}</h4>
     <div class="plan-facts">
       <div><span class="k-label">${t('Member since')}</span><b>${fmt.date(p.since)}</b></div>
       <div><span class="k-label">${t('Next billing date')}</span><b>${fmt.date(p.next)}</b></div>
