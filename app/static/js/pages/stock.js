@@ -7,6 +7,7 @@ import {
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
+import { AiForecast } from './ai.js';
 
 const RANGES = [
   { value: 60, label: '3M' }, { value: 120, label: '6M' }, { value: 250, label: '1Y' }, { value: 500, label: '2Y' },
@@ -101,6 +102,7 @@ export function StockPage({ route }) {
             : html`<${LiveChart} symbol=${data.symbol} />
               <p class="faint chart-note">${t(LIVE_NOTE)} ${t('Your buy, stop and target lines are on the Agent chart.')}</p>`}
         </div>
+        ${data.ai && html`<${AiForecast} ai=${data.ai} sym=${data.symbol} />`}
         ${data.news && html`<div class="card stock-news"><div class="card-title"><${Icon} name="news" size=${15} />${t('News')}
             <span class="right faint">Mubasher, Reuters, Zawya</span></div>
           <${NewsList} items=${data.news} sources=${SOURCES} limit=${5}

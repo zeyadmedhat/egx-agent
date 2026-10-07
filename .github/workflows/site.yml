@@ -23,7 +23,7 @@ on:
         default: true
   push:
     branches: [main]
-    paths: ["app/**", "egx_agent/**", "site/**", "requirements.txt", ".github/workflows/site.yml"]
+    paths: ["app/**", "egx_agent/**", "site/**", "requirements*.txt", ".github/workflows/site.yml"]
 
 permissions:
   contents: write     # the keep-alive commit
@@ -77,6 +77,28 @@ jobs:
           done
           rm -rf _restore
           [ -f state/egx.db ] || echo "No backup to bring back: starting fresh."
+
+      # The AI models' forecasts for every stock (egx_agent/ai_forecast.py): once a day, from the last final close, before
+      # the site is built so it shows them. Only this step needs torch (CPU-only) and the models; a failure here never
+      # stops the site.
+      - name: Are the AI models' forecasts due?
+        id: ai
+        continue-on-error: true
+        env:
+          TZ: Africa/Cairo
+        run: python -m egx_agent.ai_forecast due --db state/egx.db >> "$GITHUB_OUTPUT"
+
+      - name: The AI models' forecasts
+        if: steps.ai.outputs.due != ''
+        continue-on-error: true
+        timeout-minutes: 30
+        env:
+          HF_HUB_DISABLE_PROGRESS_BARS: "1"
+          TZ: Africa/Cairo
+        run: |
+          pip install -q --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -q -r requirements-ai.txt
+          python -m egx_agent.ai_forecast run --db state/egx.db
 
       - id: pages
         uses: actions/configure-pages@v6

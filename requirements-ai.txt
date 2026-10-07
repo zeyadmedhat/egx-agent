@@ -1,0 +1,5 @@
+# Only the website run's AI forecast step (egx_agent/ai_forecast.py) needs these, after torch (CPU) is installed.
+chronos-forecasting>=2.3,<3
+timesfm[torch]>=2.0.2,<3
+tirex-ts>=1.4,<2
+einops>=0.8

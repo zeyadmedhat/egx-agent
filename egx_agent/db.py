@@ -94,6 +94,20 @@ CREATE TABLE IF NOT EXISTS predictions (
     resolved TEXT,                  -- 'done' or 'cancelled' (opened below the stop, or couldn't be bought that day)
     PRIMARY KEY (date, symbol, horizon)
 );
+CREATE TABLE IF NOT EXISTS ai_forecasts (   -- what each AI model forecast after a close (egx_agent/ai_forecast.py)
+    made TEXT NOT NULL,             -- the close it started from
+    symbol TEXT NOT NULL,
+    model TEXT NOT NULL,            -- chronos2 | timesfm | tirex | kronos
+    p1 REAL, p5 REAL, p20 REAL,     -- the price it forecast 1, 5 and 20 sessions later
+    PRIMARY KEY (made, symbol, model)
+);
+CREATE TABLE IF NOT EXISTS ai_paths (       -- each model's latest forecast, session by session, for the chart
+    symbol TEXT NOT NULL,
+    model TEXT NOT NULL,
+    made TEXT NOT NULL,
+    path TEXT NOT NULL,             -- JSON: the next 20 sessions' prices
+    PRIMARY KEY (symbol, model)
+);
 CREATE TABLE IF NOT EXISTS macro (
     series TEXT NOT NULL,           -- usdegp | interbank | inflation | egx70 | gold (see data/macro.py)
     date   TEXT NOT NULL,           -- YYYY-MM-DD, as the source dates it

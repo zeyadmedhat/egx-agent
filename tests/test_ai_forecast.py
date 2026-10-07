@@ -1,0 +1,79 @@
+"""The AI models' forecasts: saving them once a close, grading them against what happened and against "no change",
+and the stock page's card."""
+import numpy as np
+import pandas as pd
+
+from app import views
+from egx_agent import ai_forecast, config, db
+from egx_agent.data.prices import INDEX_SYMBOL
+
+
+def _market(tmp_path):
+    conn = db.connect(tmp_path / "egx.db")
+    days = [str(d.date()) for d in pd.bdate_range("2026-01-04", periods=200, freq="C", weekmask="Sun Mon Tue Wed Thu")]
+    for sym, base in [(INDEX_SYMBOL, 1000.0), ("AAA", 10.0), ("BBB", 50.0)]:
+        close = base * (1 + 0.001 * np.arange(len(days)))                # a steady rise
+        conn.executemany("INSERT INTO prices VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         [(sym, d, c, c, c, c, 1e5) for d, c in zip(days, close)])
+    conn.commit()
+    return conn, days
+
+
+def _models(monkeypatch):
+    def up(data, made):        # the truth: +0.1% of the first price a session
+        return {s: g["close"].iloc[-1] * (1 + 0.001 * np.arange(1, 21) / (1 + 0.001 * (len(g) - 1)))
+                for s, g in data.items()}
+
+    def flat(data, made):
+        return {s: np.full(20, g["close"].iloc[-1]) for s, g in data.items()}
+
+    def broken(data, made):
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr(ai_forecast, "RUNNERS", {"up": up, "flat": flat, "broken": broken})
+    monkeypatch.setattr(ai_forecast, "MODELS", {"up": ("Up", "Lab A"), "flat": ("Flat", "Lab B"), "broken": ("X", "C")})
+
+
+def test_forecasts_are_saved_once_a_close_and_graded_against_no_change(tmp_path, monkeypatch):
+    conn, days = _market(tmp_path)
+    _models(monkeypatch)
+    db.set_meta(conn, "scan_data_date", days[150])
+    assert ai_forecast.due(conn) == days[150]
+    report = ai_forecast.run(conn, days[150]) | ai_forecast.run(conn, days[130])   # a backfill after
+    assert report["up"].startswith("2 stocks") and report["broken"].startswith("failed (RuntimeError")
+    assert ai_forecast.due(conn) is None                      # done for that close
+    assert ai_forecast.backfill_days(conn, days[150]) == days[149:141:-1]   # the sessions before, newest first
+    paths = conn.execute("SELECT DISTINCT made FROM ai_paths").fetchall()
+    assert [r[0] for r in paths] == [days[150]]               # an older run doesn't replace the newest path
+
+    rec = ai_forecast.record(conn)
+    assert set(rec["made"]) == {days[130], days[150]} and set(rec["model"]) == {"up", "flat", "middle"}
+    row = rec[(rec["made"] == days[130]) & (rec["symbol"] == "AAA") & (rec["model"] == "up") & (rec["step"] == 5)].iloc[0]
+    assert row["target"] == days[135] and np.isclose(row["start"], 11.3) and np.isclose(row["actual"], 11.35)
+    assert np.isclose(row["forecast"], row["actual"])
+    assert len(rec[rec["made"] == days[150]].query("step == 20")) == 6      # 20 sessions on: finished too (day 170)
+    grades = {m: ai_forecast.grade(g) for m, g in rec.groupby("model")}
+    assert grades["up"]["direction"] == 1 and grades["up"]["closer"] == 1 and grades["up"]["error"] < 1e-6
+    assert grades["flat"]["direction"] is None and grades["flat"]["closer"] == 0   # "no change" itself
+    assert grades["middle"]["direction"] == 1 and grades["middle"]["closer"] == 1
+    assert np.isclose(grades["flat"]["error"], grades["flat"]["naive_error"])
+
+
+def test_the_stock_page_shows_each_model_their_middle_and_how_they_did(tmp_path, monkeypatch):
+    conn, days = _market(tmp_path)
+    _models(monkeypatch)
+    for made in (days[130], days[190]):
+        ai_forecast.run(conn, made)
+    d = views.Data(conn, dict(config.DEFAULTS), views.Cache())
+    close = d.indicators("AAA")["close"]
+    ai = views.ai_view(d, "AAA", close)
+    assert ai["made"] == ai["start_date"] == days[190] and ai["start"] == close.iloc[190] and [m["key"] for m in ai["models"]] == ["up", "flat"]
+    s = ai["steps"]["5"]
+    assert s["target"] == days[195] and s["up"] == 1 and s["down"] == 0 and np.isclose(s["lo"], ai["start"])
+    assert s["score"] == 0                                    # one rises, one stays: they don't agree
+    assert s["mid"] == np.median(list(s["values"].values())) and s["typical"] > 0
+    assert [p["made"] for p in s["past"]] == [days[130]] and s["past"][0]["actual"] == close.iloc[135]
+    assert s["record"]["n"] == 2 and s["all"]["middle"]["n"] == 4 and s["all"]["up"]["closer"] == 1   # both finished
+    assert len(ai["closes"]["time"]) == 61 and ai["closes"]["time"][-1] == days[-1]
+    assert views.ai_view(d, "BBB", d.indicators("BBB")["close"].iloc[195:]) is None   # no close by the forecast's
+    assert views.ai_view(d, "ZZZ", close) is None                                         # no forecasts
