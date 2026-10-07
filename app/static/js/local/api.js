@@ -666,7 +666,7 @@ function walletView(c, s) {
     withdraw_fee: String(c.cfg.broker).startsWith('thndr') ? THNDR_WITHDRAW_FEE : 0, settle_days: E.SETTLE_DAYS,
     settle: String(c.cfg.broker).startsWith('thndr') ? THNDR_SETTLE : null, thndr: String(c.cfg.broker).startsWith('thndr'),
     plan: plan ? { ...plan, free: E.PLAN_FREE, used: E.planTrades(book, plan, today), month: E.planMonth(plan, today),
-      next: E.planNext(plan, today) } : null, prices: E.PLAN_PRICE };
+      next: E.planNext(plan, today) } : null, prices: E.PLAN_PRICE, plan_free: E.PLAN_FREE };
 }
 
 // Your Thndr Trader plan, from its page in Thndr's app (Account → Subscriptions): saving it also sets your fees to
