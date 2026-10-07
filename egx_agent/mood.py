@@ -118,7 +118,11 @@ def compute(data: dict) -> dict | None:
                    "value": None if np.isnan(raw.at[day, k]) else float(raw.at[day, k])} for k in PARTS],
         "past": past, "since": str(ahead.index[0].date()) if len(ahead) else None,
         "flows": _last_flows(data.get("flows_table")),
-        "history": {"time": [str(t.date()) for t in mood.index[-250:]], "score": [round(float(v), 1) for v in mood.tail(250)]},
+        # the last year, for the chart: the mood, and what foreign and Arab investors bought net each day (million EGP)
+        "history": {"time": [str(t.date()) for t in mood.index[-250:]], "score": [round(float(v), 1) for v in mood.tail(250)],
+                    "flows": [None if pd.isna(v) else round(float(v), 1) for v in
+                              (data.get("flows") if data.get("flows") is not None else pd.Series(dtype=float))
+                              .reindex(mood.index[-250:])]},
     }
 
 

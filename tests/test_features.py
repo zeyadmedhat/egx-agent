@@ -211,6 +211,7 @@ def test_market_mood_is_fear_after_a_fall_and_greed_after_a_steady_climb():
     assert climb["score"] >= 76 and climb["label"] == "Extreme greed"
     assert [p["key"] for p in fall["parts"]] == list(mood.PARTS)
     assert fall["past"][-1]["label"] == "Any mood" and len(fall["history"]["time"]) == 250
+    assert fall["history"]["flows"] == [None] * 250          # the chart's bars: no flows in this market
     assert [mood.label(s) for s in (0, 24.9, 25, 50, 56, 75.9, 76, 100)] == [
         "Extreme fear", "Extreme fear", "Fear", "Neutral", "Greed", "Greed", "Extreme greed", "Extreme greed"]
 

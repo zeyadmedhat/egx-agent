@@ -879,6 +879,7 @@ export const AR = {
   "{pct} of the money traded": "{pct} من قيمة التداول",
   "Net buying on {date}, million EGP: Egyptians {e} · Arabs {a} · foreigners {f}. From the exchange's daily statement, as Amwal Al Ghad reports it.":
     "صافي الشراء في {date} بالمليون جنيه: المصريون {e} · العرب {a} · الأجانب {f}. من بيان البورصة اليومي كما تنشره أموال الغد.",
+  "Foreign + Arab": "الأجانب والعرب",
   "Mood": "المزاج", "Sessions": "الجلسات", "Up after a month": "صعد بعد شهر", "Typical month": "الشهر المعتاد",
   "How it's made, and what it told in the past": "كيف يُحسب، وماذا قال في الماضي",
   "Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk. The seventh, foreign and Arab investors' net buying, is EGX's own.":

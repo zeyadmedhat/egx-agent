@@ -6,7 +6,7 @@ import {
   Fold, More,
 } from '../ui.js';
 import { t, tp, tn } from '../i18n.js';
-import { BreadthChart } from '../charts.js';
+import { BreadthChart, MoodChart } from '../charts.js';
 
 const TONE = { ok: 'ok', warn: 'warn', bad: 'bad' };
 
@@ -138,6 +138,7 @@ function Mood({ m }) {
       <span><b class=${MOOD_TONE(m.score)}>${t(m.label)}</b><span class="faint"> · ${t('0 = extreme fear, 100 = extreme greed')}</span>
       ${m.week_ago != null && html`<br /><span class="faint">${t('{n} a week ago', { n: Math.round(m.week_ago) })}</span>`}</span></div>
     <div class="mood-scale"><span style=${`inset-inline-start:${Math.max(0, Math.min(100, m.score))}%`}></span></div>
+    ${m.history && m.history.time.length > 1 && html`<div class="mood-chart"><${MoodChart} h=${m.history} height=${360} /></div>`}
     <div class="mood-parts">${m.parts.map(p => html`<div class="mood-part">
       <span>${t(p.text)} <span class="faint">${partValue(p)}</span></span>
       ${p.score == null ? html`<span class="faint">–</span>` : html`<div class="gauge"><b class="gauge-v">${Math.round(p.score)}</b>
