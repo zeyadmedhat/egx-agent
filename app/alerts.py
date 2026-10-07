@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import requests
 
-from egx_agent import breadth, config, db, levels, portfolio, predict, scan
+from egx_agent import breadth, config, db, holidays, levels, portfolio, predict, scan
 from egx_agent.data import news
 
 from . import views
@@ -914,7 +914,8 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
     return {"scan": scan_date, "final": scan.scan_is_final(conn), "pred": db.get_meta(conn, "prediction_date"),
             "stocks": stocks, "bands": [[b["from"], b["to"], _r(b["hit"], 4), _r(b["ret"], 4)] for b in preds.get("bands") or []],
             "base10": _r((preds.get("base") or {}).get("10"), 4), "rated": preds.get("count") or 0,
-            "min_value": cfg["min_avg_value_egp"], "week": week, "x30": x30}
+            "min_value": cfg["min_avg_value_egp"], "week": week, "x30": x30,
+            "hol": [h["date"] for h in holidays.upcoming()]}     # the Worker asks for no scans on these
 
 
 def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None, extra: dict | None = None) -> dict:
@@ -983,15 +984,15 @@ def week_of(day: str) -> str:
 
 
 def weekly_due(data_date: str | None, sent_for: str | None, today: date | None = None) -> bool:
-    """The summary goes once a week: after Thursday's close, or on Friday or Saturday if Thursday's scan came late
-    (or the week ended early for a holiday). Never for an older week's data."""
+    """The summary goes once a week: after the week's last close (Thursday's, or Wednesday's when Thursday is a holiday),
+    or on Friday or Saturday if that scan came late. Never for an older week's data."""
     if not data_date:
         return False
     today = today or datetime.now(scan.CAIRO).date()
     week = week_of(data_date)
     if sent_for == week or week_of(today.isoformat()) != week:
         return False
-    return date.fromisoformat(data_date).weekday() == 3 or today.weekday() in (4, 5)
+    return week_of(holidays.sessions_after(data_date, 1)) != week or today.weekday() in (4, 5)
 
 
 HEALTH_AR = {"ok": "🟢 على المسار (أفضل اختياراته تتفوق على السهم المتوسط)",

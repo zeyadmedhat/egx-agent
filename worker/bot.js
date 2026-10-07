@@ -850,7 +850,7 @@ export function parseHoldings(text) {
 // ------------------------------------------------------------------ on-time scans
 // GitHub starts scheduled runs late, or not at all, when it's busy. After each close, every 10 minutes, the bot
 // checks whether that close's scan has reached it; if not, at each of these times (minutes after midnight, Cairo) it
-// asks GitHub to run the scan now. Holidays: the run finds no new prices and only rebuilds the site.
+// asks GitHub to run the scan now. Not on the holidays EGX announced (info.hol, from egx_agent/holidays.py).
 const SLOTS = [940, 970, 1000, 1060, 1150, 1270]      // 15:40, 16:10, 16:40, 17:40, 19:10, 21:10
 const MORNING = [570, 600]                            // the reminder before the open: 9:30–10:00 Cairo
 const LAST_MINUTE = 1350                              // 22:30
@@ -867,7 +867,7 @@ const SESSION = [630, 885]                            // 10:30–14:45: the live
 
 // The slot to ask for now ("2026-09-30 940", or "2026-09-30 s660" during the session), or why not.
 export function scanDue(info, now) {
-  if (!SESSION_DAYS.includes(now.weekday)) return { why: "no session today" }
+  if (!SESSION_DAYS.includes(now.weekday) || ((info && info.hol) || []).includes(now.day)) return { why: "no session today" }
   if (now.minute >= SESSION[0] && now.minute <= SESSION[1]) {
     return { key: `${now.day} s${SESSION[0] + Math.floor((now.minute - SESSION[0]) / 30) * 30}` }
   }

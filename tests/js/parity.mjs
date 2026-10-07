@@ -60,8 +60,8 @@ const OPS = {
   journal: ({ closed, history }) => I.journal(closed, history),
   correlations: ({ series, symbols }) => I.correlations(series, symbols),
   describe: ({ factors }) => factors.map(f => E.describe(f)),
-  sessionsAfter: ({ pairs }) => pairs.map(([d, n]) => E.sessionsAfter(d, n)),
-  expected: ({ times }) => times.map(t => E.expectedSessionDate(new Date(t))),
+  sessionsAfter: ({ pairs, holidays }) => { E.setHolidays(holidays); return pairs.map(([d, n]) => E.sessionsAfter(d, n)); },
+  expected: ({ times, holidays }) => { E.setHolidays(holidays); return times.map(t => E.expectedSessionDate(new Date(t))); },
   stopFrom: ({ times }) => times.map(t => E.stopFrom(new Date(t))),
   px: ({ values }) => values.map(v => E.px(v)),
 };

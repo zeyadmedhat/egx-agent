@@ -316,7 +316,7 @@ export function Term({ k, children }) {
     ${pos && html`<span class="term-pop" role="tooltip" style=${style}><b>${info[0]}</b>${info[1]}</span>`}</span>`;
 }
 
-// Is EGX trading right now? Sunday to Thursday, 10:00–14:30 Cairo time (public holidays aren't known here).
+// Is EGX trading right now? Sunday to Thursday, 10:00–14:30 Cairo time, except the holidays it announced.
 export function sessionState(now = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Africa/Cairo', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -325,6 +325,7 @@ export function sessionState(now = new Date()) {
   const day = `${parts.year}-${parts.month}-${parts.day}`;
   const mins = Number(parts.hour) * 60 + Number(parts.minute);
   if (parts.weekday === 'Fri' || parts.weekday === 'Sat') return { state: 'weekend', day };
+  if (((store.status && store.status.holidays) || {})[day]) return { state: 'holiday', day };
   if (mins < 600) return { state: 'pre', day };
   if (mins < 870) return { state: 'open', day };
   return { state: 'after', day };
@@ -345,6 +346,8 @@ export function SessionBadge({ dataDate }) {
         'The session ended. The agent scans after the close; until then its numbers use the {date} close.']
       : s.state === 'weekend'
         ? ['ok', 'Market closed', 'Closing prices', 'Final closing prices of {date}. EGX trades Sunday to Thursday.']
+        : s.state === 'holiday'
+          ? ['ok', 'Market closed', 'Holiday', 'EGX is closed today for a public holiday. Final closing prices of {date}.']
         : ['ok', s.state === 'pre' ? 'Before the open' : 'Market closed', 'Closing prices',
           'Final closing prices of {date}. The next session opens at 10:00 Cairo time.'];
   return html`<div class=${cls('session', tn)} title=${t(text, { date })}>

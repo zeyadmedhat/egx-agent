@@ -21,6 +21,7 @@ const localToday = () => {
 // ------------------------------------------------------------------ one request's context
 async function context() {
   const core = await load('core');
+  E.setHolidays(core.holidays);
   const book = loadBook();
   const cfg = { ...core.strategy, ...core.personal_defaults };
   for (const [k, v] of Object.entries(book.settings || {})) if (k in core.personal_defaults) cfg[k] = v;
@@ -151,6 +152,7 @@ function status(c, positions) {
     positions: positions.length,
     job: null,
     scan_url: c.core.scan_url || null,
+    holidays: Object.fromEntries(Object.entries(c.core.holidays || {}).filter(([d]) => d >= localToday())),
   };
 }
 

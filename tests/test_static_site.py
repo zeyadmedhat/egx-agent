@@ -12,7 +12,7 @@ import pytest
 from cryptography.exceptions import InvalidTag
 
 from app import static_site
-from egx_agent import config, corporate, db, levels, portfolio, risk, scan, strategy
+from egx_agent import config, corporate, db, holidays, levels, portfolio, risk, scan, strategy
 from egx_agent.data import prices as prices_mod
 from egx_agent.indicators import add_indicators
 from tests.conftest import make_ohlcv
@@ -298,6 +298,17 @@ def test_dates_and_words_match():
                       for t in times]
     assert got[2] == [corporate.describe(f) for f in factors]
     assert got[3] == [views.px(v) for v in values]
+    holidays.HOLIDAYS.update({"2026-10-08": "x", "2026-10-11": "y"})      # the same with EGX's holidays
+    try:
+        pairs += [("2026-10-07", 1), ("2026-10-06", 3)]
+        times += ["2026-10-08T18:00:00+03:00", "2026-10-11T16:00:00+03:00", "2026-10-12T09:00:00+03:00"]
+        got = run_js({"op": "sessionsAfter", "args": {"pairs": pairs, "holidays": dict(holidays.HOLIDAYS)}},
+                     {"op": "expected", "args": {"times": times, "holidays": dict(holidays.HOLIDAYS)}})
+        assert got[0] == [views.sessions_after(d, n) for d, n in pairs] and got[0][-1] == "2026-10-13"
+        assert got[1] == [scan.expected_session_date(datetime.fromisoformat(t).astimezone(scan.CAIRO)).isoformat()
+                          for t in times] and got[1][-3:] == ["2026-10-07"] * 3
+    finally:
+        holidays.HOLIDAYS.clear()
 
 
 # ------------------------------------------------------------------ what gets published

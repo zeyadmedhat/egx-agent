@@ -5,7 +5,7 @@ import sqlite3
 
 import pandas as pd
 
-from . import config, corporate, db, engine, levels
+from . import config, corporate, db, engine, holidays, levels
 from .indicators import add_indicators
 from .strategy import initial_stop
 
@@ -217,7 +217,6 @@ BOUNCE_DAYS = 20     # …is sold at its first close back above its 20-day avera
 # Walk-forward 2016–2026 (2026-10), stocks 30–50% under their 60-day high and under their 20-day average: waiting for
 # the first close back above it (at most 20 sessions) beat selling at once 68% of the time (median +3.6%, mean +1.3%);
 # 50%+ under it: 64%, +5.7%, +4.3%. For 10–30% falls the mean gain was about nothing (+0.3%): normal stops stay.
-SESSION = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
 
 
 def on_bounce(row: pd.Series, ind: pd.DataFrame, st: dict) -> dict:
@@ -239,7 +238,7 @@ def on_bounce(row: pd.Series, ind: pd.DataFrame, st: dict) -> dict:
     if len(ind) - 1 - start >= BOUNCE_DAYS:
         return {**st, "reason": f"Big loss ({loss:.1%}): no close above its 20-day average in {BOUNCE_DAYS} sessions: "
                                 "sell at the next open"}
-    level, by = float(ind["ema20"].iloc[-1]), str((ind.index[start] + BOUNCE_DAYS * SESSION).date())
+    level, by = float(ind["ema20"].iloc[-1]), str((ind.index[start] + BOUNCE_DAYS * holidays.session_day()).date())
     return {**st, "status": "BOUNCE", "bounce_level": level, "bounce_by": by,
             "reason": f"Big loss ({loss:.1%}): sell at the first close above its 20-day average ({level:.2f} now), "
                       f"by {by} at the latest"}

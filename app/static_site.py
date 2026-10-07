@@ -28,7 +28,7 @@ from pathlib import Path
 import yaml
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from egx_agent import breadth, config, corporate, db, record, scan
+from egx_agent import breadth, config, corporate, db, holidays, record, scan
 from egx_agent.data import dividends, prices, shariah
 
 from . import views
@@ -125,6 +125,7 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
     core = {
         "v": 1, "built": datetime.now().isoformat(timespec="seconds"), "scan_date": scan_date, "market": m or None,
         "final": scan.scan_is_final(conn),     # False: scanned during the session, again after the close
+        "holidays": dict(holidays.HOLIDAYS),   # EGX's announced holidays: the browser counts sessions without them
         "signals": signals, "stocks": views.stocks_list(d), "predictions": views.predictions(d),
         "spark": spark, "index": index or {"time": [], "close": []},
         "breadth_today": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},

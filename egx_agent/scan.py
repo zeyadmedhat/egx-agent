@@ -9,24 +9,23 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import corporate, db, levels, portfolio, predict, risk, strategy
+from . import corporate, db, holidays, levels, portfolio, predict, risk, strategy
 from .data import dividends, flows, macro, news, prices, shariah, universe
 from .indicators import add_indicators
 
 CAIRO = ZoneInfo("Africa/Cairo")
 DATA_READY = time(15, 30)       # EGX closes ~14:30 Cairo; give data providers an hour
-TRADING_WEEKDAYS = {6, 0, 1, 2, 3}  # Sunday–Thursday
 PRICES_FAILING = 0.25           # the price download counts as broken when over a quarter of the stocks got nothing
 
 
 def expected_session_date(now: datetime | None = None) -> date:
-    """Most recent EGX session whose closing data should be available by now (holidays ignored)."""
+    """Most recent EGX session whose closing data should be available by now (the announced holidays skipped)."""
     now = now or datetime.now(CAIRO)
     d = now.date()
-    if d.weekday() in TRADING_WEEKDAYS and now.time() >= DATA_READY:
+    if holidays.is_session(d) and now.time() >= DATA_READY:
         return d
     d -= timedelta(days=1)
-    while d.weekday() not in TRADING_WEEKDAYS:
+    while not holidays.is_session(d):
         d -= timedelta(days=1)
     return d
 
@@ -50,7 +49,7 @@ def session_scan_due(conn: sqlite3.Connection, now: datetime | None = None,
     """During a session, a scan of the live prices every half hour (the site's runs ask about every 30 minutes). It
     isn't final (scan_is_final), so it's scanned again after the close and Telegram waits for that one."""
     now = now or datetime.now(CAIRO)
-    if now.weekday() not in TRADING_WEEKDAYS or not SESSION[0] <= now.time() <= SESSION[1]:
+    if not holidays.is_session(now.date()) or not SESSION[0] <= now.time() <= SESSION[1]:
         return False
     finished = json.loads(db.get_meta(conn, "market") or "{}").get("finished")
     return not finished or now - datetime.fromisoformat(finished).astimezone(CAIRO) >= every

@@ -34,13 +34,15 @@ const byId = (a, b) => a.id - b.id;
 const DAY = 86400000;
 const iso = d => d.toISOString().slice(0, 10);
 const weekday = day => new Date(day + 'T00:00:00Z').getUTCDay();   // 0 = Sunday … 6 = Saturday
-const trading = day => weekday(day) <= 4;
+let holidays = {};                // EGX's announced holidays, {date: title} (egx_agent/holidays.py)
+export function setHolidays(h) { holidays = h || {}; }
+const trading = day => weekday(day) <= 4 && !(day in holidays);
 
 export function addDays(day, n) {
   return iso(new Date(Date.parse(day + 'T00:00:00Z') + n * DAY));
 }
 
-// Date n EGX sessions after `day` (public holidays not included), like views.sessions_after.
+// Date n EGX sessions after `day` (the announced holidays skipped), like views.sessions_after.
 export function sessionsAfter(day, n) {
   let d = day;
   for (let k = 0; k < n;) {

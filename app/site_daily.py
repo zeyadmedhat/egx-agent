@@ -34,7 +34,7 @@ from pathlib import Path
 
 import requests
 
-from egx_agent import config, db, predict, record, scan
+from egx_agent import config, db, holidays, predict, record, scan
 from egx_agent.data import dividends, flows, fundamentals, macro, news, prices
 
 from . import alerts, backup, health, jobs, static_site, views
@@ -175,6 +175,13 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         fresh = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0] == 0
         strategy = hashlib.sha256(json.dumps(static_site.strategy_settings(cfg), sort_keys=True).encode()).hexdigest()
         changed = db.get_meta(conn, "site_strategy") != strategy
+
+        try:   # EGX's holidays (a few looks a day), before deciding whether a close is due
+            n = holidays.check(conn)
+            if n is not None:
+                report["holidays"] = f"{n} known"
+        except Exception as exc:  # the days it knew still count
+            report["holidays"] = f"not checked ({type(exc).__name__})"
 
         # 1. prices and signals
         if fresh or force_scan or scan.scan_is_stale(conn, RETRY) or scan.session_scan_due(conn):

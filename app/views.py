@@ -10,11 +10,10 @@ from datetime import date, datetime
 import numpy as np
 import pandas as pd
 
-from egx_agent import breadth, config, corporate, db, levels, mood, portfolio, predict, record, risk, scan, strategy
+from egx_agent import breadth, config, corporate, db, holidays, levels, mood, portfolio, predict, record, risk, scan, strategy
 from egx_agent.data import dividends, flows, fundamentals, macro, news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
-EGX_DAY = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
 STATUS_ORDER = {"ADJUST": 0, "EXIT": 1, "BOUNCE": 2, "REVIEW": 3, "TIGHTEN STOP": 4, "HOLD": 5, "NO DATA": 6}
 ACTION_STATUSES = ("ADJUST", "EXIT", "BOUNCE", "REVIEW", "TIGHTEN STOP")
 SELL_REASONS = ["Stop-loss", "Target reached", "Time limit", "Trend break", "Taking partial profit",
@@ -64,9 +63,7 @@ def column(s: pd.Series, digits: int = 4) -> list:
     return clean(s.round(digits).astype(object).where(s.notna(), None).tolist())
 
 
-def sessions_after(day: str, n: int) -> str:
-    """Date n EGX sessions after `day` (Sunday–Thursday calendar; public holidays not included)."""
-    return str((pd.Timestamp(day) + n * EGX_DAY).date())
+sessions_after = holidays.sessions_after     # date n EGX sessions after a day, the announced holidays skipped
 
 
 def px(v) -> str:
@@ -349,6 +346,7 @@ def status(d: Data) -> dict:
                                             "watches", "finished")}, **mine} if m else None,
         "alerts": sum(1 for p in positions if p["status"] in ACTION_STATUSES),
         "positions": len(positions),
+        "holidays": {h["date"]: h["title"] for h in holidays.upcoming()},
     }
 
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import holidays
 from .config import DB_PATH
 
 # Shared by everyone: prices, stock info, scans, bonus-share events, the prediction model's numbers.
@@ -269,6 +270,7 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
         # these used to live in meta; now they're yours (user_meta), so bring over the old values once
         conn.execute("INSERT OR IGNORE INTO user_meta(key, value) SELECT key, value FROM meta WHERE key=?", (key,))
     conn.commit()
+    holidays.load(conn)
     return conn
 
 
@@ -277,6 +279,7 @@ def connect_market(path: Path | str) -> sqlite3.Connection:
     conn = _open(path)
     conn.executescript(MARKET_SCHEMA)
     _add_columns(conn, MARKET_COLUMNS)
+    holidays.load(conn)
     return conn
 
 

@@ -319,6 +319,8 @@ export const AR = {
   "The session ended. The agent scans after the close; until then its numbers use the {date} close.": "انتهت الجلسة. يفحص الوكيل السوق بعد الإغلاق، وحتى ذلك الحين أرقامه مبنية على إغلاق {date}.",
   "Final closing prices of {date}. The next session opens at 10:00 Cairo time.": "أسعار إغلاق نهائية ليوم {date}. تفتح الجلسة القادمة الساعة 10:00 بتوقيت القاهرة.",
   "Final closing prices of {date}. EGX trades Sunday to Thursday.": "أسعار إغلاق نهائية ليوم {date}. تتداول البورصة من الأحد إلى الخميس.",
+  "Holiday": "إجازة رسمية",
+  "EGX is closed today for a public holiday. Final closing prices of {date}.": "البورصة مغلقة اليوم لإجازة رسمية. أسعار إغلاق نهائية ليوم {date}.",
   // statuses and cautions
   "HOLD": "احتفاظ",
   "SELL": "بيع",

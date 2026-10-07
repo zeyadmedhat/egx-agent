@@ -7,8 +7,9 @@ import pandas as pd
 import pytest
 
 from app import alerts, health, views
-from egx_agent import backtest, config, db, engine, portfolio, predict, scan, strategy
+from egx_agent import backtest, config, db, engine, holidays, portfolio, predict, scan, strategy
 from egx_agent.data import dividends, shariah, universe
+from egx_agent.data.prices import INDEX_SYMBOL
 from tests.conftest import make_ohlcv
 from tests.test_static_site import FakeBot, _site_db, assert_same, bars_of, market, needs_node, run_js
 
@@ -284,6 +285,61 @@ def test_the_weekly_summary_goes_once_after_thursdays_close():
     assert not alerts.weekly_due("2026-10-01", "2026-09-27", fri)         # sent already
     assert not alerts.weekly_due("2026-10-01", None, sun)                 # a new week began: too late
     assert not alerts.weekly_due(None, None, thu)
+
+
+# ------------------------------------------------------------------ EGX's holidays
+
+ANNOUNCED = [   # (posted, text) as the news repeats the exchange's statements
+    ("2026-10-05", "البورصة المصرية تعلن الخميس المقبل إجازة رسمية بمناسبة ذكرى 6 أكتوبر . قررت إدارة البورصة المصرية "
+                   "اعتبار يوم الخميس الموافق 8 أكتوبر 2026 إجازة رسمية بمناسبة عيد القوات المسلحة 6 أكتوبر. وأوضحت "
+                   "البورصة أن استئناف العمل سيكون يوم الأحد الموافق 11 أكتوبر 2026."),
+    ("2026-05-21", "أعلنت إدارة البورصة المصرية تعطيل العمل رسميًا اعتبارًا من يوم الثلاثاء الموافق 26 مايو 2026، بمناسبة "
+                   "إجازة عيد الأضحى المبارك. وأوضحت البورصة أن الإجازة تستمر حتى يوم الأحد الموافق 31 مايو 2026، على أن "
+                   "يُستأنف العمل اعتبارًا من الاثنين الموافق أول يونيو 2026."),
+    ("2026-06-11", "أعلنت إدارة البورصة المصرية، في بيان اليوم الخميس 11 يونيو 2026، موعد إجازة رأس السنة الهجرية. وتقرر "
+                   "أن يكون يوم الخميس الموافق 18 من شهر يونيو 2026 إجازة رسمية. ومن المقرر استئناف العمل وإعادة فتح "
+                   "قاعات التداول بشكل طبيعي اعتبارًا من يوم الأحد الموافق 21 من شهر يونيو 2026."),
+    ("2026-04-09", "أعلنت البورصة المصرية تعطيل العمل بها يوم الأحد الموافق 12 أبريل 2026، بمناسبة عيد القيامة. وتقرر "
+                   "اعتبار يوم الاثنين الموافق 13 أبريل 2026 إجازة رسمية. يستأنف العمل يوم الثلاثاء الموافق 14 أبريل 2026."),
+    ("2024-06-26", "قررت إدارة البورصة المصرية، أن يكون يوم الأحد الموافق 30/06/2024أجازة رسمية بمناسبة ذكرى ثورة 30 "
+                   "يونيو. على أن يستأنف العمل بالبورصة المصرية يوم الأثنين الموافق 01/07/2024."),
+    ("2026-07-15", "البورصة المصرية تعطل التداولات 23 يوليو بمناسبة عيد الثورة"),       # no weekday: not read
+]
+
+
+def test_holidays_are_read_from_the_exchanges_announcements():
+    got = [holidays.parse(text, date.fromisoformat(day)) for day, text in ANNOUNCED]
+    assert got == [{"2026-10-08"}, {"2026-05-26", "2026-05-27", "2026-05-28", "2026-05-31"}, {"2026-06-18"},
+                   {"2026-04-12", "2026-04-13"}, {"2024-06-30"}, set()]
+
+
+def test_sessions_skip_the_announced_holidays(tmp_path):
+    from datetime import datetime
+
+    class Feed:
+        calls = 0
+
+        def get(self, url, params, headers, timeout):
+            Feed.calls += 1
+            posts = [{"date": f"{day}T12:00:00", "title": {"rendered": "البورصة المصرية إجازة"}, "content": {"rendered": text}}
+                     for day, text in ANNOUNCED[:2]]
+            return type("R", (), {"raise_for_status": lambda self: None, "json": lambda self: posts})()
+
+    conn = db.connect(tmp_path / "egx.db")
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) VALUES (?, '2026-05-27', 1, 1, 1, 1, 0)",
+                 (INDEX_SYMBOL,))
+    now = datetime(2026, 10, 7, 12)
+    assert holidays.check(conn, Feed(), now) == 4          # 27 May traded after all: dropped
+    assert holidays.check(conn, Feed(), now) is None and Feed.calls == 1     # not again for a few hours
+    assert "2026-05-27" not in holidays.HOLIDAYS and not holidays.is_session("2026-10-08")
+    db.connect(tmp_path / "egx.db")                                 # opening the file loads them
+    assert holidays.upcoming(date(2026, 10, 7)) == [{"date": "2026-10-08", "title": "البورصة المصرية إجازة"}]
+    assert views.sessions_after("2026-10-07", 1) == "2026-10-11" and views.sessions_after("2026-10-07", 2) == "2026-10-12"
+    thu = datetime(2026, 10, 8, 18, tzinfo=scan.CAIRO)
+    assert scan.expected_session_date(thu) == date(2026, 10, 7) and not scan.session_scan_due(conn, thu.replace(hour=11))
+    assert health.sessions_behind("2026-10-07", date(2026, 10, 11)) == 1
+    assert alerts.weekly_due("2026-10-07", None, date(2026, 10, 7))   # Thursday's a holiday: after Wednesday's close
+    holidays.HOLIDAYS.clear()
 
 
 def test_friends_get_the_weekly_summary_unless_they_turn_it_off(tmp_path, monkeypatch, cfg):
