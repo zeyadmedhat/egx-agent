@@ -68,11 +68,8 @@ export function PredictPage() {
 
 // Next week: each stock's honest chance (predict.week_chances) of rising 1.5× its daily range before falling as far
 // within 5 sessions, highest first. Strong: one of its top 10% in an uptrend while the market is healthy.
-const median = xs => { const v = xs.filter(x => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
-
 function Week({ data, rows, filters }) {
   const w = data.week, tst = w.test, s = tst.strong, a = tst.all, years = tst.years || [];
-  const move = median(data.rows.map(r => r[`move${WK}`]));
   return html`
     ${w.weak && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>${t('Weak market: better to skip short trades this week.')}</b>${' '}
       ${t('Fewer than 40% of stocks are above their 50-day average. In past weak markets even its top picks reached the target first only {pct} of the time.', { pct: fmt.pct(tst.weak_top.hit, 0, false) })}<//></div>`}
@@ -92,25 +89,7 @@ function Week({ data, rows, filters }) {
       <div class="card flush"><${WeekTable} rows=${rows} base=${a.hit} top=${data.top_n} /></div>
     </section>
 
-    <${Fold} title="How honest its chances are" hint=${t('When it said {said}, it happened {got}', bandText(tst.bands))}>
-      <p class="muted" style="font-size:13px;margin-bottom:12px">${t('Each week it asks: will the price rise {x}× its usual daily range (about {pct} now) before it falls as far, within 5 sessions? Each year was predicted by a version that had never seen it, and its chances were learnt from the years before.', {
-        x: fmt.num(w.atr, 1), pct: fmt.pct(move, 1, false) })}</p>
-      <div class="card flush"><${DataTable} rows=${tst.bands} rowKey=${b => b.from} columns=${[
-        { key: 'from', label: 'It said', sortable: false, render: b => html`<b>${fmt.pct(b.said, 0, false)}</b>` },
-        { key: 'got', label: 'It happened', align: 'r', sortable: false, render: b => html`<b>${fmt.pct(b.got, 0, false)}</b>` },
-        { key: 'n', label: 'Times', align: 'r', sortable: false, render: b => html`<span class="faint">${fmt.int(b.n)}</span>` },
-      ]} /></div>
-      ${tst.replay && tst.replay.cagr != null && html`<p class="muted" style="font-size:13px;margin-top:12px">${t('Buying its top 5 every week (half as much when the market is mixed, nothing when it is weak): {cagr} a year, worst drop {dd}. With {cost} more costs a trade: {cagr2} a year.', {
-        cagr: fmt.pct(tst.replay.cagr, 0), dd: fmt.pct(tst.replay.max_drawdown, 0), cost: fmt.pct(w.extra_cost, 1, false),
-        cagr2: fmt.pct((tst.replay_cost || {}).cagr, 0) })}</p>`}
-    <//>
     <p class="faint note" style="margin-top:14px">${t('Even its strong picks reach the target first only about {pct} of the time, so always use the stop. A second opinion, not advice.', { pct: fmt.pct(s.hit, 0, false) })}</p>`;
-}
-
-// The fold's hint: its highest band of chances with at least 500 tests, and how often that came true.
-function bandText(bands) {
-  const b = [...(bands || [])].reverse().find(x => x.n >= 500) || (bands || [])[0];
-  return { said: fmt.pct(b && b.said, 0, false), got: fmt.pct(b && b.got, 0, false) };
 }
 
 function WeekTable({ rows, base, top }) {

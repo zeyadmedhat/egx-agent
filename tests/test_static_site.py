@@ -863,3 +863,30 @@ def test_stops_that_move_only_when_you_change_them(cfg):
         assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "prev_stop", "last_close"))
     auto = [portfolio.real_status(pd.Series(x["args"]["trade"]), ind[x["args"]["trade"]["symbol"]], cfg) for x in cases]
     assert any(a["stop"] > e["stop"] for a, e in zip(auto, expected))      # the same trades' stops rise by themselves
+
+
+@needs_node
+def test_wallet_counts_top_ups_withdrawals_fees_and_sales_still_settling():
+    """Top-ups and withdrawals are money in and out, not profit; fees and money back are; a sale's money can't be
+    withdrawn for 2 sessions; and on the account's chart taking money out isn't a fall."""
+    sale = {"id": 1, "account": "real", "status": "closed", "symbol": "X", "entry_date": "2026-10-01",
+            "entry_price": 10, "exit_date": "2026-10-06", "exit_price": 12, "shares": 100, "fees": 0}
+    fills = [{"id": 2, "trade_id": 1, "symbol": "X", "date": "2026-10-01", "side": "buy", "shares": 100, "price": 10},
+             {"id": 3, "trade_id": 1, "symbol": "X", "date": "2026-10-06", "side": "sell", "shares": 100, "price": 12}]
+    cash = [{"id": 4, "date": "2026-10-07", "kind": "deposit", "amount": 1000, "fee": 10},
+            {"id": 5, "date": "2026-10-07", "kind": "withdraw", "amount": 500, "fee": 2.5},
+            {"id": 6, "date": "2026-10-07", "kind": "fee", "amount": 9.59},
+            {"id": 7, "date": "2026-10-07", "kind": "refund", "amount": 20.06}]
+    book = {"next_id": 8, "trades": [sale], "fills": fills, "dividends": [], "adjustments": [], "cash": cash}
+    days = ["a", "b", "c"]
+    curve = {"start": 1000, "fills": [{"date": "a", "symbol": "X", "side": "buy", "shares": 100, "price": 10}],
+             "moves": [{"date": "b", "cash": 1000, "flow": 1000}, {"date": "c", "cash": -500, "flow": -500}],
+             "series": {"X": {"time": days, "close": [10, 10, 10]}}, "index": {"time": days, "close": [100, 100, 110]}}
+    w, c = run_js({"op": "wallet", "args": {"book": book, "cfg": {"capital": 10_000}, "today": ["2026-10-07", "2026-10-08"]}},
+                  {"op": "equity", "args": curve})
+    s = w["summary"]
+    assert s["added"] == 500 and s["start"] == 10_500                       # what you put in, net
+    assert s["cash"] == pytest.approx(10_000 + 200 + 990 - 502.5 - 9.59 + 20.06)
+    assert w["unsettled"] == [1200, 0]                     # sold Tuesday: settles Thursday
+    assert c["value"] == [1000, 2000, 1500] and c["max_drawdown"] == 0 and c["ret"] == 0
+    assert c["index_ret"] == pytest.approx((20 - 500 / 110) * 110 / 1500 - 1)  # what you put in bought EGX30 too

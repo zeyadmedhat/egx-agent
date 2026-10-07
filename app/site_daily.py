@@ -35,7 +35,7 @@ from pathlib import Path
 import requests
 
 from egx_agent import config, db, predict, record, scan
-from egx_agent.data import dividends, fundamentals, macro, news, prices
+from egx_agent.data import dividends, flows, fundamentals, macro, news, prices
 
 from . import alerts, backup, health, jobs, static_site, views
 
@@ -140,6 +140,10 @@ def catch_up(conn, cfg: dict) -> dict:
             out["gold price"] = "not updated" if "gold" in missed else "downloaded"
         except Exception as exc:
             out["gold price"] = f"not updated ({type(exc).__name__})"
+    try:   # who bought and sold: the new sessions and 20 older ones a run (nothing to do once two years are in)
+        out["investors"] = f"{flows.update_split(conn)} sessions"
+    except Exception as exc:
+        out["investors"] = f"not updated ({type(exc).__name__})"
     return out
 
 

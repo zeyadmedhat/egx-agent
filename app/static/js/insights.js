@@ -24,18 +24,21 @@ function rawCloses(series, events, symbol) {
 // Your account's value after every session since your first buy, next to EGX30 scaled to the same start.
 // fills: {date, symbol, side: buy|sell|bonus, shares, price, fees}; dividends: {date, amount}; pending: bonus shares
 // or splits you haven't entered yet, valued like My Portfolio does meanwhile (old shares × new price × the ratio).
-export function equityCurve({ start, fills, dividends = [], series = {}, events = [], pending = [], index }) {
+// moves: your wallet's {date, cash: its change, flow: money you put in (+) or took out (−)}; what you put in buys EGX30
+// that day too, and flow[i] is what came in at session i.
+export function equityCurve({ start, fills, dividends = [], moves = [], series = {}, events = [], pending = [], index }) {
   if (!fills.length || !index || !index.time.length) return null;
   const sorted = [...fills].sort(byDateAsc);
   const sessions = index.time.map((t, i) => [t, index.close[i]]).filter(([t, c]) => t >= sorted[0].date && c != null);
   if (!sessions.length) return null;
   const closes = Object.fromEntries(Object.keys(series).map(s => [s, rawCloses(series[s], events, s)]));
   const divs = [...dividends].sort(byDateAsc);
+  const mv = [...moves].sort(byDateAsc);
   const shares = new Map();
   const last = new Map();
-  let cash = start, fi = 0, di = 0;
-  const time = [], value = [], bench = [];
   const base = sessions[0][1];
+  let cash = start, fi = 0, di = 0, mi = 0, units = start / base;
+  const time = [], value = [], bench = [], flow = [];
   for (const [t, idx] of sessions) {
     for (; fi < sorted.length && sorted[fi].date <= t; fi += 1) {
       const f = sorted[fi];
@@ -46,6 +49,9 @@ export function equityCurve({ start, fills, dividends = [], series = {}, events 
       if (f.price > 0) last.set(f.symbol, f.price);
     }
     for (; di < divs.length && divs[di].date <= t; di += 1) cash += divs[di].amount;
+    let put = 0;
+    for (; mi < mv.length && mv[mi].date <= t; mi += 1) { cash += mv[mi].cash; put += mv[mi].flow; }
+    units += put / idx;
     let held = 0;
     for (const [s, n] of shares) {
       if (!n) continue;
@@ -56,12 +62,25 @@ export function equityCurve({ start, fills, dividends = [], series = {}, events 
     }
     time.push(t);
     value.push(cash + held);
-    bench.push(start * idx / base);
+    bench.push(units * idx);
+    flow.push(put);
   }
-  let peak = -Infinity, maxDd = 0;
-  for (const v of value) { peak = Math.max(peak, v); maxDd = Math.min(maxDd, v / peak - 1); }
-  return { time, value, index: bench, ret: value[value.length - 1] / start - 1,
-    index_ret: bench[bench.length - 1] / start - 1, max_drawdown: maxDd };
+  const put = start + sum(flow);
+  return { time, value, index: bench, flow, ret: put > 0 ? value[value.length - 1] / put - 1 : null,
+    index_ret: put > 0 ? bench[bench.length - 1] / put - 1 : null, max_drawdown: worstDrop(value, flow) };
+}
+
+// The worst fall from a high, per unit of money in (like a fund's price), so taking money out isn't a loss.
+function worstDrop(value, flow) {
+  let units = 0, nav = 1, peak = 0, dd = 0;
+  value.forEach((v, i) => {
+    units = i ? units + flow[i] / nav : v;
+    if (units <= 0) return;
+    nav = v / units;
+    peak = Math.max(peak, nav);
+    dd = Math.min(dd, nav / peak - 1);
+  });
+  return dd;
 }
 
 // Your account, EGX30 and a bank deposit (the interbank rate, compounded daily) from the same start, in pounds,
@@ -82,21 +101,23 @@ export function inMoney(curve, money = {}, unit = 'egp') {
   const fx = onOrBefore(money.usdegp), gold = onOrBefore(money.gold), rate = onOrBefore(money.interbank);
   const hasRate = !!(money.interbank && money.interbank.time.length);
   const out = { time: curve.time, value: [], index: [], deposit: hasRate ? [] : null };
-  let dep = curve.index[0];
+  const flow = [];                                  // money put in each session, in this unit
+  let dep = curve.index[0], put = 0;
   for (let i = 0; i < curve.time.length; i += 1) {
-    const t = curve.time[i];
+    const t = curve.time[i], f = i ? (curve.flow || [])[i] || 0 : curve.index[0];
     if (i && hasRate) dep *= 1 + ((rate(curve.time[i - 1]) || 0) / 100) * (days(curve.time[i - 1], t) / 365);
+    if (i) dep += f;
     const usd = fx(t), per = unit === 'usd' ? usd : unit === 'gold' ? (gold(t) && usd ? (gold(t) * usd) / OUNCE_G : null) : 1;
     if (!per) return null;
+    flow.push(f / per);
+    put += f / per;
     out.value.push(curve.value[i] / per);
     out.index.push(curve.index[i] / per);
     if (hasRate) out.deposit.push(dep / per);
   }
-  const start = out.index[0], last = a => a[a.length - 1];
-  let peak = -Infinity, maxDd = 0;
-  for (const v of out.value) { peak = Math.max(peak, v); maxDd = Math.min(maxDd, v / peak - 1); }
-  return { ...out, ret: last(out.value) / start - 1, index_ret: last(out.index) / start - 1,
-    deposit_ret: hasRate ? last(out.deposit) / start - 1 : null, max_drawdown: maxDd };
+  const last = a => a[a.length - 1], gain = a => (put > 0 ? last(a) / put - 1 : null);
+  return { ...out, ret: gain(out.value), index_ret: gain(out.index), deposit_ret: hasRate ? gain(out.deposit) : null,
+    max_drawdown: worstDrop(out.value, flow) };
 }
 
 // The Health tab's checkup: what's out of line in your portfolio and what to do about it, most serious first.

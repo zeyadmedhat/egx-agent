@@ -564,21 +564,39 @@ export function deleteTrade(book, tradeId) {
   book.trades = book.trades.filter(t => t.id !== tradeId);
 }
 
+// Your broker wallet (book.cash, the real account): money you topped up or withdrew, and money in or out beside the
+// orders (settlement fees, a commission kickback). A fix sets the balance to what your broker shows.
+export const walletEffect = m => (m.kind === 'deposit' ? m.amount - (m.fee || 0) : m.kind === 'withdraw'
+  ? -m.amount - (m.fee || 0) : m.kind === 'fee' ? -m.amount : m.amount);
+export const walletFlow = m => (m.kind === 'deposit' ? m.amount : m.kind === 'withdraw' ? -m.amount : 0);   // put in / took out
+
+// A sale's money can buy at once, but can be withdrawn only once it settles, about 2 working days later.
+export const SETTLE_DAYS = 2;
+export function unsettled(book, today) {
+  const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
+  return sum(book.fills.filter(f => f.side === 'sell' && real.has(f.trade_id) && sessionsAfter(f.date, SETTLE_DAYS) > today)
+    .map(f => f.shares * f.price - (f.fees || 0)));
+}
+
 export function accountSummary(book, account, cfg, lastClose, events = []) {
-  const start = +(account === 'real' ? cfg.capital : cfg.paper_capital);
+  const capital = +(account === 'real' ? cfg.capital : cfg.paper_capital);
+  const moves = account === 'real' ? book.cash || [] : [];
+  const added = sum(moves.map(walletFlow));
+  const start = capital + added;                  // the money you put in: returns don't count top-ups as profit
   const closed = trades(book, account, ['closed']);
   const open = trades(book, account, ['open']);
   const dividends = sum(Object.values(dividendsByTrade(book, account)));
   const realized = sum(closed.map(t => (t.exit_price - t.entry_price) * t.shares - (t.fees || 0))) + dividends;
   const cost = sum(open.map(t => t.entry_price * t.shares + (t.fees || 0)));
-  const cash = start + realized - cost;
+  const cash = capital + sum(moves.map(walletEffect)) + realized - cost;
   // A position still waiting for its bonus-share update holds the old share count at old prices.
   const factor = Object.fromEntries(Object.entries(pending(book, events, account)).map(([id, e]) => [id, e.factor]));
   const market = sum(open.map(t => (lastClose[t.symbol] ?? t.entry_price) * t.shares * (factor[t.id] ?? 1)));
   const equity = cash + market;
   return {
-    start, cash, equity, realized, dividends, unrealized: market - cost, open_count: open.length,
-    open_risk: sum(open.map(t => Math.max(0, t.entry_price - t.stop) * t.shares)), return_pct: equity / start - 1,
+    start, capital, added, cash, equity, realized, dividends, unrealized: market - cost, open_count: open.length,
+    open_risk: sum(open.map(t => Math.max(0, t.entry_price - t.stop) * t.shares)),
+    return_pct: start > 0 ? equity / start - 1 : null,
   };
 }
 

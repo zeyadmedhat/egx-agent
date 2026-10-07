@@ -52,6 +52,9 @@ const OPS = {
       trades: E.trades(book, 'real'), fills: book.fills, dividends: E.dividendsByTrade(book, 'real'),
       settings: book.settings, next_id: E.nextId(book) };
   },
+  // your wallet (local/api.js walletView): the account with its top-ups, withdrawals and fees, and what's settling
+  wallet: ({ book, cfg, today }) => ({ summary: E.accountSummary(book, 'real', cfg, {}, []),
+    unsettled: today.map(d => E.unsettled(book, d)) }),
   plan: args => planTrade(args),
   equity: args => I.equityCurve(args),
   journal: ({ closed, history }) => I.journal(closed, history),

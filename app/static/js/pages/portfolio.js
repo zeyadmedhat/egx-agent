@@ -56,7 +56,9 @@ export function PortfolioPage({ route }) {
       ${STATIC && data.closed.length > 0 && !openClosed && html`<p class="faint" style="font-size:12.5px;margin-top:8px">${t('Tap a closed trade to edit or delete it.')}</p>`}
       ${openClosed && html`<${ClosedDetail} r=${openClosed} data=${data} onClose=${() => setClosedId(null)} />`}
     </section>`;
-  const tab = TABS.some(x => x.value === route.query.tab) ? route.query.tab : 'positions';
+  const tabs = data.wallet ? [TABS[0], { value: 'wallet', label: 'Wallet' }, ...TABS.slice(1)] : TABS;
+  const tab = tabs.some(x => x.value === route.query.tab) ? route.query.tab : 'positions';
+  const ret = s.start > 0 ? equity / s.start - 1 : null;
   const pickTab = v => go(v === 'positions' ? '#/portfolio' : `#/portfolio?tab=${v}`);
   return html`
     <${PageHead} title="My Portfolio" sub="The trades you placed with your broker, checked against the exit rules after each close.">
@@ -76,8 +78,8 @@ export function PortfolioPage({ route }) {
     </section>`}
     <div class="kpis">
       <${Kpi} label="Account value" value=${fmt.short(equity)}
-        sub=${`${fmt.pct(equity / s.start - 1)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
-        subClass=${s.cash < 0 ? 'warn' : tone(equity / s.start - 1)} />
+        sub=${`${fmt.pct(ret)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
+        subClass=${s.cash < 0 ? 'warn' : tone(ret)} />
       <${Kpi} label="Open profit / loss" value=${fmt.signed(openPnl)} valueClass=${tone(openPnl)}
         sub=${live ? 'EGP after buy fees, live (~15 min late)' : 'EGP after buy fees, at the last close'} />
       <${Kpi} label="Closed profit / loss" value=${fmt.signed(s.realized)} valueClass=${tone(s.realized)}
@@ -85,8 +87,8 @@ export function PortfolioPage({ route }) {
       <${Kpi} label="Loss if all stops hit" value=${fmt.short(s.open_risk)}
         sub=${s.equity ? t('{pct} of your account', { pct: fmt.pct(s.open_risk / s.equity, 1, false) }) : ''} />
     </div>
-    <div style="margin-top:16px"><${Seg} options=${TABS} value=${tab} onChange=${pickTab} /></div>
-    ${tab === 'health' ? html`<${HealthTab} data=${data} />` : tab === 'journal' ? html`${closedSection}<${JournalTab} data=${data} />` : html`
+    <div style="margin-top:16px"><${Seg} options=${tabs} value=${tab} onChange=${pickTab} /></div>
+    ${tab === 'wallet' ? html`<${WalletTab} data=${data} />` : tab === 'health' ? html`<${HealthTab} data=${data} />` : tab === 'journal' ? html`${closedSection}<${JournalTab} data=${data} />` : html`
     <section class="section">
       <${SectionHead} title="Open positions" count=${data.positions.length}
         hint=${data.positions.length ? 'Sell or edit opens the sale form and the position\'s history.' : ''} />
@@ -100,10 +102,120 @@ export function PortfolioPage({ route }) {
     </section>
 
     <section class="section">
-      <p class="faint" style="font-size:12.5px;margin-top:10px">${t('Starting capital {v}', { v: fmt.egp(s.start) })}${' '}
+      <p class="faint" style="font-size:12.5px;margin-top:10px">${t('Starting capital {v}', { v: fmt.egp(s.capital ?? s.start) })}${s.added ? ` · ${t('added since {v}', { v: fmt.signed(s.added) })}` : ''}${' '}
         (<a href="#/settings">${t('change it in Settings')}</a>). ${data.fee_cfg.broker === 'other' ? t('Profit and loss include {fee}% fees each way.', { fee: data.fee_pct })
           : t("Profit and loss include Thndr's fees each way.")} ${t('Open positions count the buy fees only, like your broker: the selling fees count once you sell.')}</p>
     </section>`}`;
+}
+
+// ------------------------------------------------------------------ Wallet tab (the website)
+// Like your broker's wallet: the balance, what can be withdrawn now and what's still settling, top up, withdraw, a fee
+// or money back beside the orders, matching your broker's balance, and every pound in or out (local/api.js walletView).
+const WALLET_FORMS = {
+  deposit: { title: 'Top up', icon: 'plus' },
+  withdraw: { title: 'Withdraw', icon: 'sell' },
+  fee: { title: 'A fee', icon: 'coins', notes: ['Settlement fees', 'Other fee'] },
+  refund: { title: 'Money back', icon: 'coins', notes: ['Commission kickback', 'Other'] },
+  fix: { title: 'Match my broker', icon: 'refresh' },
+};
+const MOVE_NAME = { deposit: 'Top up', withdraw: 'Withdrawal', fee: 'Fee', refund: 'Money back', fix: 'Set to match my broker' };
+
+function WalletTab({ data }) {
+  const w = data.wallet, thndr = String(data.fee_cfg.broker).startsWith('thndr');
+  const [form, setForm] = useState(null);
+  const [gone, setGone] = useState(null);           // the row you asked to remove
+  const what = m => (m.kind === 'buy' || m.kind === 'sell'
+    ? t(m.kind === 'buy' ? 'Bought {n} {sym}' : 'Sold {n} {sym}', { n: fmt.int(m.shares), sym: m.symbol })
+    : m.kind === 'dividend' ? t('Dividend from {sym}', { sym: m.symbol }) : tn(m.note) || t(MOVE_NAME[m.kind]));
+  const columns = [
+    { key: 'date', label: 'Date', fmt: v => fmt.date(v) },
+    { key: 'kind', label: 'What', sortable: false, render: m => html`<b>${what(m)}</b>${m.fee > 0
+      ? html` <span class="faint">${t('incl. {v} fees', { v: fmt.num(m.fee, 2) })}</span>` : ''}` },
+    { key: 'amount', label: 'EGP', align: 'r', render: m => html`<b class=${tone(m.amount)}>${fmt.signed(m.amount, 2)}</b>` },
+    { key: 'id', label: '', sortable: false, render: m => m.id != null && html`<button class="btn sm ghost"
+      title=${t('Remove')} aria-label=${t('Remove')} onClick=${() => setGone(m)}><${Icon} name="trash" size=${14} /></button>` },
+  ];
+  const remove = async () => {
+    try {
+      toast((await api(`/wallet/${gone.id}`, { method: 'DELETE' })).message);
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
+  return html`
+    <div class="kpis" style="margin-top:16px">
+      <${Kpi} label="Wallet" value=${fmt.egp(w.balance, 2)} valueClass=${w.balance < 0 ? 'down' : ''}
+        sub=${t('your stocks {v}', { v: fmt.egp(data.summary.equity - w.balance) })} />
+      <${Kpi} label="Available to withdraw" value=${fmt.egp(w.available, 2)} />
+      <${Kpi} label="Unsettled" value=${fmt.egp(w.unsettled, 2)}
+        sub=${t('can buy now, withdraw in {n} working days', { n: w.settle_days })}
+        title=${t('Money from sales in the last {n} working days: you can buy with it now, but withdraw it only once it settles.', { n: w.settle_days })} />
+    </div>
+    <div class="row" style="margin-top:14px;flex-wrap:wrap;gap:8px">
+      ${Object.entries(WALLET_FORMS).map(([k, f]) => html`<button class=${cls('btn', k === 'deposit' ? 'primary' : '', k !== 'deposit' && k !== 'withdraw' && 'sm ghost')}
+        aria-pressed=${form === k} onClick=${() => setForm(x => (x === k ? null : k))}><${Icon} name=${f.icon} size=${16} />${t(f.title)}</button>`)}
+    </div>
+    ${form && html`<${WalletForm} key=${form} kind=${form} w=${w} thndr=${thndr} onClose=${() => setForm(null)} />`}
+    <section class="section">
+      <${SectionHead} title="Money in and out" count=${w.moves.length}
+        hint="Top-ups, withdrawals, fees and money back, with every buy, sale and dividend you logged. Newest first." />
+      <div class="card flush"><${DataTable} columns=${columns} rows=${w.moves} rowKey=${(m, i) => m.id ?? `${m.kind}${m.date}${i}`}
+        limit=${15} empty="Nothing yet. Press Top up when you add money at your broker." /></div>
+      <p class="faint" style="font-size:12.5px;margin-top:8px">${t("Your wallet is your starting capital plus top-ups, minus withdrawals, after your trades and fees. If it doesn't match your broker's app, press Match my broker.")}</p>
+    </section>
+    ${gone && html`<${Confirm} title="Remove this from your wallet?" text=${`${what(gone)}: ${fmt.signed(gone.amount, 2)} EGP`}
+      confirmLabel="Remove" danger onConfirm=${remove} onClose=${() => setGone(null)} />`}`;
+}
+
+function WalletForm({ kind, w, thndr, onClose }) {
+  const spec = WALLET_FORMS[kind];
+  const [form, setForm] = useState({ date: todayISO(), amount: '', fee: kind === 'withdraw' && w.withdraw_fee ? String(w.withdraw_fee) : '',
+    note: (spec.notes || [''])[0], balance: '' });
+  const [busy, setBusy] = useState(false);
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const amount = parseFloat(kind === 'fix' ? form.balance : form.amount), fee = parseFloat(form.fee) || 0;
+  const valid = kind === 'fix' ? amount >= 0 : amount > 0;
+  const total = kind === 'withdraw' ? amount + fee : kind === 'deposit' ? amount - fee : null;
+  const submit = async e => {
+    e.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    try {
+      toast((await api('/portfolio/wallet', { method: 'POST',
+        body: { kind, date: form.date, amount, fee, note: form.note, balance: amount } })).message);
+      onClose();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const feeHelp = kind === 'withdraw'
+    ? (thndr ? t('Thndr takes {v} EGP a bank transfer.', { v: fmt.num(w.withdraw_fee, 1) }) : "Your broker's fee, if any.")
+    : (thndr ? 'At Thndr an e-wallet top-up has a fee; InstaPay and bank transfers are free.' : "Your broker's fee, if any.");
+  return html`<form class="preview-box" style="margin-top:14px;gap:10px" onSubmit=${submit}>
+    <b>${t(spec.title)}</b>
+    <div class="form-grid">
+      ${kind === 'fix'
+        ? html`<${Field} label="Your broker's wallet balance (EGP)" help="The balance your broker's app shows. Record your top-ups and withdrawals first: what's left of the difference counts as a gain or a loss.">
+            <input class="input" type="number" min="0" step="0.01" value=${form.balance} onInput=${set('balance')} required /><//>`
+        : html`<${Field} label="Amount (EGP)" help=${kind === 'withdraw' ? t('Up to {v} now', { v: fmt.egp(Math.max(0, w.available - fee), 2) }) : ''}>
+            <input class="input" type="number" min="0.01" step="0.01" value=${form.amount} onInput=${set('amount')} required /><//>`}
+      ${(kind === 'deposit' || kind === 'withdraw') && html`<${Field} label="Fee (EGP)" help=${feeHelp}>
+        <input class="input" type="number" min="0" step="0.01" value=${form.fee} onInput=${set('fee')} /><//>`}
+      ${spec.notes && html`<${Field} label="What it is"><select class="input" value=${form.note} onChange=${set('note')}>
+        ${spec.notes.map(n => html`<option value=${n}>${t(n)}</option>`)}</select><//>`}
+      ${kind !== 'fix' && html`<${Field} label="Date"><${DateInput} weekends value=${form.date} onInput=${set('date')} /><//>`}
+    </div>
+    ${kind === 'fee' && thndr && html`<p class="faint" style="font-size:12.5px;margin:0">${t("Each buy and sale you log already counts Thndr's commission and the exchange's fees, which Thndr may take a day later as settlement fees. Add a fee here only if it's something else; if your balance is off, use Match my broker.")}</p>`}
+    <div class="row">
+      <span style="flex:1">${total != null && amount > 0 ? t(kind === 'withdraw' ? 'Total out of your wallet: {v}' : 'Reaches your wallet: {v}', { v: fmt.egp(total, 2) }) : ''}</span>
+      <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
+      <button class="btn primary sm" type="submit" disabled=${busy || !valid}><${Icon} name="check" />${t('Save')}</button>
+    </div>
+  </form>`;
 }
 
 // ------------------------------------------------------------------ Health tab

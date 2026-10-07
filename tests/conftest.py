@@ -59,4 +59,7 @@ def _no_tradingview_lists(monkeypatch):
     monkeypatch.setattr(dividends, "_feed", offline)
     monkeypatch.setattr(dividends, "fetch", offline)
     monkeypatch.setattr(flows, "update", offline)
+    split = flows.update_split
+    monkeypatch.setattr(flows, "update_split", lambda conn, session=None, **kw: split(conn, session, **kw) if session
+                        else offline())
     monkeypatch.setattr(prices.TvProvider, "fetch_hourly", lambda self, symbol, n_bars: None)

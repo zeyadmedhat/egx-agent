@@ -318,7 +318,7 @@ async function portfolioView(c) {
   }
   const [, sig] = signals(c);
   return {
-    summary: s, positions: await openPositions(c), closed: rows, closed_stats: stats,
+    summary: s, wallet: walletView(c, s), positions: await openPositions(c), closed: rows, closed_stats: stats,
     signals: sig.filter(r => r.action === 'BUY').map(r => ({ symbol: r.symbol, entry_high: r.entry_high, shares: r.shares })),
     fee_pct: E.feePct(cfg), fee_cfg: { broker: cfg.broker, fee_pct_per_side: cfg.fee_pct_per_side },
     sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
@@ -374,6 +374,7 @@ async function historyView(c) {
   const fills = c.book.fills.filter(f => real.has(f.trade_id))
     .map(f => ({ date: f.date, symbol: f.symbol, side: f.side, shares: f.shares, price: f.price, fees: f.fees || 0 }));
   const dividends = c.book.dividends.filter(x => real.has(x.trade_id)).map(x => ({ date: x.date, amount: x.amount }));
+  const moves = (c.book.cash || []).map(m => ({ date: m.date, cash: E.walletEffect(m), flow: E.walletFlow(m) }));
   const symbols = [...new Set(fills.map(f => f.symbol))];
   const pages = await Promise.all(symbols.map(s => load(`stock/${s}`).catch(() => null)));
   const series = {};
@@ -381,7 +382,7 @@ async function historyView(c) {
   const shared = (await load('history').catch(() => null)) || { buys: [], inflation: [] };
   const pending = Object.values(E.pending(c.book, c.core.events, 'real'))
     .map(e => ({ symbol: e.symbol, ex_date: e.ex_date, factor: e.factor }));
-  return { start: +c.cfg.capital, fills, dividends, pending, events: c.core.events.filter(e => symbols.includes(e.symbol)),
+  return { start: +c.cfg.capital, fills, dividends, moves, pending, events: c.core.events.filter(e => symbols.includes(e.symbol)),
     series, index: fills.length ? c.core.index : null, ...shared };
 }
 
@@ -617,6 +618,71 @@ function deleteDividend(c, id) {
   return { message: `Removed the ${money2(row.amount)} EGP ${row.symbol} dividend.` };
 }
 
+// ------------------------------------------------------------------ your wallet (engine.js walletEffect)
+const THNDR_WITHDRAW_FEE = 2.5;     // EGP a bank transfer out of Thndr (Oct 2026)
+const WALLET_KINDS = ['deposit', 'withdraw', 'fee', 'refund', 'fix'];
+
+// Like your broker's wallet: the balance, what can be withdrawn now, and every pound in or out, newest first.
+function walletView(c, s) {
+  const { book } = c;
+  const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
+  const wait = E.unsettled(book, localToday());
+  const rows = [
+    ...(book.cash || []).map(m => ({ id: m.id, date: m.date, kind: m.kind, amount: E.walletEffect(m), fee: m.fee || 0,
+      note: m.note || '' })),
+    ...book.fills.filter(f => real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')).map(f => ({
+      date: f.date, kind: f.side, symbol: f.symbol, shares: f.shares, fee: f.fees || 0,
+      amount: f.side === 'buy' ? -(f.shares * f.price + (f.fees || 0)) : f.shares * f.price - (f.fees || 0) })),
+    ...book.dividends.filter(d => real.has(d.trade_id)).map(d => ({ date: d.date, kind: 'dividend', symbol: d.symbol,
+      amount: d.amount })),
+  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || 0) - (a.id || 0)));
+  return { balance: s.cash, unsettled: wait, available: Math.max(0, s.cash - wait), moves: rows,
+    withdraw_fee: String(c.cfg.broker).startsWith('thndr') ? THNDR_WITHDRAW_FEE : 0, settle_days: E.SETTLE_DAYS };
+}
+
+function walletMove(c, body) {
+  const kind = String(body.kind || '');
+  if (!WALLET_KINDS.includes(kind)) fail(422, 'Choose top up, withdraw, a fee or money back.');
+  const date = toDay(body.date || localToday());
+  const note = String(body.note || '').trim().slice(0, 100);
+  const s = E.accountSummary(c.book, 'real', c.cfg, closes(c), c.core.events);
+  let amount, fee = 0, message;
+  if (kind === 'fix') {             // what your broker's wallet shows: the difference is set right
+    const balance = toNum(body.balance, 'Balance', { strict: false });
+    amount = Math.round((balance - s.cash) * 100) / 100;
+    if (!amount) return { message: 'Your wallet already shows that.' };
+    message = `Your wallet now shows ${money2(balance)} EGP (${amount > 0 ? '+' : '−'}${money2(Math.abs(amount))} set right).`;
+  } else {
+    amount = toNum(body.amount, 'Amount');
+    if (kind === 'deposit' || kind === 'withdraw') fee = toNum(body.fee || 0, 'Fee', { strict: false });
+    if (kind === 'deposit' && fee >= amount) fail(422, 'The fee is more than the amount.');
+    if (kind === 'withdraw') {
+      const free = s.cash - E.unsettled(c.book, localToday());
+      if (amount + fee > free + 0.005) {
+        fail(422, `You can withdraw up to ${money2(Math.max(0, free - fee))} EGP now. Money from a sale can buy at once `
+          + `but can be withdrawn only after about ${E.SETTLE_DAYS} working days. If your broker shows a different `
+          + 'balance, use "Match my broker" first.');
+      }
+    }
+    message = {
+      deposit: `Added ${money2(amount - fee)} EGP to your wallet.`,
+      withdraw: `Took ${money2(amount)} EGP out of your wallet${fee ? ` (+ ${money2(fee)} EGP fee)` : ''}.`,
+      fee: `Recorded a ${money2(amount)} EGP fee.`,
+      refund: `Recorded ${money2(amount)} EGP back.`,
+    }[kind];
+  }
+  c.book.cash = [...(c.book.cash || []), { id: E.nextId(c.book), date, kind, amount, fee, note }];
+  saveBook(c.book);
+  return { message };
+}
+
+function deleteWalletMove(c, id) {
+  if (!(c.book.cash || []).some(m => m.id === id)) fail(404, 'Not found.');
+  c.book.cash = c.book.cash.filter(m => m.id !== id);
+  saveBook(c.book);
+  return { message: 'Removed from your wallet.' };
+}
+
 // ------------------------------------------------------------------ editing a trade's transactions
 // The trade a closed row came from: a partial sale's position, or itself.
 const sourceOf = t => { const m = /^partial sale from position #(\d+)$/.exec(t.notes || ''); return m ? +m[1] : t.id; };
@@ -794,7 +860,7 @@ async function sendBook(c) {
       if (await pullBook(link)) c = await context();
     }
     const pv = await portfolioView(c);
-    const book = { date: c.core.scan_date, start: pv.summary.start, cash: pv.summary.cash, closed: pv.closed_stats,
+    const book = { date: c.core.scan_date, start: Math.max(0, pv.summary.start), cash: pv.summary.cash, closed: pv.closed_stats,
       watchlist: c.book.watchlist || [],
       positions: pv.positions.map(p => ({ symbol: p.symbol, shares: p.shares, avg: p.avg_price, fees: p.fees, last: p.last,
         stop: p.stop, target: p.target, status: p.status, reason: p.reason || '' })) };
@@ -944,6 +1010,8 @@ async function route(path, { method = 'GET', body } = {}) {
   if (method === 'DELETE' && a === 'portfolio' && b === 'closed') return deleteClosed(c, Number(x));
   if (method === 'DELETE' && a === 'portfolio' && b && !x) return deletePosition(c, id);
   if (method === 'DELETE' && a === 'dividends') return deleteDividend(c, id);
+  if (method === 'POST' && a === 'portfolio' && b === 'wallet') return walletMove(c, body || {});
+  if (method === 'DELETE' && a === 'wallet') return deleteWalletMove(c, id);
   if (method === 'PUT' && a === 'settings') return saveSettings(c, body);
   if (method === 'PUT' && a === 'watchlist') return saveWatchlist(c, body || {});
   if (method === 'POST' && a === 'settings' && b === 'defaults') return resetSettings(c);
