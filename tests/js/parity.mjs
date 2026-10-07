@@ -56,6 +56,11 @@ const OPS = {
   wallet: ({ book, cfg, today }) => ({ summary: E.accountSummary(book, 'real', cfg, {}, []),
     unsettled: today.map(d => E.unsettled(book, d)) }),
   plan: args => planTrade(args),
+  // Thndr Trader (engine.js planMonth / planFree / planRenewals) and its fee on an order in and after the free 50
+  thndrPlan: ({ plan, book, days, today, cfg, value }) => ({
+    months: days.map(d => E.planMonth(plan, d)), free: days.map(d => E.planFree(book, plan, d)),
+    due: E.planRenewals(plan, plan.paid_to || plan.added, today), next: E.planNext(plan, today),
+    fees: [true, false, undefined].map(f => E.orderFee(value, { ...cfg, free_trade: f })) }),
   equity: args => I.equityCurve(args),
   journal: ({ closed, history }) => I.journal(closed, history),
   correlations: ({ series, symbols }) => I.correlations(series, symbols),

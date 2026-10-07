@@ -38,12 +38,13 @@ def government_fees(value: float) -> float:
 
 
 def order_fee(value: float, cfg: dict) -> float:
-    """What one buy or sell order of this value (EGP) costs with your broker."""
+    """What one buy or sell order of this value (EGP) costs with your broker. Thndr Trader: no commission on the plan
+    month's first 50 orders (free_trade False: one after them; the site counts them, local/engine.js planFree)."""
     broker = cfg.get("broker", "other")
     if broker == "thndr":
         return thndr_commission(value) + government_fees(value)
     if broker == "thndr_trader":
-        return government_fees(value)
+        return government_fees(value) + (0.0 if cfg.get("free_trade", True) else thndr_commission(value))
     return value * cfg["fee_pct_per_side"] / 100
 
 

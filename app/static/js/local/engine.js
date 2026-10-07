@@ -13,10 +13,11 @@
 export const thndrCommission = v => (v > 0 ? 2 + v * 0.001 : 0);
 // What every Egyptian broker passes on, per order: EGX, clearing, investor fund and stamp duty 0.075%, FRA 0.005% (EGP 1–250).
 export const governmentFees = v => (v > 0 ? v * 0.00075 + Math.min(Math.max(v * 0.00005, 1), 250) : 0);
-// What one buy or sell order of this value (EGP) costs with your broker.
+// What one buy or sell order of this value (EGP) costs with your broker. Thndr Trader: no commission on the plan
+// month's first 50 orders (free_trade false: one after them, or from before you subscribed).
 export function orderFee(v, cfg) {
   if (cfg.broker === 'thndr') return thndrCommission(v) + governmentFees(v);
-  if (cfg.broker === 'thndr_trader') return governmentFees(v);
+  if (cfg.broker === 'thndr_trader') return governmentFees(v) + (cfg.free_trade === false ? thndrCommission(v) : 0);
   return v * cfg.fee_pct_per_side / 100;
 }
 // Your fees a side as a %, for estimates where the order's size isn't known.
@@ -571,6 +572,47 @@ export function deleteTrade(book, tradeId) {
 export const walletEffect = m => (m.kind === 'deposit' ? m.amount - (m.fee || 0) : m.kind === 'withdraw'
   ? -m.amount - (m.fee || 0) : m.kind === 'fee' ? -m.amount : m.kind === 'settle' ? -(m.fee || 0) : m.amount);
 export const walletFlow = m => (m.kind === 'deposit' ? m.amount : m.kind === 'withdraw' ? -m.amount : 0);   // put in / took out
+
+// Thndr Trader (book.plan: { since, kind: 'monthly' | 'yearly', price, added, paid_to }). Thndr takes its commission
+// on every order and gives it back to your wallet at the end of the day ("Commission kickback") on the first 50 buys
+// and sales of each plan month, which starts on the day of the month you subscribed; the price comes out of your
+// wallet when the plan renews (support.thndr.app, Oct 2026). A renewal before you added the plan here is already in
+// the balance you had then (paid_to: the last one taken).
+export const PLAN_FREE = 50;
+export const PLAN_PRICE = { monthly: 245, yearly: 2646 };
+
+// The date n months after `day`, on its day of the month (the 31st is a shorter month's last day).
+export function monthsAfter(day, n) {
+  const [y, m, d] = day.split('-').map(Number);
+  const k = y * 12 + m - 1 + n, Y = Math.floor(k / 12), M = k - Y * 12;
+  return iso(new Date(Date.UTC(Y, M, Math.min(d, new Date(Date.UTC(Y, M + 1, 0)).getUTCDate()))));
+}
+
+// The plan month `day` is in, [its first day, the next one's]; null before you subscribed.
+export function planMonth(plan, day) {
+  if (!plan || day < plan.since) return null;
+  let n = (+day.slice(0, 4) - +plan.since.slice(0, 4)) * 12 + (+day.slice(5, 7) - +plan.since.slice(5, 7));
+  if (monthsAfter(plan.since, n) > day) n -= 1;
+  return [monthsAfter(plan.since, n), monthsAfter(plan.since, n + 1)];
+}
+
+// Your buys and sales in that plan month up to `day` (not counting the transaction `skip`, one being changed).
+export function planTrades(book, plan, day, skip = null) {
+  const m = planMonth(plan, day);
+  if (!m) return 0;
+  const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
+  return book.fills.filter(f => f.id !== skip && real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')
+    && f.date >= m[0] && f.date <= day).length;
+}
+export const planFree = (book, plan, day, skip = null) => !!planMonth(plan, day) && planTrades(book, plan, day, skip) < PLAN_FREE;
+
+// The renewals from `from` on: the next one after today (from = today), or the ones due up to today not taken yet.
+export function planRenewals(plan, from, to) {
+  const step = plan.kind === 'yearly' ? 12 : 1, out = [];
+  for (let n = step, d; (d = monthsAfter(plan.since, n)) <= to; n += step) if (d > from) out.push(d);
+  return out;
+}
+export const planNext = (plan, today) => planRenewals(plan, today, monthsAfter(today, 13))[0];
 
 // A sale's money can buy at once, but can be withdrawn only once it settles, 2 sessions later, or at once with
 // your broker's Settle now (a 'settle' wallet move: that much of the money still settling then, oldest sale first).

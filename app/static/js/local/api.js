@@ -27,8 +27,21 @@ async function context() {
   for (const [k, v] of Object.entries(book.settings || {})) if (k in core.personal_defaults) cfg[k] = v;
   // set your own fee % before the broker choice came: keep it
   if (book.settings && 'fee_pct_per_side' in book.settings && !('broker' in book.settings)) cfg.broker = 'other';
+  const plan = cfg.broker === 'thndr_trader' && book.plan;
+  const due = plan ? E.planRenewals(plan, plan.paid_to || plan.added, localToday()) : [];
+  if (due.length) {          // Thndr Trader renewed since you last looked: its price came out of your wallet
+    book.cash = [...(book.cash || []), ...due.map(date => ({ id: E.nextId(book), date, kind: 'fee', amount: plan.price,
+      fee: 0, note: 'Thndr Trader plan' }))];
+    plan.paid_to = due.at(-1);
+    saveBook(book);
+  }
   return { core, book, cfg, stocks: new Map(core.stocks.map(s => [s.symbol, s])), bars: {} };
 }
+
+// Your fees on an order that day: with Thndr Trader, Thndr's commission stays on one after the plan month's 50 free
+// ones (engine.js planFree). skip: the transaction being changed, which doesn't count against itself.
+const feeCfg = (c, day, skip = null) => (c.cfg.broker === 'thndr_trader' && c.book.plan
+  ? { ...c.cfg, free_trade: E.planFree(c.book, c.book.plan, day, skip) } : c.cfg);
 
 const info = (c, sym) => c.stocks.get(sym)
   || { symbol: sym, egx33_manual: false, kashif_url: `${c.core.kashif_url}${encodeURIComponent(sym)}` };
@@ -322,7 +335,8 @@ async function portfolioView(c) {
   return {
     summary: s, wallet: walletView(c, s), positions: await openPositions(c), closed: rows, closed_stats: stats,
     signals: sig.filter(r => r.action === 'BUY').map(r => ({ symbol: r.symbol, entry_high: r.entry_high, shares: r.shares })),
-    fee_pct: E.feePct(cfg), fee_cfg: { broker: cfg.broker, fee_pct_per_side: cfg.fee_pct_per_side },
+    fee_pct: E.feePct(cfg), fee_cfg: { broker: cfg.broker, fee_pct_per_side: cfg.fee_pct_per_side,
+      free_trade: feeCfg(c, localToday()).free_trade },
     sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
     review_day: cfg.review_day, max_open_risk_pct: cfg.max_open_risk_pct,
     limits: Object.fromEntries(['max_position_pct', 'max_positions', 'max_per_sector', 'max_open_risk_pct'].map(k => [k, cfg[k]])),
@@ -497,7 +511,7 @@ async function buy(c, body) {
   }
   const had = !!E.openPosition(c.book, 'real', sym);
   const { chart } = marketAt(bars, c.cfg)(date);
-  E.addRealBuy(c.book, c.cfg, sym, date, price, shares, atr, info(c, sym).sector || '', stop || null,
+  E.addRealBuy(c.book, feeCfg(c, date), sym, date, price, shares, atr, info(c, sym).sector || '', stop || null,
     String(body.notes || '').trim().slice(0, 500), chart, !!body.fees_in);
   saveBook(c.book);
   const pos = E.openPosition(c.book, 'real', sym);
@@ -517,11 +531,12 @@ function sell(c, body) {
   const pos = c.book.trades.find(t => t.id === id && t.account === 'real' && t.status === 'open');
   if (!pos) fail(404, 'This position is no longer open. Refresh the page.');
   if (shares > pos.shares) fail(400, `You hold ${E.int(pos.shares)} shares, so you can't sell ${E.int(shares)}.`);
-  const pnl = (price - pos.entry_price) * shares - (pos.fees || 0) * shares / pos.shares - E.orderFee(price * shares, c.cfg);
+  const cfg = feeCfg(c, date);
+  const pnl = (price - pos.entry_price) * shares - (pos.fees || 0) * shares / pos.shares - E.orderFee(price * shares, cfg);
   const before = { symbol: pos.symbol, shares: pos.shares, avg: pos.entry_price };
   let result;
   try {
-    result = E.sellReal(c.book, c.cfg, id, date, price, shares, reason);
+    result = E.sellReal(c.book, cfg, id, date, price, shares, reason);
   } catch (e) {
     fail(400, e.message);
   }
@@ -629,19 +644,54 @@ const WALLET_KINDS = ['deposit', 'withdraw', 'fee', 'refund', 'fix', 'settle'];
 function walletView(c, s) {
   const { book } = c;
   const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
-  const wait = E.unsettled(book, localToday());
+  const today = localToday();
+  const wait = E.unsettled(book, today);
+  const plan = c.cfg.broker === 'thndr_trader' && book.plan;
+  // With Thndr Trader, an order whose fees have no commission was one of the month's free ones: like Thndr's wallet,
+  // the commission shows taken with the order and given back the same day (the balance is the same either way).
+  const back = f => (plan && !f.fees_in && f.date >= plan.since && (f.fees || 0) < E.governmentFees(f.shares * f.price) + 0.005
+    ? E.thndrCommission(f.shares * f.price) : 0);
   const rows = [
     ...(book.cash || []).map(m => ({ id: m.id, date: m.date, kind: m.kind, amount: E.walletEffect(m), fee: m.fee || 0,
       note: m.note || '', settled: m.kind === 'settle' ? m.amount : undefined })),
-    ...book.fills.filter(f => real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')).map(f => ({
-      date: f.date, kind: f.side, symbol: f.symbol, shares: f.shares, fee: f.fees || 0,
-      amount: f.side === 'buy' ? -(f.shares * f.price + (f.fees || 0)) : f.shares * f.price - (f.fees || 0) })),
+    ...book.fills.filter(f => real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')).flatMap(f => {
+      const k = back(f), fee = (f.fees || 0) + k, v = f.shares * f.price;
+      return [...(k ? [{ date: f.date, kind: 'kickback', symbol: f.symbol, amount: k }] : []),
+        { date: f.date, kind: f.side, symbol: f.symbol, shares: f.shares, fee, amount: f.side === 'buy' ? -(v + fee) : v - fee }];
+    }),
     ...book.dividends.filter(d => real.has(d.trade_id)).map(d => ({ date: d.date, kind: 'dividend', symbol: d.symbol,
       amount: d.amount })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || 0) - (a.id || 0)));
   return { balance: s.cash, unsettled: wait, available: Math.max(0, s.cash - wait), moves: rows,
     withdraw_fee: String(c.cfg.broker).startsWith('thndr') ? THNDR_WITHDRAW_FEE : 0, settle_days: E.SETTLE_DAYS,
-    settle: String(c.cfg.broker).startsWith('thndr') ? THNDR_SETTLE : null };
+    settle: String(c.cfg.broker).startsWith('thndr') ? THNDR_SETTLE : null, thndr: String(c.cfg.broker).startsWith('thndr'),
+    plan: plan ? { ...plan, free: E.PLAN_FREE, used: E.planTrades(book, plan, today), month: E.planMonth(plan, today),
+      next: E.planNext(plan, today) } : null, prices: E.PLAN_PRICE };
+}
+
+// Your Thndr Trader plan, from its page in Thndr's app (Account → Subscriptions): saving it also sets your fees to
+// Thndr Trader's, and removing it to Thndr's own. Renewals from today on come out of your wallet (context()).
+function savePlan(c, body) {
+  const since = toDay(body.since, 'Member since');
+  const today = localToday();
+  if (since > today) fail(422, "Member since: that's in the future.");
+  const kind = body.kind === 'yearly' ? 'yearly' : 'monthly';
+  const price = toNum(body.price, 'Plan price', { strict: false });
+  const had = c.book.plan;
+  c.book.plan = { since, kind, price, added: had ? had.added : today,
+    paid_to: had && had.since === since && had.kind === kind ? had.paid_to : E.planRenewals({ since, kind }, '', today).at(-1) };
+  c.book.settings = { ...c.book.settings, broker: 'thndr_trader' };
+  saveBook(c.book);
+  return { message: had ? 'Your Thndr Trader plan is updated.'
+    : `Saved your Thndr Trader plan: ${E.PLAN_FREE} orders a month without Thndr's commission, and ${money2(price)} EGP out of your wallet on each renewal.` };
+}
+
+function deletePlan(c) {
+  if (!c.book.plan) fail(404, 'No plan saved.');
+  delete c.book.plan;
+  c.book.settings = { ...c.book.settings, broker: 'thndr' };
+  saveBook(c.book);
+  return { message: "Removed your Thndr Trader plan: your orders count Thndr's commission again." };
 }
 
 function walletMove(c, body) {
@@ -738,7 +788,7 @@ async function editFill(c, fid, body) {
   const v = fillBody({ note: f.note, ...body }, f.side);
   const feesIn = f.side === 'buy' && (body.fees_in ?? !!f.fees_in);   // the price already has the fees in it
   const { symbol, trade } = await changeTrade(c, f.trade_id, () => {
-    Object.assign(f, v, { fees: feesIn ? 0 : E.orderFee(v.price * v.shares, c.cfg) });
+    Object.assign(f, v, { fees: feesIn ? 0 : E.orderFee(v.price * v.shares, feeCfg(c, v.date, f.id)) });
     if (feesIn) f.fees_in = true; else delete f.fees_in;
   });
   return { message: changedMsg(symbol, trade) };
@@ -758,7 +808,7 @@ async function addFillTo(c, id, body) {
   if (!t) fail(404, 'This trade no longer exists. Refresh the page.');
   const feesIn = side === 'buy' && !!body.fees_in;
   const { symbol, trade } = await changeTrade(c, id, () => c.book.fills.push({ id: E.nextId(c.book), trade_id: id,
-    symbol: t.symbol, side, ...v, fees: feesIn ? 0 : E.orderFee(v.price * v.shares, c.cfg), ...(feesIn ? { fees_in: true } : {}) }));
+    symbol: t.symbol, side, ...v, fees: feesIn ? 0 : E.orderFee(v.price * v.shares, feeCfg(c, v.date)), ...(feesIn ? { fees_in: true } : {}) }));
   return { message: changedMsg(symbol, trade) };
 }
 
@@ -1021,6 +1071,8 @@ async function route(path, { method = 'GET', body } = {}) {
   if (method === 'PUT' && a === 'portfolio' && b === 'fills') return editFill(c, Number(x), body || {});
   if (method === 'DELETE' && a === 'portfolio' && b === 'fills') return deleteFill(c, Number(x));
   if (method === 'DELETE' && a === 'portfolio' && b === 'closed') return deleteClosed(c, Number(x));
+  if (method === 'POST' && a === 'portfolio' && b === 'plan') return savePlan(c, body || {});
+  if (method === 'DELETE' && a === 'portfolio' && b === 'plan') return deletePlan(c);
   if (method === 'DELETE' && a === 'portfolio' && b && !x) return deletePosition(c, id);
   if (method === 'DELETE' && a === 'dividends') return deleteDividend(c, id);
   if (method === 'POST' && a === 'portfolio' && b === 'wallet') return walletMove(c, body || {});

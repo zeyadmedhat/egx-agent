@@ -881,6 +881,35 @@ def test_stops_that_move_only_when_you_change_them(cfg):
 
 
 @needs_node
+@needs_node
+def test_thndr_trader_gives_50_orders_a_plan_month_without_commission_and_renews_from_the_wallet():
+    """The plan month starts on the day you subscribed (the 31st: a shorter month's last day); the first 50 buys and
+    sales in it have no commission, the 51st has; renewals after you added the plan here come out of the wallet; and
+    the Mac's fee rule is the same."""
+    plan = {"since": "2026-03-25", "kind": "monthly", "price": 245, "added": "2026-10-08"}
+    trade = {"id": 1, "account": "real", "status": "open", "symbol": "X"}
+    fills = [{"id": 10 + i, "trade_id": 1, "symbol": "X", "date": "2026-09-25" if i < 30 else "2026-10-07",
+              "side": "buy" if i % 2 else "sell", "shares": 1, "price": 10} for i in range(50)]
+    book = {"next_id": 99, "trades": [trade], "fills": fills, "dividends": [], "adjustments": [], "cash": []}
+    cfg = {**config.DEFAULTS, "broker": "thndr_trader"}
+    days = ["2026-03-24", "2026-09-24", "2026-10-08", "2026-10-25"]
+    js, short = run_js({"op": "thndrPlan", "args": {"plan": plan, "book": book, "days": days, "today": "2026-12-01",
+                                                   "cfg": cfg, "value": 10_000}},
+                       {"op": "thndrPlan", "args": {"plan": {**plan, "since": "2026-01-31", "paid_to": "2026-09-30"},
+                                                   "book": book, "days": ["2026-02-28", "2026-03-01"],
+                                                   "today": "2026-12-01", "cfg": cfg, "value": 10_000}})
+    assert js["months"] == [None, ["2026-08-25", "2026-09-25"], ["2026-09-25", "2026-10-25"], ["2026-10-25", "2026-11-25"]]
+    assert js["free"] == [False, True, False, True]           # before subscribing; 0 used; all 50 used; a new month
+    assert js["due"] == ["2026-10-25", "2026-11-25"] and js["next"] == "2026-12-25"
+    assert short["months"] == [["2026-02-28", "2026-03-31"], ["2026-02-28", "2026-03-31"]]
+    assert short["due"] == ["2026-10-31", "2026-11-30"]
+    free, paid, unknown = js["fees"]
+    assert paid - free == pytest.approx(2 + 10)               # Thndr's commission: EGP 2 + 0.1%
+    assert unknown == free                                    # no plan saved: every order free, as before
+    for flag, fee in ((True, free), (False, paid), (None, unknown)):
+        assert config.order_fee(10_000, {**cfg, **({} if flag is None else {"free_trade": flag})}) == pytest.approx(fee)
+
+
 def test_wallet_counts_top_ups_withdrawals_fees_and_sales_still_settling():
     """Top-ups and withdrawals are money in and out, not profit; fees and money back are; a sale's money can't be
     withdrawn for 2 sessions; and on the account's chart taking money out isn't a fall."""

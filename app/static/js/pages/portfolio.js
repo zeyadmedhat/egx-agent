@@ -109,16 +109,19 @@ export function PortfolioPage({ route }) {
 }
 
 // ------------------------------------------------------------------ Wallet tab (the website)
-// Like your broker's wallet: the balance, what can be withdrawn now and what's still settling, top up, withdraw, a fee
-// or money back beside the orders, matching your broker's balance, and every pound in or out (local/api.js walletView).
+// Like your broker's wallet: the balance, what can be withdrawn now and what's still settling, top up, withdraw,
+// money back beside the orders, matching your broker's balance, your Thndr Trader plan, and every pound in or out
+// (local/api.js walletView).
 const WALLET_FORMS = {
   deposit: { title: 'Top up', icon: 'plus' },
   withdraw: { title: 'Withdraw', icon: 'sell' },
   settle: { title: 'Settle now', icon: 'history' },
-  fee: { title: 'A fee', icon: 'coins', notes: ['Settlement fees', 'Other fee'] },
   refund: { title: 'Money back', icon: 'coins', notes: ['Commission kickback', 'Other'] },
   fix: { title: 'Match my broker', icon: 'refresh' },
+  plan: { title: 'Thndr Trader plan', icon: 'percent' },
 };
+// the buttons: Settle now while money is settling, the plan with Thndr until you've saved one
+const showForm = (k, w) => (k !== 'settle' || w.unsettled > 0.005) && (k !== 'plan' || (w.thndr && !w.plan));
 const MOVE_NAME = { deposit: 'Top up', withdraw: 'Withdrawal', fee: 'Fee', refund: 'Money back', fix: 'Set to match my broker' };
 const settleFee = (w, a) => (w.settle && a > 0 ? Math.max(w.settle.min_fee, Math.round(a * w.settle.pct * 100) / 100) : 0);
 
@@ -129,7 +132,8 @@ function WalletTab({ data }) {
   const what = m => (m.kind === 'buy' || m.kind === 'sell'
     ? t(m.kind === 'buy' ? 'Bought {n} {sym}' : 'Sold {n} {sym}', { n: fmt.int(m.shares), sym: m.symbol })
     : m.kind === 'dividend' ? t('Dividend from {sym}', { sym: m.symbol })
-      : m.kind === 'settle' ? t('Settled {v} early', { v: fmt.num(m.settled, 2) }) : tn(m.note) || t(MOVE_NAME[m.kind]));
+      : m.kind === 'kickback' ? t('Commission kickback on {sym}', { sym: m.symbol })
+        : m.kind === 'settle' ? t('Settled {v} early', { v: fmt.num(m.settled, 2) }) : tn(m.note) || t(MOVE_NAME[m.kind]));
   const columns = [
     { key: 'date', label: 'Date', fmt: v => fmt.date(v) },
     { key: 'kind', label: 'What', sortable: false, render: m => html`<b>${what(m)}</b>${m.fee > 0
@@ -155,11 +159,13 @@ function WalletTab({ data }) {
         sub=${t('can buy now, withdraw in {n} working days', { n: w.settle_days })}
         title=${t('Money from sales in the last {n} working days: you can buy with it now, but withdraw it only once it settles.', { n: w.settle_days })} />
     </div>
+    ${w.plan && html`<${PlanCard} p=${w.plan} onEdit=${() => setForm(x => (x === 'plan' ? null : 'plan'))} />`}
     <div class="row" style="margin-top:14px;flex-wrap:wrap;gap:8px">
-      ${Object.entries(WALLET_FORMS).filter(([k]) => k !== 'settle' || w.unsettled > 0.005).map(([k, f]) => html`<button class=${cls('btn', k === 'deposit' ? 'primary' : '', k !== 'deposit' && k !== 'withdraw' && 'sm ghost')}
+      ${Object.entries(WALLET_FORMS).filter(([k]) => showForm(k, w)).map(([k, f]) => html`<button class=${cls('btn', k === 'deposit' ? 'primary' : '', k !== 'deposit' && k !== 'withdraw' && 'sm ghost')}
         aria-pressed=${form === k} onClick=${() => setForm(x => (x === k ? null : k))}><${Icon} name=${f.icon} size=${16} />${t(f.title)}</button>`)}
     </div>
-    ${form && html`<${WalletForm} key=${form} kind=${form} w=${w} thndr=${thndr} onClose=${() => setForm(null)} />`}
+    ${form === 'plan' ? html`<${PlanForm} w=${w} onClose=${() => setForm(null)} />`
+      : form && html`<${WalletForm} key=${form} kind=${form} w=${w} thndr=${thndr} onClose=${() => setForm(null)} />`}
     <section class="section">
       <${SectionHead} title="Money in and out" count=${w.moves.length}
         hint="Top-ups, withdrawals, fees and money back, with every buy, sale and dividend you logged. Newest first." />
@@ -174,7 +180,7 @@ function WalletTab({ data }) {
 function WalletForm({ kind, w, thndr, onClose }) {
   const spec = WALLET_FORMS[kind];
   const all = Math.floor(w.unsettled * 100) / 100;       // Settle now: all that's settling, unless you say less
-  const [form, setForm] = useState({ date: todayISO(), amount: kind === 'settle' ? String(all) : '', note: (spec.notes || [''])[0],
+  const [form, setForm] = useState({ date: todayISO(), amount: kind === 'settle' ? String(all) : '', note: w.plan ? '' : (spec.notes || [''])[0],
     fee: kind === 'withdraw' && w.withdraw_fee ? String(w.withdraw_fee) : kind === 'settle' && w.settle ? String(settleFee(w, all)) : '',
     balance: '' });
   const [busy, setBusy] = useState(false);
@@ -220,17 +226,88 @@ function WalletForm({ kind, w, thndr, onClose }) {
             <input class="input" type="number" min="0.01" step="0.01" value=${form.amount} onInput=${set('amount')} required /><//>`}
       ${(kind === 'deposit' || kind === 'withdraw' || kind === 'settle') && html`<${Field} label="Fee (EGP)" help=${feeHelp}>
         <input class="input" type="number" min="0" step="0.01" value=${form.fee} onInput=${set('fee')} /><//>`}
-      ${spec.notes && html`<${Field} label="What it is"><select class="input" value=${form.note} onChange=${set('note')}>
+      ${spec.notes && !w.plan && html`<${Field} label="What it is"><select class="input" value=${form.note} onChange=${set('note')}>
         ${spec.notes.map(n => html`<option value=${n}>${t(n)}</option>`)}</select><//>`}
       ${kind !== 'fix' && html`<${Field} label="Date"><${DateInput} weekends value=${form.date} onInput=${set('date')} /><//>`}
     </div>
-    ${kind === 'fee' && thndr && html`<p class="faint" style="font-size:12.5px;margin:0">${t("Each buy and sale you log already counts Thndr's commission and the exchange's fees. To make a sale's money withdrawable at once, use Settle now (it shows while money is settling). Add a fee here only if it's something else; if your balance is off, use Match my broker.")}</p>`}
+    ${kind === 'refund' && w.plan && html`<p class="faint" style="font-size:12.5px;margin:0">${t("Your Thndr Trader commission kickbacks are added for you, the day of each of the month's first 50 orders. Add money back here only if it's something else.")}</p>`}
     <div class="row">
       <span style="flex:1">${total != null && amount > 0 ? t(kind === 'withdraw' ? 'Total out of your wallet: {v}' : 'Reaches your wallet: {v}', { v: fmt.egp(total, 2) })
         : kind === 'settle' && amount > 0 ? t('You can withdraw {v} more at once; the fee comes out of your wallet.', { v: fmt.egp(amount, 2) }) : ''}</span>
       <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
       <button class="btn primary sm" type="submit" disabled=${busy || !valid || short}><${Icon} name="check" />${t('Save')}</button>
     </div>
+  </form>`;
+}
+
+// Your Thndr Trader plan, like its page in Thndr's app: the plan month's free orders used, its dates and price.
+function PlanCard({ p, onEdit }) {
+  const left = Math.max(0, p.free - p.used), resets = fmt.date(p.month[1], false);
+  return html`<div class="card plan-card" style="margin-top:14px">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
+      <div><span class="k-label">${t('Your plan')}</span>
+        <h3>Thndr Trader <small class="faint">${t(p.kind === 'yearly' ? 'Yearly' : 'Monthly')}</small></h3></div>
+      <button class="btn sm ghost" onClick=${onEdit}><${Icon} name="pencil" size=${14} />${t('Edit')}</button>
+    </div>
+    <div class="plan-used"><b>${Math.min(p.used, p.free)}</b>/${p.free} ${t('free trades')}</div>
+    <div class="pbar" role="progressbar" aria-valuemin="0" aria-valuemax=${p.free} aria-valuenow=${Math.min(p.used, p.free)}>
+      <span style=${`width:${Math.min(100, (100 * p.used) / p.free)}%`}></span></div>
+    <p class="faint">${left
+      ? t('{n} left until {date}. Each buy and each sale you log is one: Thndr takes its commission and gives it back to your wallet the same day.', { n: left, date: resets })
+      : t("All used: Thndr's commission stays on your orders until {date}.", { date: resets })}</p>
+    <div class="plan-facts">
+      <div><span class="k-label">${t('Member since')}</span><b>${fmt.date(p.since)}</b></div>
+      <div><span class="k-label">${t('Next billing date')}</span><b>${fmt.date(p.next)}</b></div>
+      <div><span class="k-label">${t('Plan price')}</span><b>${fmt.egp(p.price)}</b></div>
+      <div><span class="k-label">${t('Payment method')}</span><b>${t('Your wallet')}</b></div>
+    </div>
+  </div>`;
+}
+
+function PlanForm({ w, onClose }) {
+  const p = w.plan;
+  const [form, setForm] = useState({ since: p ? p.since : '', kind: p ? p.kind : 'monthly', price: String(p ? p.price : w.prices.monthly) });
+  const [busy, setBusy] = useState(false);
+  const [gone, setGone] = useState(false);
+  const set = k => e => {
+    const v = e.target.value;
+    setForm(f => ({ ...f, [k]: v, ...(k === 'kind' ? { price: String(w.prices[v]) } : {}) }));
+  };
+  const send = async (method, body) => {
+    setBusy(true);
+    try {
+      toast((await api('/portfolio/plan', { method, body })).message);
+      onClose();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const submit = e => {
+    e.preventDefault();
+    send('POST', { ...form, price: parseFloat(form.price) });
+  };
+  return html`<form class="preview-box" style="margin-top:14px;gap:10px" onSubmit=${submit}>
+    <b>${t('Thndr Trader plan')}</b>
+    <p class="faint" style="font-size:12.5px;margin:0">${t("Copy it from the plan's page in Thndr's app (Account → Subscriptions). Thndr takes its commission on every order and gives it back to your wallet the same day on the first 50 buys and sales of each plan month, which starts on the day of the month you subscribed. The app counts the ones you log here, and the plan's price comes out of this wallet on each renewal from now on.")}</p>
+    <div class="form-grid">
+      <${Field} label="Member since"><${DateInput} weekends value=${form.since} onInput=${set('since')} /><//>
+      <${Field} label="Plan"><select class="input" value=${form.kind} onChange=${set('kind')}>
+        <option value="monthly">${t('Monthly')}</option><option value="yearly">${t('Yearly')}</option></select><//>
+      <${Field} label="Plan price (EGP)"><input class="input" type="number" min="0" step="0.01" value=${form.price}
+        onInput=${set('price')} required /><//>
+    </div>
+    <div class="row">
+      ${p && html`<button class="btn sm danger-ghost" type="button" onClick=${() => setGone(true)}>${t('Remove the plan')}</button>`}
+      <span style="flex:1"></span>
+      <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
+      <button class="btn primary sm" type="submit" disabled=${busy || !form.since}><${Icon} name="check" />${t('Save')}</button>
+    </div>
+    ${gone && html`<${Confirm} title="Remove your Thndr Trader plan?"
+      text="Your orders from now on count Thndr's commission, and nothing more comes out of your wallet for the plan. What's in your wallet already stays."
+      confirmLabel="Remove" danger onConfirm=${() => send('DELETE')} onClose=${() => setGone(false)} />`}
   </form>`;
 }
 
