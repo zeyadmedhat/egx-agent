@@ -205,9 +205,15 @@ def _mood_line(d, lang: str = "en") -> str | None:
     if not x:
         return None
     s = round(x["score"])
+    f = x.get("flows") if (x.get("flows") or {}).get("date") == x["date"] else None    # that session's, or none
+    m = lambda v: f"{'+' if v > 0 else '−' if v < 0 else ''}{abs(v):,.{1 if abs(v) < 10 else 0}f}"   # noqa: E731
     if lang == "ar":
-        return f"مزاج السوق: {MOOD_ICON[x['label']]} {MOOD_AR[x['label']]} ({s} من 100)"
-    return f"Market mood: {MOOD_ICON[x['label']]} {x['label']} ({s} of 100)"
+        return f"مزاج السوق: {MOOD_ICON[x['label']]} {MOOD_AR[x['label']]} ({s} من 100)" + (
+            f"\nصافي الشراء: المصريون {m(f['egyptians'])} · العرب {m(f['arabs'])} · الأجانب {m(f['foreigners'])} مليون جنيه"
+            if f else "")
+    return f"Market mood: {MOOD_ICON[x['label']]} {x['label']} ({s} of 100)" + (
+        f"\nNet buying: Egyptians {m(f['egyptians'])} · Arabs {m(f['arabs'])} · foreigners {m(f['foreigners'])} million EGP"
+        if f else "")
 
 
 def _caution_lines(items: list[dict], indent: str = "      ", lang: str = "en") -> list[str]:

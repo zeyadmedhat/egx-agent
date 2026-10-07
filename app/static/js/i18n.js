@@ -875,10 +875,14 @@ export const AR = {
   "How calm EGX30 is against its usual swings": "هدوء EGX30 مقارنة بتذبذبه المعتاد",
   "Stocks against gold in pounds, last 20 sessions": "الأسهم مقابل الذهب بالجنيه، آخر 20 جلسة",
   "Small companies (EGX70) against EGX30, last 20 sessions": "الشركات الصغيرة (EGX70) مقابل EGX30، آخر 20 جلسة",
+  "Foreign and Arab investors' net buying, last 20 sessions": "صافي شراء المستثمرين الأجانب والعرب، آخر 20 جلسة",
+  "{pct} of the money traded": "{pct} من قيمة التداول",
+  "Net buying on {date}, million EGP: Egyptians {e} · Arabs {a} · foreigners {f}. From the exchange's daily statement, as Amwal Al Ghad reports it.":
+    "صافي الشراء في {date} بالمليون جنيه: المصريون {e} · العرب {a} · الأجانب {f}. من بيان البورصة اليومي كما تنشره أموال الغد.",
   "Mood": "المزاج", "Sessions": "الجلسات", "Up after a month": "صعد بعد شهر", "Typical month": "الشهر المعتاد",
   "How it's made, and what it told in the past": "كيف يُحسب، وماذا قال في الماضي",
-  "Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk.":
-    "مبني مثل مؤشر الخوف والطمع من CNN. كل مقياس يأخذ درجة من 0 إلى 100 حسب موقع قيمة اليوم بين قيم آخر عامين، والمزاج هو متوسطها. مقاييس الخيارات والسندات عالية المخاطر في CNN غير موجودة في البورصة المصرية؛ لذلك تحل الشركات الصغيرة مقابل EGX30 محل الإقبال على المخاطرة.",
+  "Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk. The seventh, foreign and Arab investors' net buying, is EGX's own.":
+    "مبني مثل مؤشر الخوف والطمع من CNN. كل مقياس يأخذ درجة من 0 إلى 100 حسب موقع قيمة اليوم بين قيم آخر عامين، والمزاج هو متوسطها. مقاييس الخيارات والسندات عالية المخاطر في CNN غير موجودة في البورصة المصرية؛ لذلك تحل الشركات الصغيرة مقابل EGX30 محل الإقبال على المخاطرة. والسابع، صافي شراء المستثمرين الأجانب والعرب، خاص بالبورصة المصرية.",
   "Tested since {date}: it didn't tell where EGX30 went next. The differences below are small and changed from one period to another, so use it to know the mood, not to time a buy or a sale.":
     "اختُبر منذ {date}: لم يُخبر إلى أين اتجه EGX30 بعدها. الفروق أدناه صغيرة وتغيرت من فترة لأخرى، فاستخدمه لمعرفة المزاج، لا لتوقيت شراء أو بيع.",
   // past rights issues (egx_agent/corporate.py rights_history, pages/dividends.js)

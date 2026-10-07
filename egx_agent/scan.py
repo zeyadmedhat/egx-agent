@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from . import corporate, db, levels, portfolio, predict, risk, strategy
-from .data import dividends, macro, news, prices, shariah, universe
+from .data import dividends, flows, macro, news, prices, shariah, universe
 from .indicators import add_indicators
 
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -187,6 +187,10 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             warnings.append(f"Egypt data not updated (the model uses the last values): {', '.join(missed)}")
         checked += ["Egypt data (TradingView)", "Dividends (TradingView)"]
         failed += ["Egypt data (TradingView)"] if missed else []
+        try:
+            flows.update(conn)
+        except Exception as exc:  # the market mood uses the flows it has
+            warnings.append(f"Foreign / Arab / Egyptian buying not updated ({type(exc).__name__})")
         try:
             dividends.update(conn)
         except Exception as exc:  # the dividend pages show what was downloaded before

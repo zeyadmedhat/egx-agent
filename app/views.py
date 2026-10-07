@@ -1014,7 +1014,7 @@ def mood_data(d: Data) -> dict | None:
 def mood_brief(d: Data) -> dict | None:
     """Just the gauge, for Home, the evening message and the bot."""
     x = mood_data(d)
-    return {k: x[k] for k in ("date", "score", "label", "week_ago")} if x else None
+    return {k: x.get(k) for k in ("date", "score", "label", "week_ago", "flows")} if x else None
 
 
 JUMP = 0.30   # a one-day move this big can't happen within EGX's daily price limits

@@ -1,5 +1,5 @@
 """Market mood: an EGX fear & greed gauge from 0 (extreme fear) to 100 (extreme greed), built the way CNN builds its
-Fear & Greed Index, from six things the agent already downloads. Each one scores 0–100 by where today's value sits
+Fear & Greed Index, from seven things the agent already downloads. Each one scores 0–100 by where today's value sits
 among the last two years', and the gauge is their average.
 
 Tested 2018–2026: the mood didn't tell where EGX30 went the next month (rank correlation about 0), so it is context
@@ -12,11 +12,12 @@ import sqlite3
 import numpy as np
 import pandas as pd
 
+from .data import flows as investor_flows
 from .data.prices import INDEX_SYMBOL
 
 SINCE = "2012-01-01"     # two years to score against before the first gauge, from EGX70's start (2017) on
 WINDOW = 500             # sessions: today's value is ranked among the last two years'
-MIN_PARTS = 4            # a gauge needs at least this many of the six
+MIN_PARTS = 4            # a gauge needs at least this many of the seven
 AHEAD = 20               # sessions: what EGX30 did after each mood (about a month)
 
 # key: what it measures (CNN's version in brackets)
@@ -27,6 +28,7 @@ PARTS = {
     "calm": "How calm EGX30 is against its usual swings",                   # [VIX vs its average]
     "vs_gold": "Stocks against gold in pounds, last 20 sessions",           # [stocks vs bonds: safe-haven demand]
     "small_caps": "Small companies (EGX70) against EGX30, last 20 sessions",  # [junk bond demand: appetite for risk]
+    "foreign": "Foreign and Arab investors' net buying, last 20 sessions",  # [not CNN's: EGX's daily statement]
 }
 BANDS = [(25, "Extreme fear"), (45, "Fear"), (56, "Neutral"), (76, "Greed"), (101, "Extreme greed")]
 
@@ -36,7 +38,8 @@ def label(score: float) -> str:
 
 
 def load(conn: sqlite3.Connection, since: str = SINCE) -> dict:
-    """Closes and volumes (sessions × stocks), EGX30, and gold in pounds and EGX70 on EGX30's sessions."""
+    """Closes and volumes (sessions × stocks), EGX30, gold in pounds and EGX70 on EGX30's sessions, and what foreign
+    and Arab investors bought net each session (million EGP; missing days stay empty)."""
     px = pd.read_sql_query("SELECT symbol, date, close, volume FROM prices WHERE date >= ?", conn, params=(since,))
     if px.empty:
         return {}
@@ -51,6 +54,8 @@ def load(conn: sqlite3.Connection, since: str = SINCE) -> dict:
     mac["date"] = pd.to_datetime(mac["date"])
     mac = mac.pivot(index="date", columns="series", values="value")
 
+    table = investor_flows.load(conn)
+
     def on_sessions(name: str) -> pd.Series:
         if name not in mac:
             return pd.Series(np.nan, index=index.index)
@@ -58,11 +63,13 @@ def load(conn: sqlite3.Connection, since: str = SINCE) -> dict:
         return s.reindex(s.index.union(index.index)).ffill().reindex(index.index)
 
     return {"close": close.reindex(index.index), "volume": volume.reindex(index.index), "index": index,
-            "gold": on_sessions("gold") * on_sessions("usdegp"), "egx70": on_sessions("egx70")}
+            "gold": on_sessions("gold") * on_sessions("usdegp"), "egx70": on_sessions("egx70"),
+            "flows": -table["egyptians"].reindex(index.index), "flows_table": table}   # foreign + Arab = −Egyptians
 
 
-def parts(close: pd.DataFrame, volume: pd.DataFrame, index: pd.Series, gold: pd.Series, egx70: pd.Series) -> pd.DataFrame:
-    """The six measures on every session (higher = greedier), before scoring."""
+def parts(close: pd.DataFrame, volume: pd.DataFrame, index: pd.Series, gold: pd.Series, egx70: pd.Series,
+          flows: pd.Series | None = None) -> pd.DataFrame:
+    """The seven measures on every session (higher = greedier), before scoring."""
     c = close.ffill(limit=5)                       # a stock that skipped a few sessions keeps its last price
     traded = close.notna().rolling(10, min_periods=1).max().astype(bool)
     counted = traded & (close.notna().cumsum() >= 250) & c.notna()
@@ -80,6 +87,9 @@ def parts(close: pd.DataFrame, volume: pd.DataFrame, index: pd.Series, gold: pd.
         "calm": -(r.rolling(20).std() / r.rolling(250).std()),
         "vs_gold": index.pct_change(20, fill_method=None) - gold.pct_change(20, fill_method=None),
         "small_caps": egx70.pct_change(20, fill_method=None) - index.pct_change(20, fill_method=None),
+        # their average net buying on the sessions known in the last 20 (at least 10) ÷ the average traded value
+        "foreign": (pd.Series(np.nan, index=index.index) if flows is None else
+                    flows.rolling(20, min_periods=10).mean() * 1e6 / value.sum(axis=1).rolling(20).mean()),
     }, index=index.index).replace([np.inf, -np.inf], np.nan)
 
 
@@ -87,7 +97,7 @@ def compute(data: dict) -> dict | None:
     """Today's mood, each part's score and value, a week ago, and what EGX30 did in the next month after each mood."""
     if not data:
         return None
-    raw = parts(data["close"], data["volume"], data["index"], data["gold"], data["egx70"])
+    raw = parts(data["close"], data["volume"], data["index"], data["gold"], data["egx70"], data.get("flows"))
     score = raw.rolling(WINDOW, min_periods=250).rank(pct=True) * 100
     mood = score.mean(axis=1).where(score.notna().sum(axis=1) >= MIN_PARTS).dropna()
     if mood.empty:
@@ -107,5 +117,14 @@ def compute(data: dict) -> dict | None:
         "parts": [{"key": k, "text": PARTS[k], "score": None if np.isnan(score.at[day, k]) else float(score.at[day, k]),
                    "value": None if np.isnan(raw.at[day, k]) else float(raw.at[day, k])} for k in PARTS],
         "past": past, "since": str(ahead.index[0].date()) if len(ahead) else None,
+        "flows": _last_flows(data.get("flows_table")),
         "history": {"time": [str(t.date()) for t in mood.index[-250:]], "score": [round(float(v), 1) for v in mood.tail(250)]},
     }
+
+
+def _last_flows(table: pd.DataFrame | None) -> dict | None:
+    """The last session's net buying by Egyptians, Arabs and foreigners (million EGP), for the Market page."""
+    if table is None or table.dropna().empty:
+        return None
+    row = table.dropna().iloc[-1]
+    return {"date": str(row.name.date()), **{k: float(row[k]) for k in ("egyptians", "arabs", "foreigners")}}

@@ -115,7 +115,14 @@ function Movers({ data }) {
 const MOOD_TONE = s => (s < 45 ? 'down' : s < 56 ? 'warn' : 'up');
 function partValue(p) {
   if (p.value == null) return '–';
-  return p.key === 'calm' ? t('{x}× its usual swings', { x: fmt.num(-p.value, 2) }) : fmt.pct(p.value, 1);
+  if (p.key === 'calm') return t('{x}× its usual swings', { x: fmt.num(-p.value, 2) });
+  return p.key === 'foreign' ? t('{pct} of the money traded', { pct: fmt.pct(p.value, 1) }) : fmt.pct(p.value, 1);
+}
+// The last session's net buying (+) or selling (−) by each group, in million EGP (egx_agent/data/flows.py)
+function Flows({ f }) {
+  const v = x => html`<b class=${tone(x)}>${x > 0 ? '+' : x < 0 ? '−' : ''}${fmt.num(Math.abs(x), 1)}</b>`;
+  return html`<p class="faint" style="font-size:13px;margin-top:10px">${tp('Net buying on {date}, million EGP: Egyptians {e} · Arabs {a} · foreigners {f}. From the exchange\'s daily statement, as Amwal Al Ghad reports it.',
+    { date: fmt.date(f.date), e: v(f.egyptians), a: v(f.arabs), f: v(f.foreigners) })}</p>`;
 }
 function Mood({ m }) {
   const s = Math.round(m.score);
@@ -135,8 +142,9 @@ function Mood({ m }) {
       <span>${t(p.text)} <span class="faint">${partValue(p)}</span></span>
       ${p.score == null ? html`<span class="faint">–</span>` : html`<div class="gauge"><b class="gauge-v">${Math.round(p.score)}</b>
         <div class=${`bar ${MOOD_TONE(p.score)}`}><span style=${`width:${p.score}%`}></span></div></div>`}</div>`)}</div>
+    ${m.flows && html`<${Flows} f=${m.flows} />`}
     <${More} label="How it's made, and what it told in the past">
-      <p>${t("Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk.")}</p>
+      <p>${t("Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk. The seventh, foreign and Arab investors' net buying, is EGX's own.")}</p>
       <p>${t("Tested since {date}: it didn't tell where EGX30 went next. The differences below are small and changed from one period to another, so use it to know the mood, not to time a buy or a sale.", { date: fmt.date(m.since) })}</p>
       <${DataTable} columns=${past} rows=${m.past} rowKey=${r => r.label} /><//>
   </div>`;

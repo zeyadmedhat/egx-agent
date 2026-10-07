@@ -215,6 +215,49 @@ def test_market_mood_is_fear_after_a_fall_and_greed_after_a_steady_climb():
         "Extreme fear", "Extreme fear", "Fear", "Neutral", "Greed", "Greed", "Extreme greed", "Extreme greed"]
 
 
+def test_the_daily_statement_is_read_for_each_groups_net_buying():
+    from egx_agent.data import flows
+    read = lambda text: {k: round(v, 2) for k, v in (flows.parse(text) or {}).items()}   # noqa: E731
+    assert read("اتجه المستثمرون العرب والأجانب نحو البيع بصافي بلغ 65.41 مليون جنيه و142.7 مليون جنيه على التوالي، "
+                "فيما اتجه المستثمرون المصريون نحو الشراء بصافي تعاملات بلغ نحو 208.1 مليون جنيه.") == {
+        "arabs": -65.41, "foreigners": -142.7, "egyptians": 208.1}
+    # the second group after a comma, not "فيما"
+    assert read("توجه المستثمرون المصريون والعرب نحو البيع بصافي قيمة بلغت 12.8 مليون جنيه و20.5 مليون على التوالي، "
+                "قصد الاجانب الشراء بصافي قيمة بلغت 33.4 مليون جنيه") == {"egyptians": -12.8, "arabs": -20.5, "foreigners": 33.4}
+    # only two named (the Arabs about even); millions written for billions; full pounds written as millions
+    assert read("اتجهت تعاملات المصريين نحو البيع بصافي بلغ 7.15 مليون جنيه، اتجه الاجانب نحو الشراء بصافي 7.154 مليون جنيه")[
+        "arabs"] == 0.0
+    assert read("توجه المستثمرون المصريون والعرب نحو البيع بصافي قيمة بلغت 8.03 مليار جنيه، و574.2 مليون على التوالي، "
+                "في حين قصد الاجانب الشراء بصافي قيمة بلغت 8.6 مليون جنيه")["foreigners"] == 8600.0
+    assert read("اتجهت تعاملات الاجانب والعرب نحو البيع بصافي بلغ 329517932 مليون جنيه 189314398 مليونا على التوالي، "
+                "فيما اتجه المصريين نحو الشراء بصافي 518832330 مليون جنيه")["foreigners"] == -329.52
+    # a monthly report: two groups both buying, and the year's totals after them, isn't a session
+    assert flows.parse("وسجل المستثمرون الأجانب صافي شراء بقيمة نحو 350.9 مليون جنيه خلال الشهر، فيما سجل المستثمرون العرب "
+                       "صافي شراء بنحو 3.222 مليار جنيه. وسجل الأجانب منذ بداية العام صافي بيع بنحو 11.213 مليار جنيه") is None
+
+
+def test_each_session_takes_its_closing_report_even_in_ramadan():
+    from egx_agent.data import flows
+    say = lambda e, a, f: f"اتجه المصريون نحو {'الشراء' if e > 0 else 'البيع'} بصافي {abs(e)} مليون جنيه، فيما اتجه العرب " \
+        f"والأجانب نحو {'البيع' if e > 0 else 'الشراء'} بصافي {abs(a)} مليون جنيه و{abs(f)} مليون جنيه على التوالي"  # noqa: E731
+    posts = [  # Wednesday in Ramadan: midday, then the close at 13:50; Thursday: close at 15:05, then the weekly sum
+        {"date": "2026-03-04T12:10:00", "title": {"rendered": "البورصة تواصل الصعود في منتصف التعاملات"}, "content": {"rendered": say(5, 2, 3)}},
+        {"date": "2026-03-04T13:50:00", "title": {"rendered": "البورصة المصرية تُغلق تعاملات الأربعاء"}, "content": {"rendered": say(50, 20, 30)}},
+        {"date": "2026-03-05T15:05:00", "title": {"rendered": "صعود البورصة بختام تعاملات الخميس"}, "content": {"rendered": say(-40, 10, 30)}},
+        {"date": "2026-03-05T19:00:00", "title": {"rendered": "حصاد الأسبوع"}, "content": {"rendered": say(900, 400, 500)}},
+    ]
+
+    class Feed:
+        headers: dict = {}
+
+        def get(self, url, params=None, timeout=None):
+            return type("R", (), {"status_code": 200, "headers": {"X-WP-TotalPages": "1"},
+                                  "raise_for_status": lambda self: None, "json": lambda self: posts})()
+    got = flows.fetch("2026-03-01", session=Feed())
+    assert got == {"2026-03-04": {"egyptians": 50.0, "arabs": -20.0, "foreigners": -30.0},
+                   "2026-03-05": {"egyptians": -40.0, "arabs": 10.0, "foreigners": 30.0}}
+
+
 def test_past_rights_issues_are_measured_from_the_close_before_the_ex_date(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     days = make_ohlcv(np.ones(120), start="2026-01-04").index
