@@ -877,9 +877,16 @@ export const AR = {
   "Small companies (EGX70) against EGX30, last 20 sessions": "الشركات الصغيرة (EGX70) مقابل EGX30، آخر 20 جلسة",
   "Foreign and Arab investors' net buying, last 20 sessions": "صافي شراء المستثمرين الأجانب والعرب، آخر 20 جلسة",
   "{pct} of the money traded": "{pct} من قيمة التداول",
-  "Net buying on {date}, million EGP: Egyptians {e} · Arabs {a} · foreigners {f}. From the exchange's daily statement, as Amwal Al Ghad reports it.":
-    "صافي الشراء في {date} بالمليون جنيه: المصريون {e} · العرب {a} · الأجانب {f}. من بيان البورصة اليومي كما تنشره أموال الغد.",
-  "Foreign + Arab": "الأجانب والعرب",
+  "Who bought and who sold": "من اشترى ومن باع",
+  "Egyptian individuals": "الأفراد المصريون", "Egyptian institutions": "المؤسسات المصرية",
+  "Arab individuals": "الأفراد العرب", "Arab institutions": "المؤسسات العربية",
+  "Foreign individuals": "الأفراد الأجانب", "Foreign institutions": "المؤسسات الأجنبية",
+  "Egyptians": "المصريون", "Arabs": "العرب", "Foreigners": "الأجانب", "Individuals": "الأفراد", "Institutions": "المؤسسات",
+  "bought the most ({v})": "اشتروا أكثر ({v})", "sold the most ({v})": "باعوا أكثر ({v})",
+  "{from} – {to} · {n} sessions": "{from} – {to} · {n} جلسات",
+  "Net buying (+) or selling (−) in pounds. From the exchange's daily statement, as Youm7 reports it.":
+    "صافي الشراء (+) أو البيع (−) بالجنيه. من بيان البورصة اليومي كما ينشره اليوم السابع.",
+  "Only {k} sessions have these numbers so far.": "لدينا هذه الأرقام عن {k} جلسات فقط حتى الآن.",
   "Mood": "المزاج", "Sessions": "الجلسات", "Up after a month": "صعد بعد شهر", "Typical month": "الشهر المعتاد",
   "How it's made, and what it told in the past": "كيف يُحسب، وماذا قال في الماضي",
   "Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk. The seventh, foreign and Arab investors' net buying, is EGX's own.":

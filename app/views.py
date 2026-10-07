@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from egx_agent import breadth, config, corporate, db, levels, mood, portfolio, predict, record, risk, scan, strategy
-from egx_agent.data import dividends, fundamentals, macro, news, prices, shariah, universe
+from egx_agent.data import dividends, flows, fundamentals, macro, news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
 EGX_DAY = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
@@ -1076,9 +1076,11 @@ def market_view(d: Data) -> dict:
     b = breadth_data(d)
     m = market_info(d.conn)
     if not b:
-        return {"breadth": None, "market": m or None, "results": results_calendar(d), "mood": mood_data(d)}
+        return {"breadth": None, "market": m or None, "results": results_calendar(d), "mood": mood_data(d),
+                "investors": flows.recent_split(d.conn)}
     return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("risk_off") if m else None), "market": m or None,
-                  "results": results_calendar(d), "mood": mood_data(d), **movers(d)})
+                  "results": results_calendar(d), "mood": mood_data(d), "investors": flows.recent_split(d.conn),
+                  **movers(d)})
 
 
 INDEX_PERIODS = (("1W", 5), ("1M", 21), ("3M", 63), ("6M", 126), ("1Y", 250), ("3Y", 750), ("5Y", 1250))

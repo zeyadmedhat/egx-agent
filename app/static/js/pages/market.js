@@ -47,6 +47,7 @@ export function MarketPage() {
     <${PageHead} title="Market" sub=${t('How many stocks rise with the index, from the {date} close.', { date: fmt.date(b.date) })}>
       <${SessionBadge} dataDate=${b.date} /><//>
     ${data.mood && html`<${Mood} m=${data.mood} />`}
+    ${data.investors && data.investors.length > 0 && html`<${Investors} days=${data.investors} />`}
     <${Callout} tone=${TONE[v.tone]}><b>${t(v.text)}</b>${change != null
       ? ' ' + t(change >= 0 ? '{pct} of {n} stocks are above their 50-day average, up {pts} points in a week.'
         : '{pct} of {n} stocks are above their 50-day average, down {pts} points in a week.',
@@ -118,12 +119,6 @@ function partValue(p) {
   if (p.key === 'calm') return t('{x}× its usual swings', { x: fmt.num(-p.value, 2) });
   return p.key === 'foreign' ? t('{pct} of the money traded', { pct: fmt.pct(p.value, 1) }) : fmt.pct(p.value, 1);
 }
-// The last session's net buying (+) or selling (−) by each group, in million EGP (egx_agent/data/flows.py)
-function Flows({ f }) {
-  const v = x => html`<b class=${tone(x)}>${x > 0 ? '+' : x < 0 ? '−' : ''}${fmt.num(Math.abs(x), 1)}</b>`;
-  return html`<p class="faint" style="font-size:13px;margin-top:10px">${tp('Net buying on {date}, million EGP: Egyptians {e} · Arabs {a} · foreigners {f}. From the exchange\'s daily statement, as Amwal Al Ghad reports it.',
-    { date: fmt.date(f.date), e: v(f.egyptians), a: v(f.arabs), f: v(f.foreigners) })}</p>`;
-}
 function Mood({ m }) {
   const s = Math.round(m.score);
   const past = [
@@ -138,15 +133,55 @@ function Mood({ m }) {
       <span><b class=${MOOD_TONE(m.score)}>${t(m.label)}</b><span class="faint"> · ${t('0 = extreme fear, 100 = extreme greed')}</span>
       ${m.week_ago != null && html`<br /><span class="faint">${t('{n} a week ago', { n: Math.round(m.week_ago) })}</span>`}</span></div>
     <div class="mood-scale"><span style=${`inset-inline-start:${Math.max(0, Math.min(100, m.score))}%`}></span></div>
-    ${m.history && m.history.time.length > 1 && html`<div class="mood-chart"><${MoodChart} h=${m.history} height=${360} /></div>`}
+    ${m.history && m.history.time.length > 1 && html`<div class="mood-chart"><${MoodChart} h=${m.history} /></div>`}
     <div class="mood-parts">${m.parts.map(p => html`<div class="mood-part">
       <span>${t(p.text)} <span class="faint">${partValue(p)}</span></span>
       ${p.score == null ? html`<span class="faint">–</span>` : html`<div class="gauge"><b class="gauge-v">${Math.round(p.score)}</b>
         <div class=${`bar ${MOOD_TONE(p.score)}`}><span style=${`width:${p.score}%`}></span></div></div>`}</div>`)}</div>
-    ${m.flows && html`<${Flows} f=${m.flows} />`}
     <${More} label="How it's made, and what it told in the past">
       <p>${t("Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk. The seventh, foreign and Arab investors' net buying, is EGX's own.")}</p>
       <p>${t("Tested since {date}: it didn't tell where EGX30 went next. The differences below are small and changed from one period to another, so use it to know the mood, not to time a buy or a sale.", { date: fmt.date(m.since) })}</p>
       <${DataTable} columns=${past} rows=${m.past} rowKey=${r => r.label} /><//>
   </div>`;
+}
+
+// Who bought and who sold: Egyptians, Arabs and foreigners, each as individuals and institutions, net in pounds over the
+// last session, week or month (egx_agent/data/flows.py: the exchange's daily statement, as Youm7 gives it). Bought goes
+// one way from the middle line and sold the other, each bar with its amount.
+const GROUPS = [['egyptians', 'Egyptians'], ['arabs', 'Arabs'], ['foreigners', 'Foreigners']];
+const KINDS = [['individuals', 'Individuals'], ['institutions', 'Institutions']];
+const ADJ = { egyptians: 'Egyptian', arabs: 'Arab', foreigners: 'Foreign' };
+const SPANS = [{ value: 1, label: 'Last session' }, { value: 5, label: '1 week' }, { value: 21, label: '1 month' }];
+// million EGP, rounded to read at a glance: +484M, −7.7M, +1.3B
+const money = v => {
+  const a = Math.abs(v);
+  return `${v > 0.05 ? '+' : v < -0.05 ? '−' : ''}${a >= 1000 ? `${fmt.num(a / 1000, 1)}B` : `${fmt.num(a, a >= 100 ? 0 : 1)}M`}`;
+};
+
+function Investors({ days }) {
+  const [n, setN] = useState(1);
+  const use = days.slice(-n);
+  const sum = (g, k) => use.reduce((a, d) => a + ((d[g] || {})[k] || 0), 0);
+  const rows = GROUPS.map(([g, name]) => ({ g, name, cells: KINDS.map(([k, kn]) => ({ g, k, kn, v: sum(g, k) })) }));
+  const cells = rows.flatMap(r => r.cells);
+  const max = Math.max(1, ...cells.map(c => Math.abs(c.v)));
+  const top = cells.reduce((a, c) => (c.v > a.v ? c : a), { v: 0 });
+  const low = cells.reduce((a, c) => (c.v < a.v ? c : a), { v: 0 });
+  const who = c => t(`${ADJ[c.g]} ${c.k}`);
+  const span = use.length === 1 ? fmt.date(use[0].date)
+    : t('{from} – {to} · {n} sessions', { from: fmt.date(use[0].date, false), to: fmt.date(use[use.length - 1].date, false), n: use.length });
+  return html`<section class="card inv">
+    <div class="inv-top"><div class="card-title" style="margin:0">${t('Who bought and who sold')}</div>
+      <${Seg} options=${SPANS} value=${n} onChange=${setN} /></div>
+    <p class="inv-say">${top.v > 0 && html`<b class="up">${who(top)}</b> ${t('bought the most ({v})', { v: money(top.v) })}`}${top.v > 0 && low.v < 0 ? '; ' : ''}${low.v < 0 && html`<b class="down">${who(low)}</b> ${t('sold the most ({v})', { v: money(low.v) })}`}.</p>
+    <div class="inv-axis"><span></span><div><span>${t('Sold')}</span><span>${t('Bought')}</span></div><span></span></div>
+    ${rows.map(r => html`<div class="inv-group">
+      <div class="inv-name"><b>${t(r.name)}</b><b class=${tone(r.cells[0].v + r.cells[1].v)}>${money(r.cells[0].v + r.cells[1].v)}</b></div>
+      ${r.cells.map(c => html`<div class="inv-row"><span class="muted">${t(c.kn)}</span>
+        <div class="inv-track"><span class=${`inv-bar ${c.v >= 0 ? 'up' : 'down'}`}
+          style=${`${c.v >= 0 ? 'inset-inline-start' : 'inset-inline-end'}:50%;width:${(Math.abs(c.v) / max) * 50}%`}></span></div>
+        <b class="inv-v">${money(c.v)}</b></div>`)}</div>`)}
+    <p class="faint inv-note">${span}. ${t("Net buying (+) or selling (−) in pounds. From the exchange's daily statement, as Youm7 reports it.")}
+      ${use.length < n ? ' ' + t('Only {k} sessions have these numbers so far.', { k: use.length }) : ''}</p>
+  </section>`;
 }

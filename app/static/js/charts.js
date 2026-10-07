@@ -330,10 +330,9 @@ export function BreadthChart({ h, height = 440 }) {
     <div ref=${box} style="position:absolute;inset:0"></div></div>`;
 }
 
-// ------------------------------------------------------------------ market mood: the gauge over a year, and foreign + Arab money each day
-// Top: the mood (0–100) over shaded fear and greed zones. Below: what foreign and Arab investors bought (up, green) or
-// sold (down, red) net each session, in million EGP; the side of the zero line says it as well as the colour does.
-export function MoodChart({ h, height = 380 }) {
+// ------------------------------------------------------------------ market mood over a year
+// The mood (0–100) over shaded fear and greed zones.
+export function MoodChart({ h, height = 300 }) {
   const box = useRef();
   const legend = useRef();
   const theme = useStore(s => s.theme);
@@ -341,8 +340,6 @@ export function MoodChart({ h, height = 380 }) {
     const t = palette();
     const T = h.time;
     const n = T.length;
-    const flows = h.flows || [];
-    const hasFlows = flows.some(v => v != null);
     const chart = LWC.createChart(box.current, baseOptions(t, {
       timeScale: { borderColor: t.border, fixLeftEdge: true, fixRightEdge: true },
     }));
@@ -350,7 +347,7 @@ export function MoodChart({ h, height = 380 }) {
       color: t.accent, lineWidth: 2, priceLineVisible: false,
       priceFormat: { type: 'custom', formatter: v => String(Math.round(v)), minMove: 1 },
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
-    }, 0);
+    });
     mood.setData(points(T, h.score));
     mood.attachPrimitive(new Bands([
       { low: 0, high: 25, color: alpha(t.down, 0.14) }, { low: 25, high: 45, color: alpha(t.down, 0.06) },
@@ -360,30 +357,9 @@ export function MoodChart({ h, height = 380 }) {
       mood.createPriceLine({ price: y, color: t.text3, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title });
     }
     mood.priceScale().applyOptions({ scaleMargins: { top: 0.04, bottom: 0.04 } });
-    if (hasFlows) {
-      // sized to everyday sessions, around zero: the few days of a big deal (billions) run off the top, their
-      // number still in the legend
-      const abs = flows.filter(v => v != null).map(Math.abs).sort((x, y) => x - y);
-      const cap = Math.max(50, abs[Math.floor(abs.length * 0.95)] * 1.25);
-      const bars = chart.addSeries(LWC.HistogramSeries, {
-        priceLineVisible: false, lastValueVisible: false,
-        priceFormat: { type: 'custom', formatter: v => `${fmt.int(v)}M`, minMove: 1 },
-        autoscaleInfoProvider: () => ({ priceRange: { minValue: -cap, maxValue: cap } }),
-      }, 1);
-      bars.setData(T.map((time, i) => (flows[i] == null ? { time } : {
-        time, value: flows[i], color: alpha(flows[i] >= 0 ? t.up : t.down, 0.75),
-      })));
-      bars.createPriceLine({ price: 0, color: t.text3, lineWidth: 1, lineStyle: LWC.LineStyle.Solid, axisLabelVisible: false });
-      chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? 1.4 : 1));
-    }
     const writeLegend = i => {
       if (!legend.current || i < 0 || i >= n) return;
-      const f = flows[i];
-      legend.current.innerHTML = [
-        `<span>${fmt.date(T[i])}</span>`,
-        `<span><span class="legend-dot" style="background:${t.accent}"></span>${tr('Mood')} <b>${h.score[i] == null ? '–' : Math.round(h.score[i])}</b></span>`,
-        hasFlows ? `<span><span class="legend-dot" style="background:${f != null && f < 0 ? t.down : t.up}"></span>${tr('Foreign + Arab')} <b>${f == null ? '–' : `${f > 0 ? '+' : f < 0 ? '−' : ''}${fmt.int(Math.abs(f))}M`}</b></span>` : '',
-      ].join('');
+      legend.current.innerHTML = `<span>${fmt.date(T[i])}</span><span><span class="legend-dot" style="background:${t.accent}"></span>${tr('Mood')} <b>${h.score[i] == null ? '–' : Math.round(h.score[i])}</b></span>`;
     };
     writeLegend(n - 1);
     chart.subscribeCrosshairMove(p => writeLegend(p.logical == null ? n - 1 : Math.round(p.logical)));

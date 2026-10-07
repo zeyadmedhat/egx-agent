@@ -1046,6 +1046,25 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .mood-scale > span { position: absolute; top: -4px; width: 4px; height: 16px; margin-inline-start: -2px;
   border-radius: 2px; background: var(--text); }
 .mood-chart { margin: 0 0 16px; }
+/* Who bought and who sold (pages/market.js Investors): bars from a middle line, bought one way and sold the other */
+.inv { margin-bottom: 14px; }
+.inv-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.inv-say { margin: 12px 0 14px; font-size: 15px; line-height: 1.5; }
+.inv-axis, .inv-row { display: grid; grid-template-columns: 6.5em 1fr 4.6em; gap: 10px; align-items: center; }
+.inv-axis > div { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: .06em; }
+.inv-group { padding: 10px 0; border-top: 1px solid var(--border); }
+.inv-group:first-of-type { border-top: 0; }
+.inv-name { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 14px; }
+.inv-row { font-size: 13px; margin-top: 4px; }
+.inv-track { position: relative; height: 14px; }
+.inv-track::before { content: ""; position: absolute; inset-inline-start: 50%; top: -3px; bottom: -3px; width: 1px;
+  background: var(--text-3); }
+.inv-bar { position: absolute; top: 0; height: 100%; border-radius: 4px; min-width: 2px; }
+.inv-bar.up { background: var(--up); }
+.inv-bar.down { background: var(--down); }
+.inv-v { text-align: end; font-variant-numeric: tabular-nums; }
+.inv-note { font-size: 12px; margin-top: 8px; }
 .mood-parts { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
 .mood-part { display: grid; grid-template-columns: 1fr minmax(120px, 34%); gap: 12px; align-items: center; }
 .shariah-note { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); white-space: nowrap; }

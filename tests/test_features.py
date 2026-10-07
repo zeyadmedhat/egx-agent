@@ -211,7 +211,6 @@ def test_market_mood_is_fear_after_a_fall_and_greed_after_a_steady_climb():
     assert climb["score"] >= 76 and climb["label"] == "Extreme greed"
     assert [p["key"] for p in fall["parts"]] == list(mood.PARTS)
     assert fall["past"][-1]["label"] == "Any mood" and len(fall["history"]["time"]) == 250
-    assert fall["history"]["flows"] == [None] * 250          # the chart's bars: no flows in this market
     assert [mood.label(s) for s in (0, 24.9, 25, 50, 56, 75.9, 76, 100)] == [
         "Extreme fear", "Extreme fear", "Fear", "Neutral", "Greed", "Greed", "Extreme greed", "Extreme greed"]
 
@@ -257,6 +256,65 @@ def test_each_session_takes_its_closing_report_even_in_ramadan():
     got = flows.fetch("2026-03-01", session=Feed())
     assert got == {"2026-03-04": {"egyptians": 50.0, "arabs": -20.0, "foreigners": -30.0},
                    "2026-03-05": {"egyptians": -40.0, "arabs": 10.0, "foreigners": 30.0}}
+
+
+def test_each_groups_individuals_and_institutions_are_read():
+    from egx_agent.data import flows
+    got = flows.parse_split(
+        "ومالت صافي تعاملات الأفراد العرب والمؤسسات المصرية والعربية والأجنبية للبيع بقيمة 7.7 مليون جنيه، 275.4 مليون جنيه، "
+        "57.7 مليون جنيه، 148 مليون جنيه، على الترتيب، فيما مالت تعاملات الأفراد المصريين والأجانب للشراء بقيمة 483.5 مليون "
+        "جنيه، 5.3 مليون جنيه، على الترتيب. تراجع مؤشر إيجي إكس 30 بنسبة 0.48%")
+    assert got == {"egyptians": {"individuals": 483.5, "institutions": -275.4},
+                   "arabs": {"individuals": -7.7, "institutions": -57.7},
+                   "foreigners": {"individuals": 5.3, "institutions": -148.0}}
+    # "الأفراد والمؤسسات المصرية والعربية": individuals first, then institutions, of each group named
+    got = flows.parse_split(
+        "ومالت صافي تعاملات الافراد والمؤسسات الاجنبية للبيع بقيمة 814.4 الف جنيه، 940.8 مليون جنيه، على الترتيب، فيما مالت "
+        "تعاملات الافراد والمؤسسات المصرية والعربية للشراء بقيمة 523.5 مليون جنيه، 487 الف جنيه، 387.3 مليون جنيه، 30.4 مليون جنيه")
+    assert got["foreigners"] == {"individuals": -0.8144, "institutions": -940.8}
+    assert got["egyptians"] == {"individuals": 523.5, "institutions": 387.3} and got["arabs"]["individuals"] == 0.487
+    # thousands written for millions: the one fix that evens the six; a report that can't be evened isn't used
+    got = flows.parse_split(
+        "ومالت صافي تعاملات المؤسسات العربية والاجنبية للبيع بقيمة 39.7 مليون جنيه، 254.5 الف جنيه، على الترتيب، فيما مالت "
+        "تعاملات الافراد المصريين والعرب والاجانب والمؤسسات المصرية للشراء بقيمة 120.8 مليون جنيه، 33.1 مليون جنيه، 1.9 مليون "
+        "جنيه، 138.3 مليون جنيه، على الترتيب")
+    assert got["foreigners"]["institutions"] == -254.5
+    assert flows.parse_split("ومالت صافي تعاملات الافراد المصريين والعرب والمؤسسات المصرية والعربية للشراء بقيمة 10 مليون جنيه، "
+                             "20 مليون جنيه، 30 مليون جنيه، 40 مليون جنيه") is None
+
+
+def test_the_split_fills_new_sessions_then_two_years_back_a_little_each_run(tmp_path):
+    from datetime import datetime
+    from egx_agent.data import flows
+    conn = db.connect(tmp_path / "t.db")
+    days = make_ohlcv(np.ones(30), start="2026-08-30").index
+    db.upsert_prices(conn, "EGX30", _frame(np.full(30, 1000.0), start="2026-08-30"))
+    say = ("ومالت صافي تعاملات المؤسسات الاجنبية للبيع بقيمة 100 مليون جنيه، على الترتيب، فيما مالت تعاملات الافراد "
+           "المصريين والعرب والمؤسسات المصرية والعربية للشراء بقيمة 40 مليون جنيه، 10 مليون جنيه، 30 مليون جنيه، 20 مليون جنيه")
+    asked = []
+
+    class Youm7:
+        headers: dict = {}
+
+        def get(self, url, timeout=None):
+            asked.append(url)
+            ok = lambda text: type("R", (), {"status_code": 200, "ok": True, "text": text})()   # noqa: E731
+            if "/Sitemap/" in url:
+                return ok(f"<loc>https://www.youm7.com/story/x/{flows.ROUNDUP}-x/1</loc><loc>https://www.youm7.com/story/x/other/2</loc>")
+            return ok(say)
+    db.upsert_macro(conn, "flow_foreign", pd.DataFrame({"date": [str(days[-1].date())], "close": [999.0]}))  # Amwal's
+    now = datetime.fromisoformat(f"{days[-1].date()}T16:00:00")
+    flows.SPLIT_BACK_PER_RUN, back = 5, flows.SPLIT_BACK_PER_RUN
+    try:
+        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 3 + 5      # the newest 3, then 5 older ones
+        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 5          # 5 more each run
+    finally:
+        flows.SPLIT_BACK_PER_RUN = back
+    rows = flows.recent_split(conn, 100)
+    assert len(rows) == 13 and rows[-1]["date"] == str(days[-1].date())
+    assert rows[-1]["foreigners"] == {"individuals": 0.0, "institutions": -100.0}
+    assert flows.load(conn).iloc[-1].to_dict() == {"egyptians": 70.0, "arabs": 30.0, "foreigners": -100.0}   # replaces 999
+    assert not any("/other/" in u for u in asked)
 
 
 def test_past_rights_issues_are_measured_from_the_close_before_the_ex_date(tmp_path):
