@@ -1,10 +1,13 @@
 """The AI models' forecasts: saving them once a close, grading them against what happened and against "no change",
 and the stock page's card."""
+import json
+
 import numpy as np
 import pandas as pd
 
 from app import views
-from egx_agent import ai_forecast, config, db
+from egx_agent import ai_forecast, config, db, holidays
+from egx_agent.data import news
 from egx_agent.data.prices import INDEX_SYMBOL
 
 
@@ -81,3 +84,22 @@ def test_the_stock_page_shows_each_model_their_middle_and_how_they_did(tmp_path,
     assert len(ai["closes"]["time"]) == 61 and ai["closes"]["time"][-1] == days[-1]
     assert views.ai_view(d, "BBB", d.indicators("BBB")["close"].iloc[195:]) is None   # no close by the forecast's
     assert views.ai_view(d, "ZZZ", close) is None                                         # no forecasts
+
+
+def test_a_coming_reset_is_flagged_and_forecasts_move_to_the_new_prices_after_it(tmp_path, monkeypatch):
+    conn, days = _market(tmp_path)
+    _models(monkeypatch)
+    ai_forecast.run(conn, days[190])
+    ex = holidays.sessions_after(days[-1], 2)                 # after the last close, inside 20 sessions, not 5
+    news.save_corporate_actions(conn, [{"symbol": "AAA", "kind": "rights", "type": "Capital Increase - Rights Issue",
+                                        "announced": days[180], "effective": ex, "note": ""}])
+    d = views.Data(conn, dict(config.DEFAULTS), views.Cache())
+    ai = views.ai_view(d, "AAA", d.indicators("AAA")["close"])
+    assert ai["steps"]["20"]["reset"] == {"kind": "rights", "date": ex} and ai["steps"]["5"]["reset"] is None
+    p5 = lambda sym: conn.execute("SELECT p5 FROM ai_forecasts WHERE symbol=? AND model='up'", (sym,)).fetchone()[0]  # noqa: E731
+    before, other = p5("AAA"), p5("BBB")
+    db.add_price_event(conn, "AAA", days[195], 2.0)          # the history re-based: old prices ÷ 2
+    db.add_price_event(conn, "AAA", days[195], 2.0)          # found again: no second change
+    assert p5("AAA") == before / 2 and p5("BBB") == other    # only that stock's
+    path = conn.execute("SELECT path FROM ai_paths WHERE symbol='AAA' AND model='up'").fetchone()[0]
+    assert np.isclose(json.loads(path)[4], before / 2)

@@ -344,12 +344,22 @@ def save_personal_settings(conn: sqlite3.Connection, values: dict) -> None:
 
 
 def add_price_event(conn: sqlite3.Connection, symbol: str, ex_date: str, factor: float) -> None:
-    """Remember that a stock's history was re-based (bonus shares or a split) from ex_date on."""
+    """Remember that a stock's history was re-based (bonus shares or a split) from ex_date on. The AI models'
+    forecasts from before it are in the old prices: they move to the new ones with the history (ai_forecast.py)."""
+    old = conn.execute("SELECT factor FROM price_events WHERE symbol=? AND ex_date=?", (symbol, ex_date)).fetchone()
     conn.execute(
         """INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES (?,?,?,?)
            ON CONFLICT(symbol, ex_date) DO UPDATE SET factor=excluded.factor""",
         (symbol, ex_date, float(factor), datetime.now().isoformat(timespec="seconds")),
     )
+    k = float(factor) / (old[0] if old else 1.0)          # found again with another factor: only the difference
+    if abs(k - 1) > 1e-9:
+        conn.execute("UPDATE ai_forecasts SET p1=p1/?, p5=p5/?, p20=p20/? WHERE symbol=? AND made<?",
+                     (k, k, k, symbol, ex_date))
+        for model, path in conn.execute("SELECT model, path FROM ai_paths WHERE symbol=? AND made<?",
+                                        (symbol, ex_date)).fetchall():
+            conn.execute("UPDATE ai_paths SET path=? WHERE symbol=? AND model=?",
+                         (json.dumps([float(f"{v / k:.5g}") for v in json.loads(path)]), symbol, model))
     conn.commit()
 
 

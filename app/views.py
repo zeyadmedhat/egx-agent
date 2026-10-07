@@ -497,6 +497,9 @@ def ai_grades(d: Data) -> dict:
     return d.cache.get(d.version, ("ai_grades",), build)
 
 
+AI_RESETS = ("rights", "bonus", "split", "consolidation")
+
+
 def ai_view(d: Data, sym: str, close: pd.Series) -> dict | None:
     """The stock page's "What the AI models forecast": each model's latest 20-session path from the close it ran
     after, by 1, 5 and 20 sessions ahead: the middle and the spread of the models, how many point each way, how big the
@@ -515,6 +518,11 @@ def ai_view(d: Data, sym: str, close: pd.Series) -> dict | None:
     earlier = pd.read_sql_query("SELECT made, p1, p5, p20 FROM ai_forecasts WHERE symbol=? AND made<?", d.conn,
                                 params=(sym, made)).groupby("made").median().tail(8)
     grades = ai_grades(d)
+    # bonus shares, a split or a rights issue going ex after the last close: that day the price is reset for the new
+    # shares, which the models can't know (afterwards their forecasts move to the new prices: db.add_price_event)
+    last = close.index[-1]
+    resets = sorted((a for a in news.actions(d.conn, sym, since=last, kinds=AI_RESETS) if a["effective"] > last),
+                    key=lambda a: a["effective"])
     steps = {}
     for k in ai_forecast.STEPS:
         vals = {m: p[k - 1] for m, p in paths.items()}
@@ -531,7 +539,9 @@ def ai_view(d: Data, sym: str, close: pd.Series) -> dict | None:
             target = done["target"].get(m) or holidays.sessions_after(m, k)
             past.append({"made": m, "target": target, "start": _num(close[close.index <= m].iloc[-1]), "value": float(v),
                          "actual": _num(done["actual"].get(m))})
-        steps[str(k)] = {"target": holidays.sessions_after(made, k), "values": vals, "mid": mid,
+        target = holidays.sessions_after(made, k)
+        reset = next(({"kind": a["kind"], "date": a["effective"]} for a in resets if a["effective"] <= target), None)
+        steps[str(k)] = {"target": target, "reset": reset, "values": vals, "mid": mid,
                          "lo": min(vals.values()), "hi": max(vals.values()), "up": up, "down": down,
                          "typical": typical, "score": round(100 * agree * size),
                          "record": ai_forecast.grade(done.reset_index()), "all": grades.get(str(k), {}), "past": past}

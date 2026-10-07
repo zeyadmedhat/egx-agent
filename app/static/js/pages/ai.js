@@ -13,6 +13,7 @@ const median = xs => { const s = [...xs].sort((a, b) => a - b), m = s.length >> 
 const enough = g => g && g.n >= 30;
 const BAND = { 0: 'under 30', 30: '30 to 59', 60: '60 or more' };
 const FOR = { 1: 'next-session forecasts', 5: '5-session forecasts', 20: '20-session forecasts' };
+const RESET = { rights: 'rights issue', bonus: 'bonus shares', split: 'stock split', consolidation: 'share consolidation' };
 
 export function AiForecast({ ai, sym }) {
   const [k, setK] = useState('5');
@@ -43,6 +44,8 @@ export function AiForecast({ ai, sym }) {
       <div class="ai-box"><span class="k-label"><i class="dot mid"></i>${t('Middle forecast · {when}', { when: t(AFTER[n]) })}</span>
         <b class="accent">${fmt.price(mid)}</b><small class=${tone(change)}>${t('{chg} from the start', { chg: fmt.pct(change, 2) })} · ${fmt.date(s.target, false)}</small></div>
     </div>
+    ${s.reset && html`<p class="warn-text ai-reset">${t("Ex-date of the {what}: {date}, inside this window. That day the price is reset for the new shares, which the models can't know: their forecast is in today's prices. Once it's past, their earlier forecasts move to the new prices before they're graded.",
+      { what: t(RESET[s.reset.kind]), date: fmt.date(s.reset.date, false) })}</p>`}
     <div class="ai-grid">
       <div style="min-width:0">
         <${Drawing} ai=${ai} k=${n} at=${at} pick=${pick} before=${before} />
