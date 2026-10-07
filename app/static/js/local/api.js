@@ -622,7 +622,8 @@ function deleteDividend(c, id) {
 
 // ------------------------------------------------------------------ your wallet (engine.js walletEffect)
 const THNDR_WITHDRAW_FEE = 2.5;     // EGP a bank transfer out of Thndr (Oct 2026)
-const WALLET_KINDS = ['deposit', 'withdraw', 'fee', 'refund', 'fix'];
+const THNDR_SETTLE = { pct: 0.003, min_fee: 5, min_amount: 300 };   // Thndr's Settle now (support.thndr.app, Oct 2026)
+const WALLET_KINDS = ['deposit', 'withdraw', 'fee', 'refund', 'fix', 'settle'];
 
 // Like your broker's wallet: the balance, what can be withdrawn now, and every pound in or out, newest first.
 function walletView(c, s) {
@@ -631,7 +632,7 @@ function walletView(c, s) {
   const wait = E.unsettled(book, localToday());
   const rows = [
     ...(book.cash || []).map(m => ({ id: m.id, date: m.date, kind: m.kind, amount: E.walletEffect(m), fee: m.fee || 0,
-      note: m.note || '' })),
+      note: m.note || '', settled: m.kind === 'settle' ? m.amount : undefined })),
     ...book.fills.filter(f => real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')).map(f => ({
       date: f.date, kind: f.side, symbol: f.symbol, shares: f.shares, fee: f.fees || 0,
       amount: f.side === 'buy' ? -(f.shares * f.price + (f.fees || 0)) : f.shares * f.price - (f.fees || 0) })),
@@ -639,12 +640,13 @@ function walletView(c, s) {
       amount: d.amount })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || 0) - (a.id || 0)));
   return { balance: s.cash, unsettled: wait, available: Math.max(0, s.cash - wait), moves: rows,
-    withdraw_fee: String(c.cfg.broker).startsWith('thndr') ? THNDR_WITHDRAW_FEE : 0, settle_days: E.SETTLE_DAYS };
+    withdraw_fee: String(c.cfg.broker).startsWith('thndr') ? THNDR_WITHDRAW_FEE : 0, settle_days: E.SETTLE_DAYS,
+    settle: String(c.cfg.broker).startsWith('thndr') ? THNDR_SETTLE : null };
 }
 
 function walletMove(c, body) {
   const kind = String(body.kind || '');
-  if (!WALLET_KINDS.includes(kind)) fail(422, 'Choose top up, withdraw, a fee or money back.');
+  if (!WALLET_KINDS.includes(kind)) fail(422, 'Choose top up, withdraw, settle now, a fee or money back.');
   const date = toDay(body.date || localToday());
   const note = String(body.note || '').trim().slice(0, 100);
   const s = E.accountSummary(c.book, 'real', c.cfg, closes(c), c.core.events);
@@ -654,6 +656,15 @@ function walletMove(c, body) {
     amount = Math.round((balance - s.cash) * 100) / 100;
     if (!amount) return { message: 'Your wallet already shows that.' };
     message = `Your wallet now shows ${money2(balance)} EGP (${amount > 0 ? '+' : '−'}${money2(Math.abs(amount))} set right).`;
+  } else if (kind === 'settle') {   // money from a sale made withdrawable at once, for a fee
+    amount = toNum(body.amount, 'Amount');
+    fee = toNum(body.fee || 0, 'Fee', { strict: false });
+    const wait = E.unsettled(c.book, date);
+    if (amount > wait + 0.005) fail(422, `Only ${money2(wait)} EGP was still settling on that day.`);
+    if (String(c.cfg.broker).startsWith('thndr') && amount < THNDR_SETTLE.min_amount) {
+      fail(422, `Thndr settles ${THNDR_SETTLE.min_amount} EGP or more at a time.`);
+    }
+    message = `Settled ${money2(amount)} EGP now${fee ? ` for a ${money2(fee)} EGP fee` : ''}: you can withdraw it at once.`;
   } else {
     amount = toNum(body.amount, 'Amount');
     if (kind === 'deposit' || kind === 'withdraw') fee = toNum(body.fee || 0, 'Fee', { strict: false });
@@ -662,8 +673,8 @@ function walletMove(c, body) {
       const free = s.cash - E.unsettled(c.book, localToday());
       if (amount + fee > free + 0.005) {
         fail(422, `You can withdraw up to ${money2(Math.max(0, free - fee))} EGP now. Money from a sale can buy at once `
-          + `but can be withdrawn only after about ${E.SETTLE_DAYS} working days. If your broker shows a different `
-          + 'balance, use "Match my broker" first.');
+          + `but can be withdrawn only after ${E.SETTLE_DAYS} working days, or at once with "Settle now" for a fee. If your `
+          + 'broker shows a different balance, use "Match my broker" first.');
       }
     }
     message = {

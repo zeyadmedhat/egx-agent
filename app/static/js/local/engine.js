@@ -569,15 +569,25 @@ export function deleteTrade(book, tradeId) {
 // Your broker wallet (book.cash, the real account): money you topped up or withdrew, and money in or out beside the
 // orders (settlement fees, a commission kickback). A fix sets the balance to what your broker shows.
 export const walletEffect = m => (m.kind === 'deposit' ? m.amount - (m.fee || 0) : m.kind === 'withdraw'
-  ? -m.amount - (m.fee || 0) : m.kind === 'fee' ? -m.amount : m.amount);
+  ? -m.amount - (m.fee || 0) : m.kind === 'fee' ? -m.amount : m.kind === 'settle' ? -(m.fee || 0) : m.amount);
 export const walletFlow = m => (m.kind === 'deposit' ? m.amount : m.kind === 'withdraw' ? -m.amount : 0);   // put in / took out
 
-// A sale's money can buy at once, but can be withdrawn only once it settles, about 2 working days later.
+// A sale's money can buy at once, but can be withdrawn only once it settles, 2 sessions later, or at once with
+// your broker's Settle now (a 'settle' wallet move: that much of the money still settling then, oldest sale first).
 export const SETTLE_DAYS = 2;
 export function unsettled(book, today) {
   const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
-  return sum(book.fills.filter(f => f.side === 'sell' && real.has(f.trade_id) && sessionsAfter(f.date, SETTLE_DAYS) > today)
-    .map(f => f.shares * f.price - (f.fees || 0)));
+  const sales = book.fills.filter(f => f.side === 'sell' && real.has(f.trade_id))
+    .map(f => ({ date: f.date, until: sessionsAfter(f.date, SETTLE_DAYS), left: f.shares * f.price - (f.fees || 0) }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  for (const m of (book.cash || []).filter(x => x.kind === 'settle' && x.date <= today)) {
+    let a = m.amount;
+    for (const s of sales) {
+      if (a <= 0) break;
+      if (s.date <= m.date && s.until > m.date) { const k = Math.min(a, s.left); s.left -= k; a -= k; }
+    }
+  }
+  return sum(sales.filter(s => s.until > today).map(s => s.left));
 }
 
 export function accountSummary(book, account, cfg, lastClose, events = []) {

@@ -114,11 +114,13 @@ export function PortfolioPage({ route }) {
 const WALLET_FORMS = {
   deposit: { title: 'Top up', icon: 'plus' },
   withdraw: { title: 'Withdraw', icon: 'sell' },
+  settle: { title: 'Settle now', icon: 'history' },
   fee: { title: 'A fee', icon: 'coins', notes: ['Settlement fees', 'Other fee'] },
   refund: { title: 'Money back', icon: 'coins', notes: ['Commission kickback', 'Other'] },
   fix: { title: 'Match my broker', icon: 'refresh' },
 };
 const MOVE_NAME = { deposit: 'Top up', withdraw: 'Withdrawal', fee: 'Fee', refund: 'Money back', fix: 'Set to match my broker' };
+const settleFee = (w, a) => (w.settle && a > 0 ? Math.max(w.settle.min_fee, Math.round(a * w.settle.pct * 100) / 100) : 0);
 
 function WalletTab({ data }) {
   const w = data.wallet, thndr = String(data.fee_cfg.broker).startsWith('thndr');
@@ -126,7 +128,8 @@ function WalletTab({ data }) {
   const [gone, setGone] = useState(null);           // the row you asked to remove
   const what = m => (m.kind === 'buy' || m.kind === 'sell'
     ? t(m.kind === 'buy' ? 'Bought {n} {sym}' : 'Sold {n} {sym}', { n: fmt.int(m.shares), sym: m.symbol })
-    : m.kind === 'dividend' ? t('Dividend from {sym}', { sym: m.symbol }) : tn(m.note) || t(MOVE_NAME[m.kind]));
+    : m.kind === 'dividend' ? t('Dividend from {sym}', { sym: m.symbol })
+      : m.kind === 'settle' ? t('Settled {v} early', { v: fmt.num(m.settled, 2) }) : tn(m.note) || t(MOVE_NAME[m.kind]));
   const columns = [
     { key: 'date', label: 'Date', fmt: v => fmt.date(v) },
     { key: 'kind', label: 'What', sortable: false, render: m => html`<b>${what(m)}</b>${m.fee > 0
@@ -153,7 +156,7 @@ function WalletTab({ data }) {
         title=${t('Money from sales in the last {n} working days: you can buy with it now, but withdraw it only once it settles.', { n: w.settle_days })} />
     </div>
     <div class="row" style="margin-top:14px;flex-wrap:wrap;gap:8px">
-      ${Object.entries(WALLET_FORMS).map(([k, f]) => html`<button class=${cls('btn', k === 'deposit' ? 'primary' : '', k !== 'deposit' && k !== 'withdraw' && 'sm ghost')}
+      ${Object.entries(WALLET_FORMS).filter(([k]) => k !== 'settle' || w.unsettled > 0.005).map(([k, f]) => html`<button class=${cls('btn', k === 'deposit' ? 'primary' : '', k !== 'deposit' && k !== 'withdraw' && 'sm ghost')}
         aria-pressed=${form === k} onClick=${() => setForm(x => (x === k ? null : k))}><${Icon} name=${f.icon} size=${16} />${t(f.title)}</button>`)}
     </div>
     ${form && html`<${WalletForm} key=${form} kind=${form} w=${w} thndr=${thndr} onClose=${() => setForm(null)} />`}
@@ -170,13 +173,21 @@ function WalletTab({ data }) {
 
 function WalletForm({ kind, w, thndr, onClose }) {
   const spec = WALLET_FORMS[kind];
-  const [form, setForm] = useState({ date: todayISO(), amount: '', fee: kind === 'withdraw' && w.withdraw_fee ? String(w.withdraw_fee) : '',
-    note: (spec.notes || [''])[0], balance: '' });
+  const all = Math.floor(w.unsettled * 100) / 100;       // Settle now: all that's settling, unless you say less
+  const [form, setForm] = useState({ date: todayISO(), amount: kind === 'settle' ? String(all) : '', note: (spec.notes || [''])[0],
+    fee: kind === 'withdraw' && w.withdraw_fee ? String(w.withdraw_fee) : kind === 'settle' && w.settle ? String(settleFee(w, all)) : '',
+    balance: '' });
   const [busy, setBusy] = useState(false);
-  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const [feeSet, setFeeSet] = useState(false);            // you typed the fee: the amount no longer changes it
+  const set = k => e => {
+    const v = e.target.value;
+    if (k === 'fee') setFeeSet(true);
+    setForm(f => ({ ...f, [k]: v, ...(k === 'amount' && kind === 'settle' && w.settle && !feeSet ? { fee: String(settleFee(w, parseFloat(v))) } : {}) }));
+  };
   const amount = parseFloat(kind === 'fix' ? form.balance : form.amount), fee = parseFloat(form.fee) || 0;
   const valid = kind === 'fix' ? amount >= 0 : amount > 0;
   const total = kind === 'withdraw' ? amount + fee : kind === 'deposit' ? amount - fee : null;
+  const short = kind === 'settle' && w.settle && amount > 0 && amount < w.settle.min_amount;
   const submit = async e => {
     e.preventDefault();
     if (!valid) return;
@@ -192,7 +203,9 @@ function WalletForm({ kind, w, thndr, onClose }) {
       setBusy(false);
     }
   };
-  const feeHelp = kind === 'withdraw'
+  const feeHelp = kind === 'settle'
+    ? (w.settle ? 'Thndr takes 0.3% of the amount, at least 5 EGP.' : "Your broker's fee, if any.")
+    : kind === 'withdraw'
     ? (thndr ? t('Thndr takes {v} EGP a bank transfer.', { v: fmt.num(w.withdraw_fee, 1) }) : "Your broker's fee, if any.")
     : (thndr ? 'At Thndr an e-wallet top-up has a fee; InstaPay and bank transfers are free.' : "Your broker's fee, if any.");
   return html`<form class="preview-box" style="margin-top:14px;gap:10px" onSubmit=${submit}>
@@ -201,19 +214,22 @@ function WalletForm({ kind, w, thndr, onClose }) {
       ${kind === 'fix'
         ? html`<${Field} label="Your broker's wallet balance (EGP)" help="The balance your broker's app shows. Record your top-ups and withdrawals first: what's left of the difference counts as a gain or a loss.">
             <input class="input" type="number" min="0" step="0.01" value=${form.balance} onInput=${set('balance')} required /><//>`
-        : html`<${Field} label="Amount (EGP)" help=${kind === 'withdraw' ? t('Up to {v} now', { v: fmt.egp(Math.max(0, w.available - fee), 2) }) : ''}>
+        : html`<${Field} label=${kind === 'settle' ? 'Amount to settle (EGP)' : 'Amount (EGP)'}
+            help=${kind === 'withdraw' ? t('Up to {v} now', { v: fmt.egp(Math.max(0, w.available - fee), 2) })
+              : kind === 'settle' ? t('{v} is still settling', { v: fmt.egp(w.unsettled, 2) }) + (w.settle ? ` · ${t('Thndr settles 300 EGP or more')}` : '') : ''}>
             <input class="input" type="number" min="0.01" step="0.01" value=${form.amount} onInput=${set('amount')} required /><//>`}
-      ${(kind === 'deposit' || kind === 'withdraw') && html`<${Field} label="Fee (EGP)" help=${feeHelp}>
+      ${(kind === 'deposit' || kind === 'withdraw' || kind === 'settle') && html`<${Field} label="Fee (EGP)" help=${feeHelp}>
         <input class="input" type="number" min="0" step="0.01" value=${form.fee} onInput=${set('fee')} /><//>`}
       ${spec.notes && html`<${Field} label="What it is"><select class="input" value=${form.note} onChange=${set('note')}>
         ${spec.notes.map(n => html`<option value=${n}>${t(n)}</option>`)}</select><//>`}
       ${kind !== 'fix' && html`<${Field} label="Date"><${DateInput} weekends value=${form.date} onInput=${set('date')} /><//>`}
     </div>
-    ${kind === 'fee' && thndr && html`<p class="faint" style="font-size:12.5px;margin:0">${t("Each buy and sale you log already counts Thndr's commission and the exchange's fees, which Thndr may take a day later as settlement fees. Add a fee here only if it's something else; if your balance is off, use Match my broker.")}</p>`}
+    ${kind === 'fee' && thndr && html`<p class="faint" style="font-size:12.5px;margin:0">${t("Each buy and sale you log already counts Thndr's commission and the exchange's fees. To make a sale's money withdrawable at once, use Settle now (it shows while money is settling). Add a fee here only if it's something else; if your balance is off, use Match my broker.")}</p>`}
     <div class="row">
-      <span style="flex:1">${total != null && amount > 0 ? t(kind === 'withdraw' ? 'Total out of your wallet: {v}' : 'Reaches your wallet: {v}', { v: fmt.egp(total, 2) }) : ''}</span>
+      <span style="flex:1">${total != null && amount > 0 ? t(kind === 'withdraw' ? 'Total out of your wallet: {v}' : 'Reaches your wallet: {v}', { v: fmt.egp(total, 2) })
+        : kind === 'settle' && amount > 0 ? t('You can withdraw {v} more at once; the fee comes out of your wallet.', { v: fmt.egp(amount, 2) }) : ''}</span>
       <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
-      <button class="btn primary sm" type="submit" disabled=${busy || !valid}><${Icon} name="check" />${t('Save')}</button>
+      <button class="btn primary sm" type="submit" disabled=${busy || !valid || short}><${Icon} name="check" />${t('Save')}</button>
     </div>
   </form>`;
 }

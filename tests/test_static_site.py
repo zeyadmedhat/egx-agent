@@ -897,11 +897,14 @@ def test_wallet_counts_top_ups_withdrawals_fees_and_sales_still_settling():
     curve = {"start": 1000, "fills": [{"date": "a", "symbol": "X", "side": "buy", "shares": 100, "price": 10}],
              "moves": [{"date": "b", "cash": 1000, "flow": 1000}, {"date": "c", "cash": -500, "flow": -500}],
              "series": {"X": {"time": days, "close": [10, 10, 10]}}, "index": {"time": days, "close": [100, 100, 110]}}
-    w, c = run_js({"op": "wallet", "args": {"book": book, "cfg": {"capital": 10_000}, "today": ["2026-10-07", "2026-10-08"]}},
-                  {"op": "equity", "args": curve})
+    early = {**book, "cash": [*cash, {"id": 8, "date": "2026-10-07", "kind": "settle", "amount": 700, "fee": 5}]}
+    w, c, e = run_js({"op": "wallet", "args": {"book": book, "cfg": {"capital": 10_000}, "today": ["2026-10-07", "2026-10-08"]}},
+                     {"op": "equity", "args": curve},
+                     {"op": "wallet", "args": {"book": early, "cfg": {"capital": 10_000}, "today": ["2026-10-07", "2026-10-08"]}})
     s = w["summary"]
     assert s["added"] == 500 and s["start"] == 10_500                       # what you put in, net
     assert s["cash"] == pytest.approx(10_000 + 200 + 990 - 502.5 - 9.59 + 20.06)
     assert w["unsettled"] == [1200, 0]                     # sold Tuesday: settles Thursday
+    assert e["unsettled"] == [500, 0] and e["summary"]["cash"] == pytest.approx(s["cash"] - 5)   # Settle now: 700 for 5
     assert c["value"] == [1000, 2000, 1500] and c["max_drawdown"] == 0 and c["ret"] == 0
     assert c["index_ret"] == pytest.approx((20 - 500 / 110) * 110 / 1500 - 1)  # what you put in bought EGX30 too
