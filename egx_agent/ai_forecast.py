@@ -2,7 +2,8 @@
 forecast"), and how their past forecasts did.
 
 Each is a pretrained time-series model from a different lab, built a different way (an encoder, a decoder, an xLSTM).
-None was trained on EGX, and none sees anything but the stock's own past closes. They run once a day after the close,
+None was trained on EGX. They read the stock's own past closes, and Chronos-2 EGX30's on the same days too, nothing
+else. They run once a day after the close,
 in their own step of the website's run (they need torch, which nothing else does), and save each stock's 20-session
 path (ai_paths, the latest only) and the price it forecast 1, 5 and 20 sessions ahead (ai_forecasts, every day). The
 site grades those against what happened, next to "no change", the forecast that's hard to beat on stock prices.
@@ -34,20 +35,22 @@ HORIZON = 20
 STEPS = (1, 5, 20)
 CONTEXT = 512          # sessions each model reads, about two years
 MIN_BARS = 60          # less history than this (about 3 months): no forecast. KORA, listed June 2026, has 80
-VERSION = 2            # raise when which stocks or models change: the last close is forecast again at the next run
+VERSION = 3            # raise when which stocks or models change: the last close is forecast again at the next run
 BACKFILL = 40          # sessions before the first forecast also forecast (from what was known then): a record at once
 BACK_PER_RUN = 8       # ... this many a run, newest first (about a minute each on GitHub)
 # How the models' middle did before going live (7 Oct 2026): every stock with 120+ sessions, on 34 closes 15 sessions
 # apart from 21 Aug 2024 to 7 Sep 2026 (run() on each, then record() and grade()), all and by the card's confidence
 # score (0–29, 30–59, 60+). The next session's direction was a little better than a coin flip, more so at high scores
 # (mostly a fall forecast after a jump); 20 sessions ahead it wasn't; "no change" was the closer guess at every window.
+# Since VERSION 3 (8 Oct 2026) with Chronos-2 reading EGX30 too (_chronos2); with it on its closes alone the middle was
+# right 53.9/51.9/48.8% and closer 46.6/46.5/44.1%.
 TESTED = {"dates": 34, "from": "2024-08-21", "to": "2026-09-07", "steps": {
-    "1": {"all": {"n": 7517, "direction": 0.539, "closer": 0.466}, "0": {"n": 5719, "direction": 0.525, "closer": 0.46},
-          "30": {"n": 1054, "direction": 0.57, "closer": 0.495}, "60": {"n": 744, "direction": 0.601, "closer": 0.472}},
-    "5": {"all": {"n": 7517, "direction": 0.519, "closer": 0.465}, "0": {"n": 5574, "direction": 0.512, "closer": 0.471},
-          "30": {"n": 1126, "direction": 0.517, "closer": 0.451}, "60": {"n": 817, "direction": 0.568, "closer": 0.444}},
-    "20": {"all": {"n": 7517, "direction": 0.488, "closer": 0.441}, "0": {"n": 5232, "direction": 0.497, "closer": 0.467},
-           "30": {"n": 1217, "direction": 0.451, "closer": 0.389}, "60": {"n": 1068, "direction": 0.489, "closer": 0.37}}}}
+    "1": {"all": {"n": 7517, "direction": 0.543, "closer": 0.471}, "0": {"n": 5764, "direction": 0.53, "closer": 0.464},
+          "30": {"n": 991, "direction": 0.562, "closer": 0.504}, "60": {"n": 762, "direction": 0.611, "closer": 0.487}},
+    "5": {"all": {"n": 7517, "direction": 0.518, "closer": 0.467}, "0": {"n": 5734, "direction": 0.512, "closer": 0.471},
+          "30": {"n": 1011, "direction": 0.515, "closer": 0.455}, "60": {"n": 772, "direction": 0.569, "closer": 0.451}},
+    "20": {"all": {"n": 7517, "direction": 0.492, "closer": 0.447}, "0": {"n": 5559, "direction": 0.497, "closer": 0.467},
+           "30": {"n": 1070, "direction": 0.46, "closer": 0.4}, "60": {"n": 888, "direction": 0.498, "closer": 0.38}}}}
 MODELS = {             # key → (name, lab)
     "chronos2": ("Chronos-2", "Amazon"),
     "timesfm": ("TimesFM 2.5", "Google"),
@@ -73,24 +76,36 @@ def inputs(conn: sqlite3.Connection, made: str) -> dict[str, pd.DataFrame]:
     rows = pd.read_sql_query("SELECT symbol, date, open, high, low, close, volume FROM prices "
                              "WHERE date > ? AND date <= ? AND symbol != ? AND close > 0 ORDER BY symbol, date",
                              conn, params=(since, made, INDEX_SYMBOL))
+    egx30 = pd.read_sql_query("SELECT date, close FROM prices WHERE symbol=? AND date > ? AND date <= ?", conn,
+                              params=(INDEX_SYMBOL, since, made)).set_index("date")["close"]
     out = {}
     for sym, g in rows.groupby("symbol"):
         if g["date"].iloc[-1] >= recent and len(g) >= MIN_BARS:
             g = g.tail(CONTEXT).reset_index(drop=True)
             out[sym] = g.assign(open=g["open"].fillna(g["close"]), high=g["high"].fillna(g["close"]),
-                                low=g["low"].fillna(g["close"]), volume=g["volume"].fillna(0))
+                                low=g["low"].fillna(g["close"]), volume=g["volume"].fillna(0),
+                                egx30=egx30.reindex(g["date"]).ffill().bfill().to_numpy())
     return out
 
 
 # ------------------------------------------------------------------ the models (each: data → {symbol: 20 prices})
 def _chronos2(data: dict[str, pd.DataFrame], made: str) -> dict[str, np.ndarray]:
-    import torch
+    """Chronos-2 also reads EGX30's closes on the same days (past covariates; it can't see the index's future). Tested in
+    Oct 2026 on the 34 closes of TESTED: 20 sessions ahead it was closer than on the stock's closes alone 56.9% of the
+    time (on 85% of the dates), and the middle with it beat the middle without it at 1, 5 and 20 sessions (51%, 52%,
+    57%). Also tried and left out: the market mood gauge, foreign and Arab net buying, and the stock's open, high, low
+    and volume (noise-sized gains)."""
     from chronos import Chronos2Pipeline
 
     pipe = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map="cpu")
     syms = list(data)
-    q, _ = pipe.predict_quantiles([torch.tensor(data[s]["close"].to_numpy(float)) for s in syms],
-                                  prediction_length=HORIZON, quantile_levels=[0.5])
+    batch = []
+    for s in syms:
+        x = {"target": data[s]["close"].to_numpy(float)}
+        if "egx30" in data[s] and data[s]["egx30"].notna().all():
+            x["past_covariates"] = {"egx30": data[s]["egx30"].to_numpy(float)}
+        batch.append(x)
+    q, _ = pipe.predict_quantiles(batch, prediction_length=HORIZON, quantile_levels=[0.5])
     return {s: q[i][0, :, 0].numpy() for i, s in enumerate(syms)}
 
 

@@ -37,6 +37,16 @@ def _models(monkeypatch):
     monkeypatch.setattr(ai_forecast, "MODELS", {"up": ("Up", "Lab A"), "flat": ("Flat", "Lab B"), "broken": ("X", "C")})
 
 
+def test_each_stock_is_read_with_egx30_on_the_same_days(tmp_path):
+    conn, days = _market(tmp_path)
+    conn.execute("DELETE FROM prices WHERE symbol=? AND date=?", (INDEX_SYMBOL, days[100]))   # no index close that day
+    idx = dict(conn.execute("SELECT date, close FROM prices WHERE symbol=?", (INDEX_SYMBOL,)).fetchall())
+    data = ai_forecast.inputs(conn, days[150])
+    g = data["AAA"].set_index("date")
+    assert INDEX_SYMBOL not in data and g.index[-1] == days[150] and g["egx30"].notna().all()
+    assert g.at[days[150], "egx30"] == idx[days[150]] and g.at[days[100], "egx30"] == idx[days[99]]   # carried on
+
+
 def test_forecasts_are_saved_once_a_close_and_graded_against_no_change(tmp_path, monkeypatch):
     conn, days = _market(tmp_path)
     _models(monkeypatch)

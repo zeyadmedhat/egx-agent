@@ -107,9 +107,19 @@ def _market(tmp_path, n=1300, stocks=10):
 @pytest.fixture
 def fast_model(monkeypatch):
     from lightgbm import LGBMClassifier
-    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: LGBMClassifier(n_estimators=15, min_child_samples=40,
-                                                                               verbose=-1))
+    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: predict.Seeds(
+        [LGBMClassifier(n_estimators=15, min_child_samples=40, random_state=s, verbose=-1) for s in (1, 2)]))
     monkeypatch.setattr(macro, "update", lambda conn, provider=None: list(macro.SERIES))   # no downloads in tests
+
+
+def test_each_model_is_its_seed_copies_averaged():
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(rng.normal(size=(400, 3)), columns=["ret1", "ret5", "rsi14"])
+    y = (X["ret1"] + rng.normal(size=400) > 0).astype(int)
+    m = predict.new_model(len(X)).fit(X, y)
+    assert [c.random_state for c in m.models] == list(predict.SEEDS)
+    assert np.allclose(m.predict_proba(X), np.mean([c.predict_proba(X) for c in m.models], axis=0))
+    assert len(predict.explain(m, X.head(2))) == 2
 
 
 def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, fast_model):

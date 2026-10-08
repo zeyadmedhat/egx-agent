@@ -1932,7 +1932,7 @@ export const AR = {
   "Each line is one model's saved forecast, session by session. Model output, not advice: nothing here tells you what to do with any share.": "كل خط هو توقع محفوظ لنموذج واحد، جلسة بجلسة. هذه مخرجات نماذج وليست نصيحة: لا شيء هنا يخبرك بما تفعله في أي سهم.",
   "Confidence score": "درجة الثقة",
   "How strongly the models point the same way. It is not the chance that they are right.": "مدى اتفاق النماذج على اتجاه واحد. وليست احتمال أن تكون محقة.",
-  "When they agree they can be wrong together: all of them read the same past prices and nothing else.": "حين تتفق قد تخطئ معًا: كلها تقرأ نفس الأسعار السابقة ولا شيء غيرها.",
+  "When they agree they can be wrong together: they all read the same past prices (Chronos-2 the EGX30 index too) and nothing else.": "حين تتفق قد تخطئ معًا: كلها تقرأ نفس الأسعار السابقة (وChronos-2 مؤشر EGX30 أيضًا) ولا شيء غيرها.",
   "Do the models agree?": "هل تتفق النماذج؟",
   "{n} of {m} expect a rise.": "{n} من {m} تتوقع ارتفاعًا.",
   "{n} of {m} expect a fall.": "{n} من {m} تتوقع انخفاضًا.",

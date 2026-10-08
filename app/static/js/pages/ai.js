@@ -109,7 +109,7 @@ function Confidence({ s, n, ai, change }) {
     <div class="ai-score"><b>${s.score}</b><span class="faint">/100</span></div>
     <div class="ai-meter"><i style=${`width:${s.score}%`}></i></div>
     <p><b>${t('How strongly the models point the same way. It is not the chance that they are right.')}</b></p>
-    <p class="faint">${t('When they agree they can be wrong together: all of them read the same past prices and nothing else.')}</p>
+    <p class="faint">${t('When they agree they can be wrong together: they all read the same past prices (Chronos-2 the EGX30 index too) and nothing else.')}</p>
     <p>${t('In the test before going live, {what} with a score {band} got the direction right {d} of the time.',
       { what: t(FOR[n]), band: t(BAND[band]), d: fmt.pct(tb.direction, 0, false) })}</p>
     <h4>${t('Do the models agree?')}</h4>

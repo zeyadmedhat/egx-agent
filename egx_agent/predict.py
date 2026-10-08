@@ -44,12 +44,13 @@ WEEK_ATR = 1.5                # (ATR) before it falls as far? Bought at the next
 RANK_HORIZON = 10             # the model whose daily rank orders the BUYs and adds its own (config model_picks)
 EXTRA_COST = 0.005            # a stress test: 0.25% more slippage on each side of every trade
 PICKS = 5                     # the test portfolio: the day's top 5, bought equally every horizon
-MODEL_VERSION = 7             # 2: Egypt data for the 20-session model, untradeable entry days left out of results;
+MODEL_VERSION = 8             # 2: Egypt data for the 20-session model, untradeable entry days left out of results;
                               # 3: the Egypt data is downloaded before training (2 could train without it);
                               # 4: dividend, bonus-share and rights-issue events (Mubasher, data/news.py);
                               # 5: trades use the chart's stop and target when levels_mode is chart (levels.py);
                               # 6: the company's results as known each day (data/fundamentals.py);
-                              # 7: the 5-session model asks for +1.5×ATR before −1.5×ATR (WEEK), not a 5-day hold
+                              # 7: the 5-session model asks for +1.5×ATR before −1.5×ATR (WEEK), not a 5-day hold;
+                              # 8: each model is 5 copies from their own random seeds, chances averaged (SEEDS)
 MIN_TRAIN_YEARS = 3           # the first tested year needs at least this much history before it
 RETRAIN_DAYS = 30
 MODEL_DIR = config.ROOT / "data" / "models"
@@ -337,7 +338,34 @@ RANK_GROUPS = ((0.9, 1.0, "Top 10%"), (0.7, 0.9, "Next 20%"), (0.5, 0.7, "Middle
 AGREE_RANK = 0.8   # "the model agrees" with a rule BUY when it ranks the stock in that day's top 20%
 
 
-def new_model(n_rows: int = 200_000, hz: int = 10):
+SEEDS = (7, 8, 9, 10, 11)
+# Each model is 5 copies, each trained from its own random seed (which rows and measures each tree sees), with their
+# chances averaged. One copy's rules-plus-picks replay moved from 25.6% to 38.0% a year with the seed alone. Walk-forward
+# in 2026-10, 8 runs each: 31.5% a year, 46.7% won, worst drop -19.0%, against 31.3%, 46.4% and -19.5% for one copy.
+# Better in both halves of the period, but only just: the gain is steadier picks, not more profit. Also tested there,
+# and worse under the win-rate-and-profit rule: ranking objectives (LambdaRank, rank_xendcg), predicting the trade's
+# return (its own top 5 did better, 32.7% against 25.4% a year, but rules plus picks made 28.7%), and blends of these.
+
+
+class Seeds:
+    """Copies of one model, their chances (and the "why" contributions) averaged."""
+
+    def __init__(self, models: list):
+        self.models = models
+
+    def fit(self, X, y):
+        for m in self.models:
+            m.fit(X, y)
+        return self
+
+    def predict_proba(self, X) -> np.ndarray:
+        return np.mean([m.predict_proba(X) for m in self.models], axis=0)
+
+    def predict(self, X, pred_contrib: bool = False) -> np.ndarray:
+        return np.mean([m.predict(X, pred_contrib=pred_contrib) for m in self.models], axis=0)
+
+
+def new_model(n_rows: int = 200_000, hz: int = 10) -> Seeds:
     """Cautious settings (small trees, big leaves, strong regularisation): market data is noisy, and a model that
     fits the past closely is over-confident about the future. Tested against looser settings walk-forward.
 
@@ -345,9 +373,9 @@ def new_model(n_rows: int = 200_000, hz: int = 10):
     whole training period (EGX70 only starts in 2017), which scikit-learn's version can't."""
     from lightgbm import LGBMClassifier
     leaf = int(np.clip(n_rows // 100, 200, 1500))
-    return LGBMClassifier(learning_rate=0.03, n_estimators=300, num_leaves=15, min_child_samples=leaf,
-                          reg_lambda=5.0, subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
-                          random_state=7, verbose=-1)
+    return Seeds([LGBMClassifier(learning_rate=0.03, n_estimators=300, num_leaves=15, min_child_samples=leaf,
+                                 reg_lambda=5.0, subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
+                                 random_state=seed, verbose=-1) for seed in SEEDS])
 
 
 def _auc(y: np.ndarray, p: np.ndarray) -> float | None:
