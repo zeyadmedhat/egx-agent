@@ -10,7 +10,8 @@ from datetime import date, datetime
 import numpy as np
 import pandas as pd
 
-from egx_agent import ai_forecast, breadth, config, corporate, db, holidays, levels, mood, portfolio, predict, record, risk, scan, strategy
+from egx_agent import (ai_forecast, breadth, config, corporate, db, holidays, levels, mood, portfolio, predict, ranges,
+                       record, risk, scan, strategy)
 from egx_agent.data import dividends, flows, fundamentals, macro, news, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
@@ -552,6 +553,14 @@ def ai_view(d: Data, sym: str, close: pd.Series) -> dict | None:
             "tested": ai_forecast.TESTED}
 
 
+def range_view(d: Data, sym: str) -> dict | None:
+    """The stock page's "How far it could move" (egx_agent/ranges.py, every stock once a build): its 5- and
+    20-session ranges and price ladders, how its and every stock's ranges of the last year did, and the replay."""
+    r = d.cache.get(d.version, ("ranges",), lambda: ranges.build(d.conn))
+    mine = r["stocks"].get(sym)
+    return mine and {**mine, "all": r["all"], "tested": ranges.TESTED}
+
+
 def _num(v) -> float | None:
     return None if v is None or not np.isfinite(v) else float(v)
 
@@ -603,6 +612,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     out["news"] = news.stock_news(d.conn, sym)
     out["cautions"] = cautions_map(d).get(sym, [])
     out["ai"] = ai_view(d, sym, ind["close"])
+    out["range"] = range_view(d, sym)
     if {"sup", "ptgt"} & set(cols):
         # The site's browser needs the chart's levels on each recent day: `sup`, the stop under support (NaN when
         # there's none), which an open position's stop rises to, and `ptgt`, the target, for a buy logged that day.

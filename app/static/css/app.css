@@ -1391,6 +1391,40 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
   .ai-box small.hint, .ai-box .dot { display: none; }
 }
 
+/* How far it could move (pages/range.js): the stock page's price range card */
+.range-card { display: flex; flex-direction: column; gap: 14px; }
+.range-card h4 { margin: 0 0 4px; font-size: 14px; }
+.range-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.range-head h3 { margin: 0 0 2px; font-size: 18px; }
+.range-head p { margin: 0; font-size: 13px; }
+.range-main { background: var(--panel-2); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.range-ends { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.range-ends b { font-size: 26px; font-variant-numeric: tabular-nums; }
+.range-bar { position: relative; height: 10px; margin: 10px 0 4px; border-radius: 5px; background: var(--panel-3); }
+.range-bar .band { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--accent); opacity: .35; }
+.range-bar .now { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--text); }
+.range-sub { margin: 0 0 8px; font-size: 12.5px; }
+.range-ladder { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.range-col { border: 1px solid var(--border); border-radius: var(--r); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.range-row { display: grid; grid-template-columns: 3.2em 1fr auto; gap: 8px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.range-row .range-pct { color: var(--text-3); font-size: 12.5px; }
+.range-row small { font-size: 12px; }
+.range-row small.up { color: var(--up); }
+.range-row small.down { color: var(--down); }
+.range-check { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; }
+.range-check .input { max-width: 140px; }
+.range-answer { margin: 8px 0 0; font-weight: 600; }
+.range-record { border-top: 1px solid var(--border); padding-top: 10px; }
+.range-record p { margin: 0 0 4px; font-size: 12.5px; }
+.reach-line { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 10px 0 0; font-size: 12.5px; }
+.reach-line .faint { flex-basis: 100%; }
+@media (max-width: 560px) {   /* a phone: the two ladders stay side by side */
+  .range-col { padding: 8px; }
+  .range-row { grid-template-columns: 2.3em minmax(0, 1fr) auto; gap: 4px; }
+  .range-row b { font-size: 13.5px; }
+  .range-row small { font-size: 11px; }
+}
+
 /* ------------------------------------------------------------------ the wallet's Thndr Trader plan */
 .plan-card { display: flex; flex-direction: column; gap: 10px; }
 .plan-card h3 { margin: 2px 0 0; font-size: 18px; }

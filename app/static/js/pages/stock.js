@@ -8,6 +8,7 @@ import {
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
 import { AiForecast } from './ai.js';
+import { PriceRange, ReachLine } from './range.js';
 
 const RANGES = [
   { value: 60, label: '3M' }, { value: 120, label: '6M' }, { value: 250, label: '1Y' }, { value: 500, label: '2Y' },
@@ -102,6 +103,7 @@ export function StockPage({ route }) {
             : html`<${LiveChart} symbol=${data.symbol} />
               <p class="faint chart-note">${t(LIVE_NOTE)} ${t('Your buy, stop and target lines are on the Agent chart.')}</p>`}
         </div>
+        ${data.range && html`<${PriceRange} r=${data.range} sym=${data.symbol} />`}
         ${data.ai && html`<${AiForecast} ai=${data.ai} sym=${data.symbol} />`}
         ${data.news && html`<div class="card stock-news"><div class="card-title"><${Icon} name="news" size=${15} />${t('News')}
             <span class="right faint">Mubasher, Reuters, Zawya</span></div>
@@ -112,10 +114,10 @@ export function StockPage({ route }) {
         <aside class="stack">
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
-          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes} />`}
+          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes} rg=${data.range} />`}
           ${data.signal && html`<${SignalPanel} data=${data} />`}
           <${EntryCard} data=${data} />
-          ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} />`}
+          ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} rg=${data.range} />`}
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
           ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
           ${data.fundamentals && html`<${CompanyPanel} f=${data.fundamentals} />`}
@@ -357,7 +359,7 @@ function ZoneList({ c, pos, atr }) {
 
 // Stop-loss and target from the chart's support and resistance (egx_agent/levels.py), for every stock. When you hold
 // it, your position's stop and target are the only ones shown (Your position), and this card lists the levels.
-function LevelsPanel({ c, pos, atr, sym, tg }) {
+function LevelsPanel({ c, pos, atr, sym, tg, rg }) {
   const hint = tg && tg.bot && html`<p class="faint tg-hint"><${Icon} name="bell" size=${13} />${' '}
     ${t('A Telegram message when it nears support or reaches resistance: send {cmd} to @{bot}.', { cmd: `/watch ${sym} levels`, bot: tg.bot })}</p>`;
   if (pos) {
@@ -377,6 +379,7 @@ function LevelsPanel({ c, pos, atr, sym, tg }) {
         <span class="v up">${fmt.price(c.target2)} <span class="faint" style="font-weight:500">${fmt.pct(c.target2 / c.close - 1, 1)}</span></span>`}
       <span class="k"><${Term} k="rr">${t('Reward / risk')}<//></span><span class="v">${fmt.num(c.rr, 1)}×</span>
     </div>
+    <${ReachLine} r=${rg} stop=${c.stop} target=${c.target} />
     <ul class="level-why">
       ${c.stop_why.length > 0 && html`<li><b class="down">${t('Stop')}</b> ${t('just under support:')} ${sources(c.stop_why)}</li>`}
       ${c.method === 'atr' && html`<li><b class="down">${t('Stop')}</b> ${t('no support in range, so 2× the daily range')}</li>`}
@@ -464,11 +467,12 @@ const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower
 
 // Your position: the same card as Today and My Portfolio (live price, P&L, stop to target), and where the stop and
 // target come from. The stop rises to each new support under the price (egx_agent/engine.py); the target stays.
-function PositionPanel({ p, hold, c, atr, quotes }) {
+function PositionPanel({ p, hold, c, atr, quotes, rg }) {
   const next = p.stop != null && c ? nextTarget(p, c, atr) : null;
   const sw = p.stop != null ? stopWhy(p, c, atr) : '';
   const tw = targetWhy(p, c, atr);
   return html`<${PositionCard} p=${livePosition(p, quotes)} hold=${hold}>
+    <${ReachLine} r=${rg} stop=${p.stop} target=${p.target} />
     ${(sw || tw || next) && html`<${More} label="Where the stop and target come from"><ul class="level-why">
       ${sw && html`<li><b class="down">${t('Stop')}</b> ${sw}</li>`}
       ${tw && html`<li><b class="up">${t('Target')}</b> ${tw}</li>`}
