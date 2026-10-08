@@ -83,8 +83,10 @@ DEFAULTS: dict = {
     # The prediction model's 10-session rank decides which BUYs get money first, and its top picks that pass the
     # liquidity and uptrend checks are BUYs too (0 = none). Walk-forward 2016–2026 (its test years only, dividends
     # counted): rules alone 15.3% a year; in the model's order 19.8%; plus its top 3 26.9%, same worst drop (−20%),
-    # better in both halves.
-    "model_picks": 3,
+    # better in both halves. Oct 2026, with no new buys while fewer than 40% of stocks are above their 50-day average
+    # (breadth.SWITCH_OFF_BELOW), 8 runs: top 2 made 32.0% a year, won 46.4%, worst drop −17.5%; top 3 31.7%, 45.6%,
+    # −18.8%.
+    "model_picks": 2,
     # Exits. "chart": the stop under the nearest solid support and the target under the first resistance paying at
     # least target_min_r × the risk (levels.py: swing points, Fibonacci, averages, pivots, volume). "atr": the stop
     # atr_stop_mult × the daily range below (within stop_min/max_pct) and the target target_r × the risk above.

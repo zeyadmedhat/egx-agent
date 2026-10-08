@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from app import alerts, health, views
-from egx_agent import backtest, config, db, engine, holidays, portfolio, predict, scan, strategy
+from egx_agent import backtest, breadth, config, db, engine, holidays, portfolio, predict, scan, strategy
 from egx_agent.data import dividends, shariah, universe
 from egx_agent.data.prices import INDEX_SYMBOL
 from tests.conftest import make_ohlcv
@@ -251,6 +251,13 @@ def test_no_model_picks_while_egx30_is_under_its_50_day_average(scan_with_model,
     monkeypatch.setattr(strategy, "is_risk_off", lambda row: True)
     scan.run_scan(conn, {**config.DEFAULTS, "setups": []}, update_data=False)
     assert _rows(conn).empty
+
+
+def test_no_buys_while_fewer_than_40_percent_of_stocks_are_above_their_average(scan_with_model, monkeypatch):
+    conn, _ = scan_with_model
+    monkeypatch.setattr(breadth, "above50_daily", lambda closes: pd.Series(0.3, index=closes.index))
+    m = scan.run_scan(conn, {**config.DEFAULTS, "buy_score": 0}, update_data=False)
+    assert m["risk_off"] and m["weak_breadth"] and m["above50"] == 0.3 and _rows(conn).empty
 
 
 def test_the_rules_signals_get_the_models_rank(scan_with_model):

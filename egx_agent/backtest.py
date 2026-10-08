@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from . import engine, levels, risk, strategy
+from . import breadth, engine, levels, risk, strategy
 from .data import dividends, shariah
 from .indicators import add_indicators
 
@@ -60,7 +60,9 @@ def prepare(price_data: dict[str, pd.DataFrame], index_df: pd.DataFrame, stocks:
     base = _panel({s: f["base_score"] for s, f in sf.items()}, dates, 0.0)
     rank = ret63.where(eligible).rank(axis=1, pct=True).fillna(0.0)
     score = (base + rank * 25).clip(0, 100)
-    risk_off = index_ind["close"] < index_ind["ema50"]
+    # a weak market, no new BUYs: EGX30 under its 50-day average, or too few stocks above theirs (breadth.switch)
+    above50 = breadth.above50_daily(_panel({s: ind[s]["close"] for s in ind}, dates))
+    risk_off = (index_ind["close"] < index_ind["ema50"]) | (above50 < breadth.SWITCH_OFF_BELOW)
     thr = pd.Series(np.where(risk_off, strategy.buy_threshold(cfg, True), strategy.buy_threshold(cfg, False)), index=dates)
     info = stocks.to_dict("index")
     allowed = pd.Series({s: shariah.passes_filter(info.get(s, {}), cfg["shariah_filter"]) for s in score.columns}, dtype=bool)

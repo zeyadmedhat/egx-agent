@@ -10,7 +10,7 @@ const bad = text => ({ level: 'bad', text });
 
 // symbol/sector: the stock; entry/stop: prices; equity/cash/positions: your real account (positions as
 // portfolio.positions_for_allocation gives them); avgValue: the stock's average daily traded value (20 days);
-// cfg: your limits (views.CALC_KEYS); riskOff: EGX30 below its 50-day average; half: buy half the usual size.
+// cfg: your limits (views.CALC_KEYS); riskOff: a weak market (scan.py); half: buy half the usual size.
 export function planTrade({ symbol, sector, entry, stop, equity, cash, avgValue, positions = [], cfg, riskOff = false,
   half = false }) {
   const perShare = entry - stop;
@@ -35,7 +35,7 @@ export function planTrade({ symbol, sector, entry, stop, equity, cash, avgValue,
   const inSector = positions.filter(p => p.sector === sector).length;
   const riskAfter = riskNow + shares * perShare;
   const lo = cfg.stop_min_pct, hi = cfg.stop_max_pct;
-  const offMode = riskOff ? ' (half the usual number while EGX30 is below its 50-day average)' : '';
+  const offMode = riskOff ? ' (half the usual number in a weak market)' : '';
   const checks = [
     shares === 0 && bad(`Your rules give 0 shares here: ${full.size_note}.`),
     positions.some(p => p.symbol === symbol) && bad(`You already hold ${symbol}.`),

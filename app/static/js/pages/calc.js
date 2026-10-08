@@ -61,7 +61,7 @@ export function CalcPage({ route }) {
   const pred = st.prediction;
 
   return html`${head}
-    ${acct.risk_off && html`<div style="margin-bottom:10px"><${Callout} tone="warn"><b>EGX30 is below its 50-day average.</b>${' '}
+    ${acct.risk_off && html`<div style="margin-bottom:10px"><${Callout} tone="warn"><b>A weak market: EGX30 is below its 50-day average, or fewer than 40% of stocks are above theirs.</b>${' '}
       Your BUY rules make no new buys now, and allow half the usual number of positions.<//></div>`}
     ${acct.switch && html`<div style="margin-bottom:14px"><${MarketSwitch} sw=${acct.switch} /></div>`}
     <div class="grid grid-2 calc-grid">

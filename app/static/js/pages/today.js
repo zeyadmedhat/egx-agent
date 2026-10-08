@@ -55,7 +55,7 @@ function Brief({ data, blocked, alerts }) {
     lines.push(html`<a href="#/market">${t('Market mood: {label} ({score} of 100).',
       { label: t(data.mood.label), score: Math.round(data.mood.score) })}</a>`);
   }
-  if (m.risk_off) lines.push(t(blocked ? 'Weak market: no new BUYs until EGX30 recovers.' : 'Weak market: only very strong BUYs, and fewer of them.'));
+  if (m.risk_off) lines.push(t(blocked ? 'Weak market: no new BUYs until the market recovers.' : 'Weak market: only very strong BUYs, and fewer of them.'));
   const syms = data.buys.map(x => x.symbol).join(isAr() ? '، ' : ', ');
   if (!data.buys.length) { if (!blocked) lines.push(t('No BUY signals for the next session.')); } else {
     lines.push(t(data.buys.length === 1 ? '1 BUY signal: {list}.' : '{n} BUY signals: {list}.', { n: data.buys.length, list: syms }));
@@ -167,7 +167,7 @@ function OrdersCard({ o }) {
       <div class="o-act"><${OrderAction} it=${it} /></div>
     </div>`)}
     ${!n && html`<div class="orders-empty"><${Icon} name="checkCircle" />${t('Nothing to do at your broker.')}${' '}
-      ${t(o.blocked ? 'No new buys while EGX30 is below its 50-day average.' : 'No BUY signals at this close.')}</div>`}
+      ${t(o.blocked ? 'No new buys in a weak market.' : 'No BUY signals at this close.')}</div>`}
     ${(o.holds.length > 0 || o.skipped.length > 0) && html`<div class="orders-foot">
       ${o.holds.length > 0 && html`<span>${t('No change')}: ${o.holds.map((h, i) => html`${i ? ', ' : ''}<b>${h.symbol}</b> (${t('stop')} ${fmt.price(h.stop)})`)}</span>`}
       ${o.skipped.length > 0 && html`<span>${t('Not bought')}: ${o.skipped.map((x, i) => html`${i ? ', ' : ''}<b>${x.symbol}</b> (<span dir="auto">${tn(x.note)}</span>)`)}</span>`}

@@ -34,7 +34,7 @@ export function PicksPage() {
             odds=${data.odds} fee=${data.cfg.fee_pct_per_side} model=${data.model} key=${s.symbol}
             bell=${{ tg: data.telegram, bells, setBells }} />`)}</div>`
         : html`<div class="card"><${Empty} icon="shield" title="No BUY signals for the next session" text=${blocked
-          ? 'No new BUYs while EGX30 is below its 50-day average. Sitting in cash is a valid decision. Below: what is close to a BUY once the market recovers.'
+          ? 'No new BUYs in a weak market (EGX30 below its 50-day average, or fewer than 40% of stocks above theirs). Sitting in cash is a valid decision. Below: what is close to a BUY once the market recovers.'
           : 'No stock met all the entry rules at the last close. Sitting in cash is a valid decision. Below: what is close to a BUY.'} /></div>`}
     </section>
     <section class="section">
@@ -49,20 +49,20 @@ export function PicksPage() {
 }
 
 // ------------------------------------------------------------------ can I buy now?
-// The rules' EGX30 check (no new BUYs, or only the strongest, while EGX30 is under its 50-day average) and the market
-// switch for the model's picks (how many stocks are in an uptrend), as one light.
+// The weak-market check (no new BUYs, or only the strongest, while EGX30 is under its 50-day average or fewer than
+// 40% of stocks are above theirs: scan.py) and the switch's half size for the model's picks, as one light.
 function Light({ m, b, blocked }) {
   const sw = b && b.switch;
   const gap = m.egx30_close / m.egx30_ema50 - 1;
   const [lt, head, text] = blocked
-    ? ['bad', 'No new BUYs', t('EGX30 is below its 50-day average, so the agent makes no new BUY calls until it recovers. Focus on managing your open positions.')]
+    ? ['bad', 'No new BUYs', t(m.weak_breadth && m.egx30_close >= m.egx30_ema50
+      ? 'Fewer than 40% of stocks are above their 50-day average, so the agent makes no new BUY calls until more of them recover. Focus on managing your open positions.'
+      : 'EGX30 is below its 50-day average, so the agent makes no new BUY calls until it recovers. Focus on managing your open positions.')]
     : m.risk_off
       ? ['warn', 'Only the strongest BUYs', t('Weak market: only very strong signals (score ≥ {n}) and at most half the usual number of positions.', { n: fmt.int(m.buy_threshold) })]
       : sw && sw.state === 'half'
         ? ['warn', "BUYs allowed, the model's picks at half size", `${t(sw.text)} ${t("Buy the model's top picks at half your usual size.")}`]
-        : sw && sw.state === 'off'
-          ? ['warn', "The rules' BUYs only", `${t(sw.text)} ${t("Don't buy the model's picks until more stocks are back above their average.")}`]
-          : ['ok', 'BUYs allowed', t('EGX30 is above its 50-day average, so new BUY signals are allowed.')];
+        : ['ok', 'BUYs allowed', t('EGX30 is above its 50-day average, so new BUY signals are allowed.')];
   return html`<div class=${cls('card light', lt)}>
     <div class="light-head"><span class="light-dot"></span><b>${t(head)}</b></div>
     <p class="light-text">${text}</p>

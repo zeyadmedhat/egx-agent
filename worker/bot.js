@@ -181,9 +181,9 @@ const EN = {
   x30Ret: r => `📊 <b>Returns</b>\nWeek ${r["1W"]} · month ${r["1M"]}\nThis year ${r.YTD} · a year ${r["1Y"]}`,
   x30Usd: (y, yr) => `In dollars: this year ${y} · a year ${yr}`,
   x30Range: (lo, hi, ath) => `📏 <b>1-year range</b>\n${lo} – ${hi} · ${ath ? `${ath} under its record` : "at its record"}`,
-  x30Up: e => `🟢 <b>Above its 50-day average</b> (${e})\nThe BUY rules are on.`,
+  x30Up: (e, weak) => `🟢 <b>Above its 50-day average</b> (${e})` + (weak ? "" : "\nThe BUY rules are on."),
   x30Down: (e, blk) => `🔴 <b>Under its 50-day average</b> (${e})` + (blk ? "\nThe agent makes no new BUYs." : ""),
-  x30Breadth: b => `${b} of stocks are above their own 50-day average.`,
+  x30Breadth: (b, stop) => `${b} of stocks are above their own 50-day average.` + (stop ? "\nUnder 40%: the agent makes no new BUYs." : ""),
   x30Mood: (n, l) => `${MOOD_ICON[l] || ""} <b>Market mood: ${l}</b> (${n} of 100)`,
   // a broker screenshot sent here, against the website's portfolio
   shotReading: "📷 Reading your screenshot…",
@@ -339,9 +339,9 @@ const AR = {
   x30Ret: r => `📊 <b>العوائد</b>\nأسبوع ${r["1W"]} · شهر ${r["1M"]}\nهذا العام ${r.YTD} · سنة ${r["1Y"]}`,
   x30Usd: (y, yr) => `بالدولار: هذا العام ${y} · سنة ${yr}`,
   x30Range: (lo, hi, ath) => `📏 <b>مدى سنة</b>\n${lo} – ${hi} · ${ath ? `${ath} تحت قمته التاريخية` : "عند قمته التاريخية"}`,
-  x30Up: e => `🟢 <b>فوق متوسط 50 يومًا</b> (${e})\nقواعد الشراء تعمل.`,
+  x30Up: (e, weak) => `🟢 <b>فوق متوسط 50 يومًا</b> (${e})` + (weak ? "" : "\nقواعد الشراء تعمل."),
   x30Down: (e, blk) => `🔴 <b>تحت متوسط 50 يومًا</b> (${e})` + (blk ? "\nلا يشتري الوكيل جديدًا." : ""),
-  x30Breadth: b => `${b} من الأسهم فوق متوسط 50 يومًا الخاص بها.`,
+  x30Breadth: (b, stop) => `${b} من الأسهم فوق متوسط 50 يومًا الخاص بها.` + (stop ? "\nأقل من 40%: لا يشتري الوكيل جديدًا." : ""),
   x30Mood: (n, l) => `${MOOD_ICON[l] || ""} <b>مزاج السوق: ${MOOD_AR[l] || l}</b> (${n} من 100)`,
   shotReading: "📷 أقرأ صورتك…",
   shotNone: "لم أجد أسهمًا في هذه الصورة. أرسل صورة لقائمة أسهمك في تطبيق السمسرة أو لشاشة سهم.",
@@ -532,7 +532,8 @@ function egx30(info, lang) {
     T.x30(egp(x.c), move(x.ch), T.day(x.d)),
     block(T.x30Ret(r), x.u && x.u.YTD != null ? T.x30Usd(pct(x.u.YTD, true), x.u["1Y"] != null ? pct(x.u["1Y"], true) : "–") : null),
     T.x30Range(egp(x.lo), egp(x.hi), x.ath < -0.0005 ? pct(-x.ath) : null),
-    block(x.off ? T.x30Down(egp(x.e50), x.blk) : T.x30Up(egp(x.e50)), x.b50 != null ? T.x30Breadth(pct(x.b50)) : null),
+    block(x.off ? T.x30Down(egp(x.e50), x.blk) : T.x30Up(egp(x.e50), x.wb && x.blk),
+      x.b50 != null ? T.x30Breadth(pct(x.b50), !x.off && x.wb && x.blk) : null),
     ...(x.md ? [T.x30Mood(x.md[0], x.md[1])] : []),
   ].join("\n\n")
   const app = appButton(info, lang, "egx30")

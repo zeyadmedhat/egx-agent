@@ -468,12 +468,12 @@ export function NewsList({ items, sources = {}, showSymbol, limit, empty = 'No n
       ${t(all ? 'Show fewer' : 'Show all {n}', { n: items.length })}</button>`}`;
 }
 
-// The market switch for the model's picks: full size, half size or no new buys, from breadth.
+// The market switch, from breadth: the model's picks at full or half size, or no new buys at all (breadth.switch).
 const SWITCH_TONE = { full: 'ok', half: 'warn', off: 'bad' };
 const SWITCH_DO = {
   full: "The model's top picks can be bought at your usual size.",
   half: "Buy the model's top picks at half your usual size.",
-  off: "Don't buy the model's picks until more stocks are back above their average.",
+  off: "No new BUYs at all until more stocks are back above their average.",
 };
 export function MarketSwitch({ sw, compact }) {
   if (!sw) return null;

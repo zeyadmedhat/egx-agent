@@ -280,7 +280,7 @@ def build_message(d: views.Data) -> tuple[str, bool]:
     head.append(f"EGX30 {m['egx30_close']:,.0f}  {'▼' if m['egx30_change'] < 0 else '▲'} {m['egx30_change']:+.1%} · {mood}")
     b = views.breadth_data(d)
     if b:
-        v = breadth.verdict(b, m.get("risk_off"))
+        v = breadth.verdict(b, m.get("egx30_off", m.get("risk_off")))
         week = f" ({v['change_week'] * 100:+.0f} pts in a week)" if v["change_week"] is not None else ""
         head.append(f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
         head.append(_switch_line(v))
@@ -356,7 +356,7 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
     lines.append(f"EGX30 {m['egx30_close']:,.0f}  {'▼' if m['egx30_change'] < 0 else '▲'} {m['egx30_change']:+.1%} · {mood}")
     b = views.breadth_data(d)
     if b:
-        v = breadth.verdict(b, m.get("risk_off"))
+        v = breadth.verdict(b, m.get("egx30_off", m.get("risk_off")))
         if v["change_week"] is None:
             week = ""
         else:
@@ -909,6 +909,7 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
                "u": {k: _r((per.get(k) or {}).get("usd"), 4) for k in ("YTD", "1Y")},
                "ath": _r(x["from_ath"], 4), "hi": _r(x["high52"], 2), "lo": _r(x["low52"], 2),
                "off": x["close"] < x["ema50"], "blk": bool(cfg.get("riskoff_block_buys")), "b50": _r(x["above50"], 3),
+               "wb": bool(views.market_info(conn).get("weak_breadth")),    # fewer than 40% above: no new BUYs either
                "md": [round(md["score"]), md["label"]] if (md := views.mood_brief(d)) else None}
     # final: False while the scan is one taken during the session (the Worker then still asks for the one after it)
     return {"scan": scan_date, "final": scan.scan_is_final(conn), "pred": db.get_meta(conn, "prediction_date"),
@@ -1017,7 +1018,7 @@ def build_weekly(d: views.Data, site_url: str = "", mine: bool = True, lang: str
     b = views.breadth_data(d)
     m = views.market_info(d.conn)
     if b:
-        lines.append(_switch_line(breadth.verdict(b, m.get("risk_off") if m else None), lang))
+        lines.append(_switch_line(breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None), lang))
     if line := _mood_line(d, lang):
         lines.append(line)
 

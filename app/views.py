@@ -342,7 +342,7 @@ def status(d: Data) -> dict:
     mine = {"buys": sum(1 for r in sig if r["action"] == "BUY")}
     return {
         "version": d.version,
-        "market": {**{k: m.get(k) for k in ("date", "egx30_close", "egx30_change", "egx30_ema50", "risk_off",
+        "market": {**{k: m.get(k) for k in ("date", "egx30_close", "egx30_change", "egx30_ema50", "risk_off", "weak_breadth",
                                             "watches", "finished")}, **mine} if m else None,
         "alerts": sum(1 for p in positions if p["status"] in ACTION_STATUSES),
         "positions": len(positions),
@@ -397,7 +397,7 @@ def today(d: Data) -> dict:
         "market": {**m, "buys": len(buys)} if m else None, "scan_date": scan_date, "buys": buys, "watch": watch,
         "positions": positions, "spark": spark, "orders": orders(d, positions),
         "breadth": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
-                    **breadth.verdict(b, m.get("risk_off") if m else None)} if b else None,
+                    **breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None)} if b else None,
         "mood": mood_brief(d),
         "paper": {"equity": paper["equity"], "return_pct": paper["return_pct"], "open": paper["open_count"],
                   "last_scan": json.loads(paper_scan) if paper_scan else None},
@@ -1159,7 +1159,7 @@ def market_view(d: Data) -> dict:
     if not b:
         return {"breadth": None, "market": m or None, "results": results_calendar(d), "mood": mood_data(d),
                 "investors": flows.recent_split(d.conn)}
-    return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("risk_off") if m else None), "market": m or None,
+    return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None), "market": m or None,
                   "results": results_calendar(d), "mood": mood_data(d), "investors": flows.recent_split(d.conn),
                   **movers(d)})
 
@@ -1220,7 +1220,7 @@ def index_view(d: Data) -> dict:
             "best_day": {"date": str(daily.idxmax().date()), "ret": float(daily.max())},
             "worst_day": {"date": str(daily.idxmin().date()), "ret": float(daily.min())},
             "drop_1y": float((year["close"] / year["close"].cummax() - 1).min()),
-            "periods": periods, "years": years[-10:][::-1], "risk_off": bool(m.get("risk_off")) if m else None,
+            "periods": periods, "years": years[-10:][::-1], "risk_off": bool(m.get("egx30_off", m.get("risk_off"))) if m else None,
             "above50": b["above50"] if b else None,
             "series": {"time": [str(t.date()) for t in ind.index], **{k: column(ind[k]) for k in SERIES_COLS}},
             # weekly points, counted back from the last close so the chart ends on it

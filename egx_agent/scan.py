@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import corporate, db, holidays, levels, portfolio, predict, risk, strategy
+from . import breadth, corporate, db, holidays, levels, portfolio, predict, risk, strategy
 from .data import dividends, flows, macro, news, prices, shariah, universe
 from .indicators import add_indicators
 
@@ -221,7 +221,12 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     scan_ts = index_ind.index[-1]
     scan_date = str(scan_ts.date())
     idx_row = index_ind.iloc[-1]
-    risk_off = strategy.is_risk_off(idx_row)
+    # a weak market, no new BUYs: EGX30 under its 50-day average, or too few stocks above theirs (breadth.switch)
+    egx30_off = strategy.is_risk_off(idx_row)
+    closes = pd.DataFrame({s: f["close"] for s, f in ind.items()}).reindex(index_ind.index)
+    above50 = breadth.above50_daily(closes).iloc[-1]
+    weak_breadth = bool(above50 < breadth.SWITCH_OFF_BELOW)
+    risk_off = egx30_off or weak_breadth
     threshold = strategy.buy_threshold(cfg, risk_off)
 
     # The prediction model first: its rank orders the BUYs and its best picks are BUYs too (config model_picks).
@@ -270,8 +275,8 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             buys.append({**item, "action": "BUY"})
         elif item["score"] >= cfg["watch_score"]:
             watches.append({**item, "action": "WATCH"})
-    # The model's own BUYs: its best-ranked stocks that pass the same liquidity and uptrend checks, none while EGX30
-    # is under its 50-day average, and none while its live results show no edge (predict.health).
+    # The model's own BUYs: its best-ranked stocks that pass the same liquidity and uptrend checks, none in a weak
+    # market (risk_off), and none while its live results show no edge (predict.health).
     n_picks = int(cfg.get("model_picks", 0) or 0) if model_health != "bad" else 0
     added = 0
     if n_picks and not risk_off:
@@ -311,6 +316,9 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         "egx30_change": float(index_ind["close"].pct_change().iloc[-1]),
         "egx30_ema50": float(idx_row["ema50"]),
         "risk_off": risk_off,
+        "egx30_off": egx30_off,
+        "weak_breadth": weak_breadth,
+        "above50": None if pd.isna(above50) else float(above50),
         "buy_threshold": threshold,
         "buys": len(buys),
         "model_picks": added,

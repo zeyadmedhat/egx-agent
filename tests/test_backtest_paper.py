@@ -66,3 +66,14 @@ def test_real_trade_status_uses_rules(tmp_path, cfg):
     row = portfolio.trades_df(conn, "real", ("open",)).iloc[0]
     st = portfolio.real_status(row, df, cfg)
     assert st["status"] in {"HOLD", "TIGHTEN STOP"} and st["days_held"] == 5
+
+
+def test_no_new_buys_while_most_stocks_are_under_their_50_day_average(cfg):
+    _, _, stocks = _market()
+    index = make_ohlcv(1000 * 1.002 ** np.arange(500))           # EGX30 above its 50-day average all along
+    path = np.r_[20 * 1.002 ** np.arange(300), 20 * 1.002 ** 299 * 0.997 ** np.arange(1, 201)]   # up, then down
+    prep = backtest.prepare({s: make_ohlcv(path) for s in stocks.index}, index, stocks, cfg)
+    late = prep.risk_off.index[-50:]
+    assert not (prep.index_ind["close"] < prep.index_ind["ema50"]).loc[late].any()
+    assert prep.risk_off.loc[late].all() and not prep.buy.loc[late].to_numpy().any()
+    assert not prep.risk_off.iloc[100:290].any()                # while they rose, buying was on

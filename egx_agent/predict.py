@@ -325,7 +325,7 @@ def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
     # the rules' own BUY decision on each day, to compare the model with
     ds["rule_rank"] = ds["ret63"].where(ds["liquid"]).groupby(ds["date"]).rank(pct=True).fillna(0)
     ds["rule_score"] = np.clip(ds["rule_base"] + ds["rule_rank"] * 25, 0, 100)
-    risk_off = ds["idx_risk_off"].fillna(0).astype(bool)
+    risk_off = ds["idx_risk_off"].fillna(0).astype(bool) | (ds["breadth50"] < breadth.SWITCH_OFF_BELOW)
     thr = np.where(risk_off, strategy.buy_threshold(cfg, True), strategy.buy_threshold(cfg, False))
     ds["rule_buy"] = ds["liquid"] & ds["rule_eligible"] & ds["setup_on"] & (ds["rule_score"] >= thr)
     ds[ALL_FEATURES] = ds[ALL_FEATURES].astype("float32")
@@ -582,7 +582,7 @@ def week_eval(oos: pd.DataFrame, top: float = 0.10) -> dict:
 def model_picks_mask(rank: pd.DataFrame, eligible: pd.DataFrame, trend: pd.DataFrame, risk_off: pd.Series,
                      n: int) -> pd.DataFrame:
     """The model's own BUYs each day: its n best-ranked stocks that also pass the rules' liquidity and uptrend
-    checks, and none while EGX30 is under its 50-day average (the rules' own market switch). The scan does the same
+    checks, and none in a weak market (the rules' own switch, backtest.prepare). The scan does the same
     for today (scan.run_scan)."""
     if n <= 0:
         return pd.DataFrame(False, index=rank.index, columns=rank.columns)

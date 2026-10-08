@@ -10,7 +10,7 @@ riskoff_score_bonus: 5
 riskoff_block_buys: true
 setups:
 - breakout
-model_picks: 3
+model_picks: 2
 levels_mode: chart
 target_min_r: 1.5
 target_max_r: 3.0

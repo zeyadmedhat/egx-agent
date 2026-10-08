@@ -140,7 +140,7 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
     # the BUY rules replayed with and without the model, on its test years only
     combo = meta["combo"]
     assert "error" not in combo, combo
-    assert set(combo) >= {"rules", "ordered", "with_picks", "from", "to", "picks"} and combo["picks"] == 3
+    assert set(combo) >= {"rules", "ordered", "with_picks", "from", "to", "picks"} and combo["picks"] == 2
     assert set(combo["rules"]) == {"all", "first", "second"} and "cagr" in combo["with_picks"]["all"]
 
     lt = predict.latest(conn)
