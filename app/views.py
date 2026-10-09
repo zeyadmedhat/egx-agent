@@ -558,7 +558,15 @@ def range_view(d: Data, sym: str) -> dict | None:
     20-session ranges and price ladders, how its and every stock's ranges of the last year did, and the replay."""
     r = d.cache.get(d.version, ("ranges",), lambda: ranges.build(d.conn))
     mine = r["stocks"].get(sym)
-    return mine and {**mine, "all": r["all"], "tested": ranges.TESTED}
+    if not mine:
+        return None
+    # a rights issue, bonus shares or a split going ex inside a window resets the price that day: the range is in
+    # today's prices, so the page says so instead of showing it (as the AI card; such windows aren't in the record)
+    resets = sorted((a for a in news.actions(d.conn, sym, since=mine["made"], kinds=AI_RESETS) if a["effective"] > mine["made"]),
+                    key=lambda a: a["effective"])
+    steps = {k: {**s, "reset": next(({"kind": a["kind"], "date": a["effective"]} for a in resets
+                                     if a["effective"] <= s["target"]), None)} for k, s in mine["steps"].items()}
+    return {**mine, "steps": steps, "all": r["all"], "tested": ranges.TESTED}
 
 
 def _num(v) -> float | None:

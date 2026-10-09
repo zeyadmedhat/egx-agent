@@ -1901,6 +1901,7 @@ export const AR = {
   "Medium": "متوسطة",
   "Low": "منخفضة",
   "Beta · not advice": "تجريبي · ليس نصيحة",
+  "Ex-date of the {what}: {date}, inside this window. That day the price is reset for the new shares, so a range in today's prices would be wrong. It comes back once the price history is re-based for them.": "تاريخ استحقاق {what}: {date}، داخل هذه الفترة. في ذلك اليوم يُعدَّل السعر للأسهم الجديدة، لذلك يكون النطاق بأسعار اليوم خاطئًا. يعود بعد تعديل تاريخ الأسعار لها.",
   "Ex-date of the {what}: {date}, inside this window. That day the price is reset for the new shares, which the models can't know: their forecast is in today's prices. Once it's past, their earlier forecasts move to the new prices before they're graded.": "تاريخ استحقاق {what}: {date}، داخل هذه الفترة. في ذلك اليوم يُعدَّل السعر بسبب الأسهم الجديدة، وهذا ما لا تعرفه النماذج: توقعها بأسعار اليوم. وبعد مروره تُحوَّل توقعاتها السابقة إلى الأسعار الجديدة قبل تقييمها.",
   "rights issue": "حق الاكتتاب",
   "bonus shares": "الأسهم المجانية",

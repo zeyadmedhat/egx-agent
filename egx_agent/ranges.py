@@ -41,22 +41,37 @@ SHOWN = 250            # sessions of past ranges graded on the page
 WARM = 120             # sessions the swing and the 60-session jumpiness need before the first range
 CHANCES = (0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1)    # the price ladder: the price it trades at with this chance
 CAP = {5: 0.6, 20: 0.7}   # tested chances above these ran high (said 74%, happened 61% in a week): shown as "over"
-# The replay (main(), 8 Oct 2026). cover: how often the close ended inside; groups and years: the lowest and highest of the 9
-# groups and of the years.
+LIMIT = 0.21           # EGX's daily limit is ±20%: a bigger move is two price bases mixed (a re-base half done), not a swing
+MIN_SWING = 0.004      # a share whose quoted price sat still for weeks still moves: no swing under 0.4% a day
+RESETS = ("rights", "bonus", "split", "consolidation")   # ex-dates that reset the price (views.AI_RESETS)
+# The replay (main(), 9 Oct 2026). cover: how often the close ended inside; groups and years: the lowest and highest of the 9
+# groups and of the years. Ranges with an ex-date (rights, bonus, split) or an impossible day inside aren't scored, as the
+# page doesn't show them (TradingView's history is re-based, so before that they were "inside": the same 79.6% / 78.3%).
 TESTED = {"from": "2018-01", "to": "2026-10", "steps": {
-    "5": {"n": 398256, "cover": 0.796, "groups": [0.793, 0.798], "years": [0.774, 0.808]},
-    "20": {"n": 394526, "cover": 0.783, "groups": [0.779, 0.787], "years": [0.746, 0.811]}}}
+    "5": {"n": 397039, "cover": 0.796, "groups": [0.793, 0.799], "years": [0.774, 0.808]},
+    "20": {"n": 386449, "cover": 0.783, "groups": [0.779, 0.788], "years": [0.746, 0.811]}}}
 
 
 def _wide(conn: sqlite3.Connection, sessions: int | None):
-    """The last `sessions` EGX sessions (all when None) and each stock's high, low, close and volume on them."""
+    """The last `sessions` EGX sessions (all when None) and each stock's high, low, close and volume on them, and
+    "event": the sessions a rights issue, bonus shares, a split or a consolidation went ex (or a re-base was found)."""
     q = "SELECT date FROM prices WHERE symbol=? ORDER BY date DESC" + (" LIMIT ?" if sessions else "")
     cal = [r[0] for r in conn.execute(q, (INDEX_SYMBOL, sessions) if sessions else (INDEX_SYMBOL,))][::-1]
     if not cal:
         return cal, None
     px = pd.read_sql_query("SELECT symbol, date, high, low, close, volume FROM prices WHERE date >= ? AND symbol != ? "
                            "AND close > 0", conn, params=(cal[0], INDEX_SYMBOL))
-    return cal, {c: px.pivot(index="date", columns="symbol", values=c).reindex(cal) for c in ("high", "low", "close", "volume")}
+    w = {c: px.pivot(index="date", columns="symbol", values=c).reindex(cal) for c in ("high", "low", "close", "volume")}
+    ev = pd.read_sql_query(f"SELECT symbol, effective AS date FROM corp_actions WHERE kind IN ({','.join('?' * len(RESETS))}) "
+                           "AND effective >= ? UNION SELECT symbol, ex_date FROM price_events WHERE ex_date >= ?",
+                           conn, params=(*RESETS, cal[0], cal[0]))
+    pos = np.searchsorted(cal, ev["date"].to_numpy(str))      # the first session on or after the ex-date
+    event = pd.DataFrame(False, index=cal, columns=w["close"].columns)
+    for p, sym in zip(pos, ev["symbol"]):
+        if p < len(cal) and sym in event.columns:
+            event.iat[p, event.columns.get_loc(sym)] = True
+    w["event"] = event
+    return cal, w
 
 
 def _rows(w: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, dict[int, pd.DataFrame]]:
@@ -66,8 +81,12 @@ def _rows(w: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, dict[int, pd.DataFr
     traded = C.notna() & (V.fillna(0) > 0)
     Cf = C.ffill(limit=10)
     lr = np.log(Cf).diff()
-    swing = np.sqrt((lr ** 2).ewm(alpha=DECAY, min_periods=30).mean())
-    jumpy = lr.rolling(60).std()
+    bad = np.expm1(lr).abs() > LIMIT                   # beyond the daily limit: mixed price bases, not a move
+    ex = w["event"].reindex_like(bad).fillna(False)    # an ex-date's drop isn't a swing either (re-based or not)
+    lr = lr.mask(bad | ex)
+    swing = np.sqrt((lr ** 2).ewm(alpha=DECAY, min_periods=30).mean()).clip(lower=MIN_SWING)
+    jumpy = lr.rolling(60, min_periods=50).std()
+    brk = (bad | ex).astype(float)   # a reset inside a range: not scored
     value = (C * V).where(traded).rolling(20, min_periods=5).median()
     keep = traded & (traded.cumsum() >= MIN_BARS) & jumpy.notna() & swing.notna() & (value > 0)
     third = lambda x: np.floor(np.minimum(x.where(keep).rank(axis=1, pct=True) * 3, 2.99))   # noqa: E731
@@ -85,6 +104,8 @@ def _rows(w: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, dict[int, pd.DataFr
         up = np.log(hi[::-1].rolling(h, min_periods=1).max()[::-1].shift(-1) / Cf).to_numpy() / s
         down = -np.log(lo[::-1].rolling(h, min_periods=1).min()[::-1].shift(-1) / Cf).to_numpy() / s
         up[n - h:], down[n - h:] = np.nan, np.nan                     # not finished yet
+        reset = brk[::-1].rolling(h, min_periods=1).max()[::-1].shift(-1).to_numpy() > 0   # in sessions t+1 .. t+h
+        z[reset], up[reset], down[reset] = np.nan, np.nan, np.nan
         moves[h] = pd.DataFrame({"z": z[k], "up": up[k], "down": down[k]})
     return base, moves
 
@@ -151,9 +172,12 @@ def build(conn: sqlite3.Connection, shown: int = SHOWN) -> dict:
                 samples[day, g] = (mv["up"].to_numpy()[m], mv["down"].to_numpy()[m])
             close, s = float(base.at[r, "close"]), float(base.at[r, "swing"]) * np.sqrt(h)
             ups, downs = samples[day, g]
+            target = holidays.sessions_after(cal[day], h)
+            if target <= cal[last]:                  # a stock that hasn't traded since: that window is over
+                continue
             st = stocks.setdefault(sym, {"made": cal[day], "close": close, "steps": {}})
             st["steps"][str(h)] = {
-                "target": holidays.sessions_after(cal[day], h),
+                "target": target,
                 "lo": _r(close * np.exp(lo[j])), "hi": _r(close * np.exp(hi[j])),
                 "up": _ladder(close, s, ups, 1), "down": _ladder(close, s, downs, -1), "cap": CAP[h],
                 "record": {"n": int(rec["size"].get(sym, 0)), "inside": int(rec["sum"].get(sym, 0))}}

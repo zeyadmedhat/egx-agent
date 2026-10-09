@@ -472,7 +472,7 @@ function PositionPanel({ p, hold, c, atr, quotes, rg }) {
   const sw = p.stop != null ? stopWhy(p, c, atr) : '';
   const tw = targetWhy(p, c, atr);
   return html`<${PositionCard} p=${livePosition(p, quotes)} hold=${hold}>
-    <${ReachLine} r=${rg} stop=${p.stop} target=${p.target} />
+    ${p.status !== 'ADJUST' && html`<${ReachLine} r=${rg} stop=${p.stop} target=${p.target} />`}
     ${(sw || tw || next) && html`<${More} label="Where the stop and target come from"><ul class="level-why">
       ${sw && html`<li><b class="down">${t('Stop')}</b> ${sw}</li>`}
       ${tw && html`<li><b class="up">${t('Target')}</b> ${tw}</li>`}

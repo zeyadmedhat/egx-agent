@@ -6,6 +6,7 @@ import { Seg, More } from '../ui.js';
 import { t } from '../i18n.js';
 
 const STEPS = [{ value: '5', label: 'Next week' }, { value: '20', label: 'Next month' }];
+const RESET = { rights: 'rights issue', bonus: 'bonus shares', split: 'stock split', consolidation: 'share consolidation' };
 const ret = (p, c) => p / c - 1;
 
 // The chance it trades at `price` (or beyond it, away from the close) within the step: {p} between the ladder's
@@ -28,20 +29,21 @@ export const chanceText = r => (!r ? '–' : r.over != null ? t('over {p}', { p:
     : t('about {p}', { p: fmt.pct(Math.round(r.p * 20) / 20, 0, false) }));
 
 export function PriceRange({ r, sym }) {
-  const [k, setK] = useState('5');
+  const [k, setK] = useState(r.steps['5'] ? '5' : '20');   // a stock idle for a week has only its month left
   const [price, setPrice] = useState('');
   const s = r.steps[k];
   if (!s) return null;
   const c = r.close, typed = Number(price), mine = s.record, all = r.all[k], test = r.tested.steps[k];
   const when = { date: fmt.date(s.target, false), n: k };
-  const pick = typed > 0 ? reachChance(s, c, typed) : null;
+  const pick = typed > 0 && !s.reset ? reachChance(s, c, typed) : null;
   return html`<div class="card range-card">
     <div class="range-head">
       <div><h3>${t('How far {sym} could move', { sym })}</h3>
         <p class="faint">${t('From the close of {date} ({price}). It says how far, not which way.', { date: fmt.date(r.made), price: fmt.price(c) })}</p></div>
       <${Seg} options=${STEPS} value=${k} onChange=${setK} />
     </div>
-    <div class="range-main">
+    ${s.reset ? html`<p class="warn-text ai-reset">${t("Ex-date of the {what}: {date}, inside this window. That day the price is reset for the new shares, so a range in today's prices would be wrong. It comes back once the price history is re-based for them.",
+      { what: t(RESET[s.reset.kind]), date: fmt.date(s.reset.date, false) })}</p>` : html`<div class="range-main">
       <span class="k-label">${t('8 times in 10, the close {n} sessions later ({date}) was between', when)}</span>
       <div class="range-ends"><b>${fmt.price(s.lo)}</b><span class="faint">${t('and')}</span><b>${fmt.price(s.hi)}</b></div>
       <span class="faint"><bdi>${fmt.pct(ret(s.lo, c), 1)}</bdi> ${t('to')} <bdi>${fmt.pct(ret(s.hi, c), 1)}</bdi></span>
@@ -55,11 +57,11 @@ export function PriceRange({ r, sym }) {
         <${Ladder} title="Down to" pts=${s.down} cap=${s.cap} c=${c} />
       </div>
       <label class="range-check"><span>${t('Check a price')}</span>
-        <input class="input" type="number" min="0" step="0.01" inputmode="decimal" placeholder=${fmt.price(c)}
+        <input class="input" type="number" min="0" step="any" inputmode="decimal" placeholder=${fmt.price(c)}
           value=${price} onInput=${e => setPrice(e.target.value)} /></label>
       ${pick && html`<p class="range-answer">${t(typed > c ? 'The chance it trades at {price} or higher by {date}: {chance}.'
         : 'The chance it trades at {price} or lower by {date}: {chance}.', { ...when, price: fmt.price(typed), chance: chanceText(pick) })}</p>`}
-    </div>
+    </div>`}
     <div class="range-record">
       <h4>${t('Did these ranges hold before?')}</h4>
       <p>${mine.n >= 30 ? t('{sym}, the last year: the close ended inside {a} of {n} ranges ({p}).', { sym, a: mine.inside, n: mine.n, p: fmt.pct(mine.inside / mine.n, 0, false) })
@@ -85,7 +87,10 @@ const WHY = 'Which way a share goes next is close to a coin flip, even for the A
 
 // The ladder's capped chance (said more is less sure: tested chances above it ran high), half and the 1-in-10.
 function Ladder({ title, pts, cap, c }) {
-  const shown = pts.filter(([p]) => p === cap || p === 0.5 || p === 0.3 || p === 0.1);
+  const seen = new Set();
+  const shown = pts.filter(([p]) => p === cap || p === 0.5 || p === 0.3 || p === 0.1)
+    .map(([p, v]) => [p, Number(v.toFixed(v < 10 ? 3 : 2))])              // as fmt.price shows it
+    .filter(([, v]) => v !== c && !seen.has(v) && seen.add(v));
   return html`<div class="range-col"><span class="k-label">${t(title)}</span>
     ${shown.length ? shown.map(([p, v]) => html`<div class="range-row">
       <span class="range-pct">${fmt.pct(p, 0, false)}</span>
@@ -107,7 +112,7 @@ function Bar({ s, c }) {
 
 // The stop-loss and target cards: the chance each trades by the end of the month's range (separate chances).
 export function ReachLine({ r, stop, target }) {
-  const s = r && r.steps['20'];
+  const s = r && r.steps['20'] && !r.steps['20'].reset ? r.steps['20'] : null;
   const up = s && target > r.close ? chanceText(reachChance(s, r.close, target)) : null;
   const down = s && stop > 0 && stop < r.close ? chanceText(reachChance(s, r.close, stop)) : null;
   return (up || down) && html`<p class="reach-line"><span class="faint">${t('Chance it trades there by {date}', { date: fmt.date(s.target, false) })}</span>
