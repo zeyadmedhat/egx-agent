@@ -4,6 +4,7 @@
 import { html, useState, fmt, tone, cls } from '../lib.js';
 import { Seg, More } from '../ui.js';
 import { t } from '../i18n.js';
+import { cone } from './range.js';
 
 const STEPS = [{ value: '1', label: 'Next session' }, { value: '5', label: '5 sessions' }, { value: '20', label: '20 sessions' }];
 const AFTER = { 1: 'after the next session', 5: 'after 5 sessions', 20: 'after 20 sessions' };
@@ -15,7 +16,7 @@ const BAND = { 0: 'under 30', 30: '30 to 59', 60: '60 or more' };
 const FOR = { 1: 'next-session forecasts', 5: '5-session forecasts', 20: '20-session forecasts' };
 const RESET = { rights: 'rights issue', bonus: 'bonus shares', split: 'stock split', consolidation: 'share consolidation' };
 
-export function AiForecast({ ai, sym }) {
+export function AiForecast({ ai, sym, rg, pred }) {
   const [k, setK] = useState('5');
   const [pick, setPick] = useState(null);           // the model whose line is picked out
   const [before, setBefore] = useState(false);      // earlier forecasts on the drawing
@@ -48,11 +49,12 @@ export function AiForecast({ ai, sym }) {
       { what: t(RESET[s.reset.kind]), date: fmt.date(s.reset.date, false) })}</p>`}
     <div class="ai-grid">
       <div style="min-width:0">
-        <${Drawing} ai=${ai} k=${n} at=${at} pick=${pick} before=${before} />
+        <${Drawing} ai=${ai} k=${n} at=${at} pick=${pick} before=${before} rg=${rg && rg.made === ai.made ? rg : null} />
         <div class="ai-legend faint">
           <span><i class="ln solid"></i>${t('Closes')}</span><span><i class="dot start"></i>${t('Start')}</span>
           <span><i class="ln mid"></i>${t('Middle of the forecasts')}</span><span><i class="ln dash"></i>${t('Each model')}</span>
           <span><i class="sw band"></i>${t('Lowest to highest forecast, not a range of likely prices')}</span>
+          ${rg && rg.made === ai.made && html`<span><i class="sw rg"></i>${t('Where the price really ended 8 times in 10 (card above)')}</span>`}
           ${before && html`<span><i class="ln dot2"></i>${t('An earlier forecast, to the session it was about')}</span>
             <span><i class="ln gap"></i>${t('Its gap to that session\'s close')}</span>`}
         </div>
@@ -65,7 +67,7 @@ export function AiForecast({ ai, sym }) {
         </div>
         <${Record} s=${s} n=${n} ai=${ai} />
       </div>
-      <${Confidence} s=${s} n=${n} ai=${ai} change=${change} />
+      <${Confidence} s=${s} n=${n} ai=${ai} change=${change} pred=${pred} />
     </div>
     <div class="ai-models-head"><span class="k-label">${t('Each model · {when}', { when: t(AFTER[n]) })}</span>
       <span class="faint">${t('Press one to pick its line out of the drawing.')}</span></div>
@@ -100,7 +102,7 @@ function Record({ s, n, ai }) {
   </div>`;
 }
 
-function Confidence({ s, n, ai, change }) {
+function Confidence({ s, n, ai, change, pred }) {
   const m = ai.models.filter(x => s.values[x.key] != null).length;
   const big = s.typical != null && Math.abs(change) >= s.typical;
   const band = s.score >= 60 ? '60' : s.score >= 30 ? '30' : '0', tb = ai.tested.steps[n][band];
@@ -122,12 +124,24 @@ function Confidence({ s, n, ai, change }) {
       : t(big ? "The middle forecast, {v}, is bigger than most of this share's {k}-session moves in the past year. A usual move is about {u}, up or down."
         : "The middle forecast, {v}, is smaller than most of this share's {k}-session moves in the past year. A usual move is about {u}, up or down.",
         { v: fmt.pct(change, 2), k: n, u: fmt.pct(s.typical, 1, false) })}</p>
+    <${Agent} p=${pred} />
     <${More} label="How the score is worked out"><p>${t('Agreement: all the models pointing the same way counts fully, an even split not at all. Size: the middle move against this share\'s usual move over the same number of sessions, full at a usual move or more. The score is the two multiplied, out of 100.')}</p><//>
   </div>`;
 }
 
+// The agent's own model next to the AI models: trained on EGX's own history and tested on what it picked, so it's
+// the one to weigh for a decision (Rankings). Its rating and how stocks rated like it did in that test.
+function Agent({ p }) {
+  if (!p || p.rating == null) return null;
+  const b = (p.bands || []).find(x => p.rating >= x.from && p.rating <= x.to);
+  return html`<div class="ai-agent"><h4>${t("Compare: the agent's own model")}</h4>
+    <p>${t('Rating {v}/100.', { v: p.rating })} ${b && b.hit != null ? t('Stocks rated like it reached their target before their stop {hit} of the time in its test (the average stock {base}).', {
+      hit: fmt.pct(b.hit, 0, false), base: fmt.pct(p.base && p.base[10], 0, false) }) : ''}</p>
+    <p class="faint">${t("It learned from every liquid EGX stock's past and was tested on years it hadn't seen, so weigh it more than these lines.")} <a href="#/predict">${t('Rankings')}</a></p></div>`;
+}
+
 // The drawing: past closes, then each model's path, their middle and spread; earlier forecasts on request.
-function Drawing({ ai, k, at, pick, before }) {
+function Drawing({ ai, k, at, pick, before, rg }) {
   const narrow = window.innerWidth < 600;           // a phone: fewer units across, so the words stay readable
   const W = narrow ? 420 : 640, H = narrow ? 260 : 300, L = 50, R = 58, T = 16, B = 26;
   const past = SEEN[k], times = ai.closes.time, closes = ai.closes.close;
@@ -139,7 +153,9 @@ function Drawing({ ai, k, at, pick, before }) {
   const mids = Array.from({ length: k }, (_, i) => median(step(i)));
   const los = Array.from({ length: k }, (_, i) => Math.min(...step(i))), his = Array.from({ length: k }, (_, i) => Math.max(...step(i)));
   const pastFc = before ? ai.steps[k].past.map(p => ({ ...p, i: times.indexOf(p.made) - at })).filter(p => p.i >= x0 && times.indexOf(p.made) >= 0) : [];
-  const ys = [...shown, ai.start, ...los, ...his, ...pastFc.flatMap(p => [p.value, p.actual].filter(v => v != null))];
+  const cn = rg && cone(rg, k);          // the price range card's 8-in-10 cone, from the same close
+  const ys = [...shown, ai.start, ...los, ...his, ...pastFc.flatMap(p => [p.value, p.actual].filter(v => v != null)),
+    ...(cn ? [...cn.top, ...cn.bot].map(([, v]) => v) : [])];
   let lo = Math.min(...ys), hi = Math.max(...ys);
   const pad = (hi - lo || hi * 0.02) * 0.1; lo -= pad; hi += pad;
   const X = i => L + (i - x0) / (span - x0) * (W - L - R), Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
@@ -150,6 +166,7 @@ function Drawing({ ai, k, at, pick, before }) {
   return html`<svg class="ai-draw" viewBox=${`0 0 ${W} ${H}`} role="img" aria-label=${t('What the AI models forecast')}>
     <rect x=${X(0)} y=${T} width=${X(span) - X(0)} height=${H - T - B} class="fc-zone" />
     ${ticks.map(v => html`<line x1=${L} x2=${W - R} y1=${Y(v)} y2=${Y(v)} class="grid" /><text x=${L - 6} y=${Y(v) + 4} class="axis" text-anchor="end">${fmt.price(v)}</text>`)}
+    ${cn && html`<path d=${line(cn.top) + line([...cn.bot].reverse()).replace('M', 'L') + 'Z'} class="rg-fill" />`}
     <line x1=${X(0)} x2=${X(0)} y1=${T} y2=${H - B} class="now-line" />
     <path d=${line([[0, ai.start], ...his.map((v, i) => [i + 1, v])]) + line([...los.map((v, i) => [i + 1, v]).reverse(), [0, ai.start]]).replace('M', 'L') + 'Z'} class="band" />
     ${keys.map(m => html`<path d=${line([[0, ai.start], ...ai.paths[m].slice(0, k).map((v, i) => [i + 1, v])])}

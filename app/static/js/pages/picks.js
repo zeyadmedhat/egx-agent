@@ -9,6 +9,7 @@ import {
 import { t, tp, tn } from '../i18n.js';
 import { useToday, buyHref } from './today.js';
 import { Health, Recent, RankMove } from './predict.js';
+import { ReachLine } from './range.js';
 
 const WK = 5;           // the model's week (predict.WEEK)
 
@@ -166,6 +167,7 @@ function PickCard({ s, m, wk, odds, fee, model, bell }) {
       <div class="buy-line"><span><${Term} k="buyupto">${t('Buy up to')}<//> <b>${fmt.price(s.entry_high)}</b></span>
         <span class="faint">${t('last close')} ${fmt.price(s.close)}</span></div>
       <${PlanBar} p=${{ stop: s.stop, target: s.target, price: s.close, avg_price: s.entry_high }} />
+      <${ReachLine} r=${s.range} stop=${s.stop} target=${s.target} />
       <${BestIn} e=${{ kind: 'now', price: s.entry_high, stop: s.stop, target: s.target }} />
     </div>
     <${Checks} items=${checks(s, m)} />

@@ -376,6 +376,7 @@ def today(d: Data) -> dict:
         r["co"] = firms.get(r["symbol"])
         if r["action"] == "BUY":
             r["sell_by"] = sessions_after(scan_date, cfg["max_hold_days"])
+            r["range"] = range_view(d, r["symbol"])     # the chance its target and stop trade within a month
             buys.append(r)
         elif shariah.passes_filter(r["info"], cfg["shariah_filter"]):   # close to a BUY: only what your filter allows
             px = d.prices(r["symbol"])

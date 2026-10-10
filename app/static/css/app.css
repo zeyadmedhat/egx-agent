@@ -1360,6 +1360,7 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .ai-conf .row { justify-content: space-between; }
 .ai-conf p { margin: 0; font-size: 12.5px; }
 .ai-conf h4 { margin: 8px 0 0; font-size: 13.5px; }
+.ai-agent { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; display: flex; flex-direction: column; gap: 4px; }
 .ai-conf .tag.up { color: var(--up); background: var(--up-soft); }
 .ai-conf .tag.warn { color: var(--warn); background: var(--warn-soft); }
 .ai-score b { font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
@@ -1397,32 +1398,55 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .range-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .range-head h3 { margin: 0 0 2px; font-size: 18px; }
 .range-head p { margin: 0; font-size: 13px; }
-.range-main { background: var(--panel-2); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
-.range-ends { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.range-ends b { font-size: 26px; font-variant-numeric: tabular-nums; }
-.range-bar { position: relative; height: 10px; margin: 10px 0 4px; border-radius: 5px; background: var(--panel-3); }
-.range-bar .band { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--accent); opacity: .35; }
-.range-bar .now { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--text); }
-.range-sub { margin: 0 0 8px; font-size: 12.5px; }
-.range-ladder { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.range-col { border: 1px solid var(--border); border-radius: var(--r); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
-.range-row { display: grid; grid-template-columns: 3.2em 1fr auto; gap: 8px; align-items: baseline; font-variant-numeric: tabular-nums; }
-.range-row .range-pct { color: var(--text-3); font-size: 12.5px; }
-.range-row small { font-size: 12px; }
-.range-row small.up { color: var(--up); }
-.range-row small.down { color: var(--down); }
 .range-check { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; }
 .range-check .input { max-width: 140px; }
 .range-answer { margin: 8px 0 0; font-weight: 600; }
-.range-record { border-top: 1px solid var(--border); padding-top: 10px; }
-.range-record p { margin: 0 0 4px; font-size: 12.5px; }
 .reach-line { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 10px 0 0; font-size: 12.5px; }
 .reach-line .faint { flex-basis: 100%; }
-@media (max-width: 560px) {   /* a phone: the two ladders stay side by side */
-  .range-col { padding: 8px; }
-  .range-row { grid-template-columns: 2.3em minmax(0, 1fr) auto; gap: 4px; }
-  .range-row b { font-size: 13.5px; }
-  .range-row small { font-size: 11px; }
+.rg-cone .ai-legend { margin-top: 2px; }
+.ai-draw .rg-fill { fill: var(--accent); opacity: .16; }
+.ai-draw .rg-week { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 2 3; opacity: .7; }
+.ai-draw .rg-plan-line { stroke-width: 1.5; stroke-dasharray: 6 4; }
+.ai-draw .rg-plan-line.up { stroke: var(--up); }
+.ai-draw .rg-plan-line.down { stroke: var(--down); }
+.rg-cone .ai-draw { direction: ltr; }          /* labels start at the right of the cone in Arabic too */
+.ai-draw .rg-plan-txt { font-size: 12px; font-weight: 700; }
+.ai-draw .rg-plan-txt.up { fill: var(--up); }
+.ai-draw .rg-plan-txt.down { fill: var(--down); }
+.ai-draw .rg-ai { fill: var(--violet); stroke: var(--panel); stroke-width: 1.5; }
+.ai-legend .sw.rg { display: inline-block; width: 14px; height: 10px; margin-inline-end: 6px; background: var(--accent); opacity: .3; border-radius: 2px; }
+.ai-legend .ln.rg-plan { border-top: 1.5px dashed var(--down); }
+.ai-legend .rg-ai-key { display: inline-block; width: 8px; height: 8px; margin-inline-end: 7px; background: var(--violet); transform: rotate(45deg); }
+.rg-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.rg-tile { background: var(--panel-2); border-radius: var(--r); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
+.rg-tile b { font-size: 22px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rg-tile small { font-size: 13px; font-variant-numeric: tabular-nums; }
+.rg-tile .up { color: var(--up); } .rg-tile .down { color: var(--down); } .rg-tile .warn { color: var(--warn); }
+.rg-tile b.rg-paused { font-size: 16px; color: var(--text-3); }
+.rg-caption { margin: -6px 0 0; font-size: 12.5px; color: var(--text-3); }
+.rg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rg-chips:empty { display: none; }
+.rg-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; }
+.rg-chip.ok { background: var(--up-soft); color: var(--up); }
+.rg-chip.warn { background: var(--warn-soft); color: var(--warn); }
+.rg-touch { border-top: 1px solid var(--border); padding-top: 12px; }
+.rg-touch .range-head { align-items: center; margin-bottom: 8px; }
+.rg-ladder { display: flex; flex-direction: column; gap: 3px; max-width: 520px; }
+.rg-row { display: grid; grid-template-columns: 4.6em 3.4em minmax(0, 1fr) 6.4em; gap: 8px; align-items: center; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.rg-row small { font-size: 12px; color: var(--text-3); }
+.rg-row.up small { color: var(--up); } .rg-row.down small { color: var(--down); }
+.rg-bar { height: 10px; border-radius: 5px; background: var(--panel-3); overflow: hidden; }
+.rg-bar i { display: block; height: 100%; border-radius: 5px; }
+.rg-row.up .rg-bar i { background: var(--up); opacity: .55; }
+.rg-row.down .rg-bar i { background: var(--down); opacity: .55; }
+.rg-p { font-size: 12.5px; color: var(--text-2); }
+.rg-row.now { grid-template-columns: 4.6em 1fr; padding: 3px 0; border-top: 1px dashed var(--border-2); border-bottom: 1px dashed var(--border-2); }
+.rg-now { font-size: 12px; color: var(--text-3); }
+.rg-plan { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-size: 12.5px; }
+@media (max-width: 560px) {
+  .rg-tile { padding: 8px 10px; }
+  .rg-tile b { font-size: 17px; }
+  .rg-row { grid-template-columns: 4.2em 3em minmax(0, 1fr) 5.6em; gap: 6px; font-size: 13px; }
 }
 
 /* ------------------------------------------------------------------ the wallet's Thndr Trader plan */
