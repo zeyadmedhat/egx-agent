@@ -37,7 +37,10 @@ COLUMNS = ["name", "dividends_yield_current", "dividend_ex_date_recent", "divide
 FUNDAMENTALS = {"market_cap_basic": ("market_cap", 1), "price_earnings_ttm": ("pe", 1), "price_book_fq": ("pb", 1),
                 "earnings_per_share_diluted_yoy_growth_ttm": ("eps_growth", 0.01),
                 "total_revenue_yoy_growth_ttm": ("revenue_growth", 0.01), "net_margin_ttm": ("net_margin", 0.01),
-                "return_on_equity_fq": ("roe", 0.01), "debt_to_equity_fq": ("debt_equity", 1)}
+                "return_on_equity_fq": ("roe", 0.01), "debt_to_equity_fq": ("debt_equity", 1),
+                # free float: the shares not held by owners of 5% or more, insiders or a depository bank (TradingView's
+                # count, stricter than EGX's; about 160 EGX companies in 2026-10)
+                "float_shares_percent_current": ("free_float", 0.01), "float_shares_outstanding_current": ("float_shares", 1)}
 COLUMNS = COLUMNS + list(FUNDAMENTALS) + fundamentals.COLUMNS     # and each company's past results
 EARNINGS_STALE_DAYS = 400     # a company whose last results on TradingView are older gets no expected date: it
                               # doesn't report there regularly, so the estimate would be a guess

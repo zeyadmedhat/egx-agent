@@ -369,8 +369,10 @@ def today(d: Data) -> dict:
     preds = predictions(d)
     warn = cautions_map(d)
     firms = company_brief(d)
+    floats = free_floats(d)
     for r in [dict(x) for x in rows]:
         r["info"] = d.info(r["symbol"])
+        r["free_float"] = floats.get(r["symbol"])
         r["pred"] = preds["by_symbol"].get(r["symbol"])
         r["cautions"] = warn.get(r["symbol"], [])
         r["co"] = firms.get(r["symbol"])
@@ -913,6 +915,20 @@ def company_values(conn: sqlite3.Connection) -> dict[str, dict]:
     back = {v: k for k, v in prices.TV_ALIASES.items()}
     return {back.get(r["symbol"], r["symbol"]): json.loads(r["data"])
             for r in conn.execute("SELECT symbol, data FROM fundamentals")}
+
+
+def free_floats(d: Data) -> dict[str, float]:
+    """Each company's free float (TradingView, data/dividends.py): shown, not used. Tested in 2026-10 as inputs to the
+    10-session model (float %, the float's value, its rank, how fast it trades): the model's own top picks did a
+    little better, but the rules plus its picks made 25.8% a year against 32.5% and won fewer trades, on all 4 seeds."""
+    def build():
+        out = {}
+        for r in d.conn.execute("SELECT symbol, data FROM fundamentals"):
+            v = json.loads(r["data"]).get("free_float")
+            if v is not None:
+                out[r["symbol"]] = v
+        return out
+    return d.cache.get(d.version, ("free_floats",), build)
 
 
 def company_brief(d: Data) -> dict[str, dict]:

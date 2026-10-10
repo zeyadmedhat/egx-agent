@@ -450,6 +450,7 @@ const COMPANY = [
   ['net_margin', 'Net margin', v => fmt.pct(v, 0, false)],
   ['roe', 'Return on equity', v => fmt.pct(v, 0, false)],
   ['debt_equity', 'Debt / equity', v => `${fmt.num(v, 2)}×`],
+  ['free_float', 'Free float', v => fmt.pct(v, 0, false)],
 ];
 const GROWTH = new Set(['eps_growth', 'revenue_growth']);
 
@@ -473,7 +474,9 @@ const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower
   + 'costs more. Price / book: the price against what the company owns minus what it owes. Growth: the last 12 months '
   + 'against the 12 before (in EGP, so inflation lifts it too). Net margin: profit from each pound of sales. Return on '
   + 'equity: yearly profit on the owners\' money. Debt / equity: borrowing against the owners\' money; over 1 is a lot for '
-  + 'most companies except banks. The agent\'s signals don\'t use these: they are here to know the company.';
+  + 'most companies except banks. Free float: the share of the company anyone can trade, not held by owners of 5% or more, '
+  + 'insiders or a depository bank (TradingView\'s count, stricter than the exchange\'s). A small float moves more on less money. '
+  + 'The agent\'s signals don\'t use these: they are here to know the company.';
 
 // Your position: the same card as Today and My Portfolio (live price, P&L, stop to target), and where the stop and
 // target come from. The stop rises to each new support under the price (egx_agent/engine.py); the target stays.
