@@ -113,3 +113,12 @@ def test_a_coming_reset_is_flagged_and_forecasts_move_to_the_new_prices_after_it
     assert p5("AAA") == before / 2 and p5("BBB") == other    # only that stock's
     path = conn.execute("SELECT path FROM ai_paths WHERE symbol='AAA' AND model='up'").fetchone()[0]
     assert np.isclose(json.loads(path)[4], before / 2)
+
+
+def test_the_egx_trained_model_never_forecasts_from_before_its_training_ended(tmp_path, monkeypatch):
+    conn, days = _market(tmp_path)
+    monkeypatch.setattr(ai_forecast, "RUNNERS", {"chronos2_egx": lambda data, made: {s: np.full(20, 9.0) for s in data}})
+    monkeypatch.setattr(ai_forecast, "EGX_TRAINED_TO", days[150])
+    assert ai_forecast.run(conn, days[149])["chronos2_egx"].startswith("skipped")
+    assert ai_forecast.run(conn, days[150])["chronos2_egx"].startswith("2 stocks")
+    assert [r[0] for r in conn.execute("SELECT DISTINCT made FROM ai_forecasts")] == [days[150]]

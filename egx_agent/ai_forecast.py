@@ -59,6 +59,7 @@ TESTED = {"dates": 100, "from": "2024-08-21", "to": "2026-09-07", "steps": {
 # so it's a release file (EGX_RELEASE), not in the code; site.yml downloads it here.
 EGX_DIR = Path(os.environ.get("EGX_CHRONOS2", "_models/chronos2-egx"))
 EGX_RELEASE = "chronos2-egx-1"
+EGX_TRAINED_TO = "2026-10-07"   # its last training close: from an earlier close it has seen what came next
 MODELS = {             # key → (name, lab)
     "chronos2_egx": ("Chronos-2", "Amazon, trained on EGX"),
     "timesfm": ("TimesFM 2.5", "Google"),
@@ -165,6 +166,9 @@ def run(conn: sqlite3.Connection, made: str, models: list[str] | None = None) ->
     data = inputs(conn, made)
     report = {}
     for key in models or list(RUNNERS):
+        if key == "chronos2_egx" and made < EGX_TRAINED_TO:     # a backfill: it would grade itself on what it learned
+            report[key] = "skipped (trained on what came after)"
+            continue
         t0 = time.time()
         try:
             n = save(conn, made, key, RUNNERS[key](data, made))
@@ -238,6 +242,8 @@ def main(argv: list[str] | None = None) -> None:
         print("due=" if a.what == "due" else "No data yet.")
         return
     conn = db.connect(a.db)
+    conn.execute("DELETE FROM ai_forecasts WHERE model='chronos2_egx' AND made < ?", (EGX_TRAINED_TO,))   # backfilled once
+    conn.commit()
     made = due(conn)
     if a.what == "due":
         print(f"due={made or ''}")
