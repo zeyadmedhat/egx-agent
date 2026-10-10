@@ -88,6 +88,15 @@ jobs:
           TZ: Africa/Cairo
         run: python -m egx_agent.ai_forecast due --db state/egx.db >> "$GITHUB_OUTPUT"
 
+      # The EGX-trained Chronos-2 (478 MB) is a release file, not in the code: downloaded once, then kept in the cache.
+      - name: The EGX-trained Chronos-2
+        if: steps.ai.outputs.due != ''
+        continue-on-error: true
+        uses: actions/cache@v6
+        with:
+          path: _models/chronos2-egx
+          key: chronos2-egx-1
+
       - name: The AI models' forecasts
         if: steps.ai.outputs.due != ''
         continue-on-error: true
@@ -96,6 +105,11 @@ jobs:
           HF_HUB_DISABLE_PROGRESS_BARS: "1"
           TZ: Africa/Cairo
         run: |
+          mkdir -p _models/chronos2-egx
+          for f in config.json model.safetensors; do
+            [ -s "_models/chronos2-egx/$f" ] || curl -fsSL --retry 3 -o "_models/chronos2-egx/$f" \
+              "https://github.com/${{ github.repository }}/releases/download/chronos2-egx-1/$f" || rm -f "_models/chronos2-egx/$f"
+          done
           pip install -q --index-url https://download.pytorch.org/whl/cpu torch
           pip install -q -r requirements-ai.txt
           python -m egx_agent.ai_forecast run --db state/egx.db

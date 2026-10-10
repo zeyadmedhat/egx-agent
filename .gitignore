@@ -4,6 +4,7 @@
 /config.yaml
 /state/
 /_site/
+/_models/
 *.db
 *.db-journal
 *.log
