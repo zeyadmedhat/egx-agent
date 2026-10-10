@@ -303,7 +303,8 @@ export const todayISO = () => {
 export const cls = (...xs) => xs.filter(Boolean).join(' ');
 
 // ------------------------------------------------------------------ language (Arabic reads right to left)
-export function setLang(lang) {
+export async function setLang(lang) {
+  if (lang === 'ar') await (await import('./i18n.js')).loadArabic();     // its words come first, then the switch
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   try { localStorage.setItem('egx-lang', lang); } catch { /* private mode */ }

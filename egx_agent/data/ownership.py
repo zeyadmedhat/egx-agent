@@ -47,7 +47,9 @@ def update(conn: sqlite3.Connection, symbols: list[str], budget: int = BUDGET, f
     f = f or Fetcher()
     f.last.setdefault(MUBASHER["en"].split("/")[2], time.monotonic())    # the news step may have just read it
     for sym in due:
-        holders = parse(f.get(f"{MUBASHER['en']}/markets/EGX/stocks/{sym}/profile").text)
+        r = f.get(f"{MUBASHER['en']}/markets/EGX/stocks/{sym}/profile")
+        r.raise_for_status()            # refused (as GitHub's servers are): stop, and don't mark the rest as read
+        holders = parse(r.text)
         conn.execute("INSERT OR REPLACE INTO ownership(symbol, holders, free_float, updated) VALUES (?,?,?,?)",
                      (sym, json.dumps(holders, ensure_ascii=False), free_float(holders),
                       datetime.now().isoformat(timespec="seconds")))

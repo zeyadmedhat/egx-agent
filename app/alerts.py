@@ -195,6 +195,25 @@ def _switch_line(v: dict, lang: str = "en") -> str:
     return f"Market switch: {SWITCH_ICON[sw['state']]} {sw['label']} (for the model's picks)"
 
 
+def _back_line(m: dict, b: dict | None, lang: str = "en") -> str:
+    """While new BUYs are off: what turns them back on. EGX30 must close above its 50-day EMA, and a close above
+    today's EMA is above the new EMA too, so today's EMA is the level. And 40% of stocks above their 50-day average."""
+    need = []
+    ema, close = m.get("egx30_ema50"), m.get("egx30_close")
+    if ema and close and close < ema:
+        need.append(f"إغلاق EGX30 فوق {ema:,.0f} ({ema / close - 1:+.1%})" if lang == "ar" else
+                    f"EGX30 closes above {ema:,.0f} ({ema / close - 1:+.1%})")
+    if m.get("weak_breadth") and b:
+        need.append(f"{breadth.SWITCH_OFF_BELOW:.0%} على الأقل من الأسهم فوق متوسط 50 يومًا (الآن {b['above50']:.0%})"
+                    if lang == "ar" else
+                    f"at least {breadth.SWITCH_OFF_BELOW:.0%} of stocks are above their 50-day average "
+                    f"(now {b['above50']:.0%})")
+    if not need:
+        return ""
+    return ("↩️ تعود إشارات الشراء بعد " + " و".join(need)) if lang == "ar" else \
+        ("↩️ New BUYs come back once " + " and ".join(need))
+
+
 MOOD_ICON = {"Extreme fear": "😱", "Fear": "😟", "Neutral": "😐", "Greed": "😀", "Extreme greed": "🤑"}
 MOOD_AR = {"Extreme fear": "خوف شديد", "Fear": "خوف", "Neutral": "محايد", "Greed": "طمع", "Extreme greed": "طمع شديد"}
 
@@ -310,6 +329,8 @@ def build_message(d: views.Data) -> tuple[str, bool]:
     if not o["items"]:
         body.append("Nothing to do. " + ("No new buys while EGX30 is below its 50-day average." if o["blocked"]
                                          else "No BUY signals at this close."))
+        if o["blocked"] and (line := _back_line(m, views.breadth_data(d))):
+            body.append(line)
     tail = []
     if o["holds"]:
         tail.append("Holding: " + ", ".join(f"{h['symbol']} (stop {views.px(h['stop'])})" for h in o["holds"]))
@@ -364,6 +385,8 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
         lines.append(f"الاتساع: {b['above50']:.0%} من الأسهم فوق متوسط 50 يومًا{week}" if ar else
                      f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
         lines.append(_switch_line(v, lang))
+    if blocked and (line := _back_line(m, b, lang)):
+        lines.append(line)
     if line := _mood_line(d, lang):
         lines.append(line)
     preds = views.predictions(d)

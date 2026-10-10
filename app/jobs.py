@@ -12,7 +12,7 @@ from typing import Callable
 
 import pandas as pd
 
-from egx_agent import backtest, config, corporate, db, predict, record, scan
+from egx_agent import backtest, config, corporate, db, holidays, predict, record, scan
 from egx_agent.data import dividends, fundamentals, macro, news, prices, shariah, universe
 
 from . import accounts, alerts, health, views
@@ -96,6 +96,10 @@ class JobRunner:
             try:
                 conn = self.site.market()
                 try:
+                    try:   # EGX's holidays (a few looks a day), before deciding whether a close is due
+                        holidays.check(conn)
+                    except Exception:  # the days it knew still count
+                        pass
                     stale = scan.scan_is_stale(conn)
                 finally:
                     conn.close()

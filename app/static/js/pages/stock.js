@@ -103,9 +103,11 @@ export function StockPage({ route }) {
             : html`<${LiveChart} symbol=${data.symbol} />
               <p class="faint chart-note">${t(LIVE_NOTE)} ${t('Your buy, stop and target lines are on the Agent chart.')}</p>`}
         </div>
-        ${data.range && html`<${PriceRange} r=${data.range} sym=${data.symbol} series=${data.series} plan=${rangePlan(data)} ai=${data.ai}
-          results=${data.corporate && data.corporate.results && data.corporate.results.next} cautions=${data.cautions} />`}
-        ${data.ai && html`<${AiForecast} ai=${data.ai} sym=${data.symbol} rg=${data.range} pred=${data.prediction} />`}
+        ${data.range && html`<${Fold} flush title=${t('How far {sym} could move', { sym: data.symbol })} hint=${rangeHint(data.range)}>
+          <${PriceRange} r=${data.range} sym=${data.symbol} series=${data.series} plan=${rangePlan(data)} ai=${data.ai}
+            results=${data.corporate && data.corporate.results && data.corporate.results.next} cautions=${data.cautions} /><//>`}
+        ${data.ai && html`<${Fold} flush title=${t('What the AI models forecast for {sym}', { sym: data.symbol })} hint=${t('Beta · not advice')}>
+          <${AiForecast} ai=${data.ai} sym=${data.symbol} rg=${data.range} pred=${data.prediction} /><//>`}
         ${data.news && html`<div class="card stock-news"><div class="card-title"><${Icon} name="news" size=${15} />${t('News')}
             <span class="right faint">Mubasher, Reuters, Zawya</span></div>
           <${NewsList} items=${data.news} sources=${SOURCES} limit=${5}
@@ -130,6 +132,12 @@ export function StockPage({ route }) {
 
 // The stop and target drawn on "How far it could move": your position's (unless it waits for a re-base), else the BUY
 // signal's, else the chart's plan from support and resistance.
+// The closed fold's one line: next week's range, the price ended inside it 8 times in 10.
+function rangeHint(r) {
+  const w = r.steps['5'];
+  return w && !w.reset ? t('1 week: {lo} – {hi}', { lo: fmt.price(w.lo), hi: fmt.price(w.hi) }) : '';
+}
+
 function rangePlan(data) {
   const p = data.position, s = data.signal, c = data.chart;
   if (p && p.status !== 'ADJUST') return { stop: p.stop, target: p.target, mine: true };
@@ -204,7 +212,7 @@ function Verdict({ data }) {
     <div class="verdict-rating">
       <${Rating} v=${p ? p.rating : null} />
       ${p && p.rating != null
-        ? html`<div><b>${t('Rating {v}/100', { v: p.rating })}</b>${b && b.hit != null ? html`<span class="faint"> · ${t('stocks rated like it reached the target first {hit} of the time (the average stock {base})', {
+        ? html`<div><b>${t('Rating {v}/100', { v: p.rating })}</b>${b && b.hit != null ? html`<span class="faint"> · ${t('within 2 weeks, with its stop and target, stocks rated like it reached the target first {hit} of the time (the average stock {base})', {
             hit: fmt.pct(b.hit, 0, false), base: fmt.pct(p.base && p.base[10], 0, false) })}</span>` : ''}
             ${p.why10 && p.why10.length > 0 && html`<div style="margin-top:4px"><${Reason} items=${p.why10} /></div>`}</div>`
         : html`<span class="muted">${t('No rating: the model rates only stocks with enough daily trading.')}</span>`}

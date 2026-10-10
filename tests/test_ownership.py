@@ -1,5 +1,7 @@
 """Free float's second source (data/ownership.py): Mubasher's owners list read, 100% minus the 5% holders, and how it
 sits next to TradingView's."""
+import pytest
+
 from egx_agent import db
 from egx_agent.data import ownership
 
@@ -10,13 +12,17 @@ PAGE = """<h2>Ownership</h2><ul><li><span>Alpha Oryx Ltd</span> <span>(<b>21.521
 
 
 class Page:
-    def __init__(self, pages):
-        self.pages, self.asked, self.last = pages, [], {}
+    def __init__(self, pages, refused=False):
+        self.pages, self.asked, self.last, self.refused = pages, [], {}, refused
 
     def get(self, url):
         sym = url.split("/stocks/")[1].split("/")[0]
         self.asked.append(sym)
-        return type("R", (), {"text": self.pages.get(sym, "<p>no list</p>")})
+
+        def check():
+            if self.refused:
+                raise OSError("403")
+        return type("R", (), {"text": self.pages.get(sym, "<p>no list</p>"), "raise_for_status": staticmethod(check)})
 
 
 def test_the_owners_list_gives_the_free_float_and_is_read_a_few_stocks_a_run(tmp_path):
@@ -30,6 +36,8 @@ def test_the_owners_list_gives_the_free_float_and_is_read_a_few_stocks_a_run(tmp
     assert ownership.update(conn, ["AAA", "BBB", "CCC"], budget=2, f=f) == 2 and f.asked == ["AAA", "BBB"]
     assert ownership.update(conn, ["AAA", "BBB", "CCC"], budget=2, f=f) == 1 and f.asked[-1] == "CCC"  # the rest
     assert ownership.update(conn, ["AAA", "BBB", "CCC"], f=f) == 0                                     # fresh
+    with pytest.raises(OSError):                           # refused: nothing is marked as read
+        ownership.update(conn, ["DDD"], f=Page({}, refused=True))
     assert dict(conn.execute("SELECT symbol, free_float FROM ownership").fetchall()) == {
         "AAA": 0.5218, "BBB": None, "CCC": None}
 

@@ -87,7 +87,8 @@ export function MarketPage() {
 const SECTOR_SPANS = [{ value: 'r5', label: '1 week' }, { value: 'r21', label: '1 month' }, { value: 'r63', label: '3 months' }];
 function SectorBars({ rows }) {
   const [k, setK] = useState('r21');
-  const list = rows.filter(r => r[k] != null).sort((a, b) => b[k] - a[k]);
+  // a sector of one or two stocks is those names alone: they go last, under their own line
+  const list = rows.filter(r => r[k] != null).sort((a, b) => (a.stocks < 3) - (b.stocks < 3) || b[k] - a[k]);
   if (!list.length) return null;
   const sizes = list.map(r => Math.abs(r[k])).sort((a, b) => b - a);
   const max = Math.max(0.001, sizes[1] ?? sizes[0]);       // one runaway sector fills its half instead of shrinking the rest
@@ -100,7 +101,7 @@ function SectorBars({ rows }) {
       a: html`<b class=${tone(top[k])}>${tn(top.sector)}</b>`, x: fmt.pct(top[k], 1),
       b: html`<b class=${tone(low[k])}>${tn(low.sector)}</b>`, y: fmt.pct(low[k], 1) })}</p>
     <div class="inv-axis"><span></span><div><span>${t('Fell')}</span><span>${t('Rose')}</span></div><span></span></div>
-    ${list.map(r => html`<div class="inv-row"><span class=${r.stocks < 3 ? 'faint' : ''} title=${tn(r.sector)}>${tn(r.sector)}</span>
+    ${list.map((r, i) => html`${i > 0 && r.stocks < 3 && list[i - 1].stocks >= 3 && html`<p class="faint inv-small">${t('Sectors of one or two stocks')}</p>`}<div class="inv-row"><span class=${r.stocks < 3 ? 'faint' : ''} title=${tn(r.sector)}>${tn(r.sector)}</span>
       <div class="inv-track"><span class=${`inv-bar ${r[k] >= 0 ? 'up' : 'down'}`}
         style=${`${r[k] >= 0 ? 'inset-inline-start' : 'inset-inline-end'}:50%;width:${Math.min(1, Math.abs(r[k]) / max) * 50}%`}></span></div>
       <b class=${`inv-v ${tone(r[k])}`}>${fmt.pct(r[k], 1)}</b></div>`)}

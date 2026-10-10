@@ -64,9 +64,15 @@ function Light({ m, b, blocked }) {
       : sw && sw.state === 'half'
         ? ['warn', "BUYs allowed, the model's picks at half size", `${t(sw.text)} ${t("Buy the model's top picks at half your usual size.")}`]
         : ['ok', 'BUYs allowed', t('EGX30 is above its 50-day average, so new BUY signals are allowed.')];
+  // What turns them back on: a close above today's 50-day EMA (it's above the new EMA too), and breadth back to 40%
+  const back = blocked ? [
+    m.egx30_close < m.egx30_ema50 && t('EGX30 closes above {level} ({pct})', { level: fmt.int(Math.ceil(m.egx30_ema50)), pct: fmt.pct(m.egx30_ema50 / m.egx30_close - 1, 1) }),
+    m.weak_breadth && b && t('at least 40% of stocks are above their 50-day average (now {p})', { p: fmt.pct(b.above50, 0, false) }),
+  ].filter(Boolean) : [];
   return html`<div class=${cls('card light', lt)}>
     <div class="light-head"><span class="light-dot"></span><b>${t(head)}</b></div>
     <p class="light-text">${text}</p>
+    ${back.length > 0 && html`<p class="light-text"><b>${t('New BUYs come back once')}</b> ${back.join(` ${t('and')} `)}.</p>`}
     <div class="light-nums">
       <a href="#/egx30">EGX30 <b class=${tone(gap)}>${fmt.pct(gap, 1)}</b> ${t('vs its 50-day average')}</a>
       ${b && html`<a href="#/market">${t('Stocks in uptrend')} <b class=${b.above50 >= 0.5 ? 'up' : b.above50 < 0.4 ? 'down' : 'warn'}>${fmt.pct(b.above50, 0, false)}</b></a>`}

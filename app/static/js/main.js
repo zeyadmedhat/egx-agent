@@ -2,29 +2,12 @@
 // bottom bar, and page routing.
 import {
   html, render, useState, useEffect, useStore, useRoute, pollStatus, loadStocks, setTheme, fmt, cls, go, stockHref,
-  loadMe, api, toast, setStore, setLang, refreshAll, STATIC,
+  loadMe, api, toast, setStore, setLang, refreshAll, STATIC, store,
 } from './lib.js';
-import { t } from './i18n.js';
+import { t, loadArabic } from './i18n.js';
 import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm, Change, Disclaimer } from './ui.js';
 import { AuthScreen } from './pages/login.js';
 import { UnlockScreen } from './pages/unlock.js';
-import { AdminPage } from './pages/admin.js';
-import { TodayPage } from './pages/today.js';
-import { PicksPage, RecordPage } from './pages/picks.js';
-import { MarketPage } from './pages/market.js';
-import { HeatmapPage } from './pages/heatmap.js';
-import { Egx30Page } from './pages/egx30.js';
-import { PredictPage } from './pages/predict.js';
-import { StockPage } from './pages/stock.js';
-import { CalcPage } from './pages/calc.js';
-import { ScreenerPage } from './pages/screener.js';
-import { DividendsPage } from './pages/dividends.js';
-import { WatchlistPage } from './pages/watchlist.js';
-import { NewsPage } from './pages/news.js';
-import { PortfolioPage } from './pages/portfolio.js';
-import { PaperPage } from './pages/paper.js';
-import { BacktestPage } from './pages/backtest.js';
-import { SettingsPage } from './pages/settings.js';
 
 // Opened inside Telegram (the bot's "Open the app" button, a mini app): Telegram puts who opened it after the # and the
 // bot's page after ?go=. Both are read once and the address goes back to the page's own #/route.
@@ -57,10 +40,21 @@ const TELEGRAM = (() => {
 })();
 
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
+// Each page's code loads when it's first opened, not all of it before the first page shows.
+function lazy(file, name) {
+  let Page = null;
+  return function Lazy(props) {
+    const [, loaded] = useState(0);
+    if (Page) return html`<${Page} ...${props} />`;
+    import(`./pages/${file}.js`).then(m => { Page = m[name]; loaded(1); });
+    return html`<p class="faint" style="padding:24px 4px">${t('Loading…')}</p>`;
+  };
+}
+
 const PAGES = Object.fromEntries(Object.entries({
-  today: TodayPage, signals: PicksPage, record: RecordPage, news: NewsPage, market: MarketPage, egx30: Egx30Page, heatmap: HeatmapPage, predict: PredictPage, dividends: DividendsPage,
-  stock: StockPage, screener: ScreenerPage, watchlist: WatchlistPage, portfolio: PortfolioPage, paper: PaperPage,
-  calc: CalcPage, backtest: BacktestPage, settings: SettingsPage, admin: AdminPage,
+  today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
+  stock: lazy('stock', 'StockPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
+  calc: lazy('calc', 'CalcPage'), backtest: lazy('backtest', 'BacktestPage'), settings: lazy('settings', 'SettingsPage'), admin: lazy('admin', 'AdminPage'),
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
 
 // The top bar's four sections and their tabs. Every page keeps its own #/address, so links from Telegram and old
@@ -288,6 +282,7 @@ function Root() {
   return html`<${App} />`;
 }
 
+if (store.lang === 'ar') await loadArabic();
 render(html`<${Root} />`, document.getElementById('app'));
 
 // The website keeps an offline copy of itself (sw.js), so it opens at once, even with weak or no signal.

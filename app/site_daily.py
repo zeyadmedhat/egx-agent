@@ -37,7 +37,7 @@ import requests
 from egx_agent import config, db, holidays, predict, record, scan
 from egx_agent.data import dividends, flows, fundamentals, macro, news, prices
 
-from . import alerts, backup, health, jobs, static_site, views
+from . import alerts, backup, health, jobs, macfeed, static_site, views
 
 
 NEWS_BUDGET_S = 120   # runs without a new close read the news too, a little less of it
@@ -165,7 +165,7 @@ def morning_texts(conn, cfg: dict, mine: dict[str, list], data_date: str) -> dic
 
 
 def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", site_url: str = "",
-        force_scan: bool = False, always_publish: bool = True, owner: str = "") -> dict:
+        force_scan: bool = False, always_publish: bool = True, owner: str = "", mac_feed: Path | None = None) -> dict:
     cfg = config.load_config()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = db.connect(db_path)
@@ -175,6 +175,15 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
         fresh = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0] == 0
         strategy = hashlib.sha256(json.dumps(static_site.strategy_settings(cfg), sort_keys=True).encode()).hexdigest()
         changed = db.get_meta(conn, "site_strategy") != strategy
+
+        if mac_feed and mac_feed.is_file():   # Mubasher's stock pages and owners, read on the Mac (app/macfeed.py)
+            try:
+                report["mac"] = macfeed.apply(conn, mac_feed, token)
+            except ValueError as exc:
+                report["mac"] = f"not read: {exc}"
+                warnings.append("The Mac's Mubasher file didn't open")
+            except Exception as exc:  # Mubasher's pages are then read here, as before
+                report["mac"] = f"not read ({type(exc).__name__})"
 
         try:   # EGX's holidays (a few looks a day), before deciding whether a close is due
             n = holidays.check(conn)
@@ -372,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", default=str(static_site.STRATEGY_PATH))
     p.add_argument("--out", default="_site")
     p.add_argument("--backup", default="", help="write the day's locked backup here (once a day)")
+    p.add_argument("--mac-feed", default="", help="the Mac's locked Mubasher file (app/macfeed.py), if downloaded")
     a = p.parse_args(argv)
     config.CONFIG_PATH = Path(a.config)
     password = os.environ.get("EGX_SITE_PASSWORD", "")
@@ -383,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
                  os.environ.get("TELEGRAM_TOKEN", "").strip(), os.environ.get("SITE_URL", ""),
                  os.environ.get("FORCE_SCAN", "").lower() == "true",
                  always_publish=os.environ.get("GITHUB_EVENT_NAME") != "schedule",
-                 owner=os.environ.get("OWNER_TELEGRAM", ""))
+                 owner=os.environ.get("OWNER_TELEGRAM", ""), mac_feed=Path(a.mac_feed) if a.mac_feed else None)
     publish, warnings = report.pop("publish"), report.pop("warnings")
     if a.backup:
         try:

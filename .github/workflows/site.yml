@@ -114,6 +114,15 @@ jobs:
           pip install -q -r requirements-ai.txt
           python -m egx_agent.ai_forecast run --db state/egx.db
 
+      - name: The Mac's Mubasher file
+        # Mubasher refuses GitHub's servers, so the Mac reads its stock pages and owners lists and sends them here,
+        # locked (app/macfeed.py). Missing or old, the run reads Mubasher itself as before.
+        continue-on-error: true
+        run: |
+          mkdir -p _macfeed
+          curl -fsSL --retry 3 -o _macfeed/mubasher.egxm \
+            "https://github.com/${{ github.repository }}/releases/download/mac-feed/mubasher.egxm" || rm -f _macfeed/mubasher.egxm
+
       - id: pages
         uses: actions/configure-pages@v6
 
@@ -130,7 +139,7 @@ jobs:
           TZ: Africa/Cairo
         run: >-
           python -m app.site_daily --db state/egx.db --config site/strategy.yaml --out _site
-          --backup _backup/state.egxb
+          --backup _backup/state.egxb --mac-feed _macfeed/mubasher.egxm
 
       - name: Tell the owner on Telegram that this run failed
         if: failure()

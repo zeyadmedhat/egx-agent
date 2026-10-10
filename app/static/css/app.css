@@ -1462,3 +1462,8 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .plan-facts > div { background: var(--panel-2); border-radius: var(--r); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 @media (max-width: 720px) { .plan-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .plan-card .plan-head { margin: 6px 0 0; font-size: 15px; }
+
+.inv-small { font-size: 12px; margin: 10px 0 2px; }
+/* "How far it could move" and the AI card inside their folds (stock page): the fold is the card and has the title */
+.fold-body > .range-card, .fold-body > .ai-card { border: 0; box-shadow: none; margin: 0; border-radius: 0; background: none; }
+.fold-body > .range-card .range-head h3, .fold-body > .ai-card .ai-head h3 { display: none; }

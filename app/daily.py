@@ -15,9 +15,9 @@ from pathlib import Path
 
 import requests
 
-from egx_agent import config, db, scan
+from egx_agent import config, db, holidays, scan
 
-from . import alerts, health, jobs, schedule
+from . import alerts, health, jobs, macfeed, schedule
 
 HEALTH = "http://127.0.0.1:8501/api/health"
 MAX_LOG = 200_000  # bytes
@@ -43,12 +43,27 @@ def dashboard_open(url: str = HEALTH) -> bool:
         return False
 
 
+def mac_feed(conn, cfg: dict) -> str:
+    """Mubasher's stock pages and owners lists for the website, which Mubasher refuses (app/macfeed.py)."""
+    if not (cfg.get("telegram_token") or "").strip():
+        return ""                 # no bot, no website to send to
+    try:
+        return f"Mubasher for the website: {macfeed.send(conn, cfg)}."
+    except Exception as exc:  # the website keeps what it has, and reads Mubasher itself once the file is old
+        return f"Mubasher for the website: not sent ({type(exc).__name__})."
+
+
 def run(db_path: Path | str, health_url: str = HEALTH) -> tuple[bool, str]:
-    if dashboard_open(health_url):
-        return True, "The dashboard is open, so it scans and sends alerts by itself."
     conn = db.connect(db_path)
     try:
         cfg = config.load_config()
+        if dashboard_open(health_url):
+            return True, " ".join(filter(None, ["The dashboard is open, so it scans and sends alerts by itself.",
+                                                 mac_feed(conn, cfg)]))
+        try:   # EGX's holidays, before deciding whether a close is due (a few looks a day)
+            holidays.check(conn)
+        except Exception:  # the days it knew still count
+            pass
         parts = []
         market: dict = {}
         if scan.scan_is_stale(conn):
@@ -71,6 +86,8 @@ def run(db_path: Path | str, health_url: str = HEALTH) -> tuple[bool, str]:
             parts.append(f"Past signals by score {odds}.")
         if alarms := jobs.check_health(None, conn, cfg, {**market, "model": model}):
             parts.append(f"Alarms: {alarms}.")
+        if sent := mac_feed(conn, cfg):
+            parts.append(sent)
         return ok and not model.startswith("retraining failed"), " ".join(parts)
     finally:
         conn.close()

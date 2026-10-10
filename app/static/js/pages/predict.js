@@ -97,7 +97,7 @@ function WeekTable({ rows, base, top }) {
     { key: `rank${WK}`, label: '#', align: 'r', width: '64px',
       render: r => html`<span class="faint">${fmt.int(r[`rank${WK}`])}</span> <${RankMove} now=${r[`rank${WK}`]} before=${r[`prev_rank${WK}`]} />` },
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
-    { key: `p${WK}`, label: 'Chance', align: 'r', title: 'Chance it rises to the target before it falls to the stop, within 5 sessions',
+    { key: `p${WK}`, label: 'Chance in 1 week', align: 'r', title: 'Chance it rises to the target before it falls to the stop, within 5 sessions',
       render: r => html`<${Chance} p=${r[`p${WK}`]} base=${base} />${r.level === 'good' && r[`rank${WK}`] <= top
         && html`<div><span class="model-pick" title=${t('One of its top 10% today, in an uptrend, while the market is healthy')}>${t('Strong')}</span></div>`}` },
     { key: `move${WK}`, label: 'Target / stop', align: 'r', title: "The week's target and stop: 1.5× its daily range either way",

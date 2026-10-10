@@ -161,7 +161,10 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             conn, syms, years=cfg["history_years"], aliases=cfg.get("symbol_aliases"),
             progress=lambda d, t, s: say(0.05 + 0.75 * d / t, f"Downloading prices {d}/{t} ({s})"),
         )
-        if res["failed"]:
+        if len(res["failed"]) > 8:     # a few names, not a screenful of them
+            warnings.append(f"No price data from TradingView for {len(res['failed'])} stocks: "
+                            f"{', '.join(res['failed'][:5])}, and {len(res['failed']) - 5} more")
+        elif res["failed"]:
             warnings.append(f"No price data from TradingView for: {', '.join(res['failed'])}")
         checked.append("TradingView prices")
         if prices.INDEX_SYMBOL in res["failed"] or len(res["failed"]) > PRICES_FAILING * len(syms):
@@ -195,9 +198,11 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         except Exception as exc:  # the dividend pages show what was downloaded before
             warnings.append(f"Dividend data not updated ({type(exc).__name__})")
             failed.append("Dividends (TradingView)")
-        try:   # free float's second source, a few stocks a run
-            ownership.update(conn, [r[0] for r in conn.execute(
-                "SELECT DISTINCT symbol FROM prices WHERE symbol != ? AND date >= date('now', '-30 days')", (prices.INDEX_SYMBOL,))])
+        try:   # free float's second source, a few stocks a run (sent by the Mac when Mubasher refuses this computer)
+            if not news.mac_sends(conn):
+                ownership.update(conn, [r[0] for r in conn.execute(
+                    "SELECT DISTINCT symbol FROM prices WHERE symbol != ? AND date >= date('now', '-30 days')",
+                    (prices.INDEX_SYMBOL,))])
         except Exception as exc:  # the site shows the free floats it has
             warnings.append(f"Owners (Mubasher) not updated ({type(exc).__name__})")
         say(0.812, "Reading past dividends from TradingView…")

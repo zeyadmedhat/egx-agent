@@ -788,7 +788,8 @@ def test_arabic_translations_keep_their_placeholders():
     import json
     import re
     src = (ROOT / "app" / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
-    body = src[src.index("export const AR = {"):]
+    ar = (ROOT / "app" / "static" / "js" / "ar.js").read_text(encoding="utf-8")       # loaded only for Arabic
+    body = ar[ar.index("export const AR = {"):]
     pairs = re.findall(r'^  ("(?:[^"\\]|\\.)*"): ("(?:[^"\\]|\\.)*"),$', body, re.M)
     assert len(pairs) > 400
     keys = [json.loads(k) for k, _ in pairs]

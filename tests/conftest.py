@@ -46,6 +46,7 @@ def _no_news_downloads(monkeypatch):
 def _no_tradingview_lists(monkeypatch):
     """Nor TradingView's stock list, dividends, company numbers, hourly bars or the Egypt data and gold, nor the
     foreign / Arab / Egyptian buying (tests pass their own rows, text or fetcher)."""
+    from egx_agent import holidays
     from egx_agent.data import dividends, flows, macro, prices, universe
 
     def offline(*a, **kw):
@@ -63,3 +64,6 @@ def _no_tradingview_lists(monkeypatch):
     monkeypatch.setattr(flows, "update_split", lambda conn, session=None, **kw: split(conn, session, **kw) if session
                         else offline())
     monkeypatch.setattr(prices.TvProvider, "fetch_hourly", lambda self, symbol, n_bars: None)
+    fetch = holidays.fetch            # nor EGX's holidays, unless the test passes its own feed
+    monkeypatch.setattr(holidays, "fetch", lambda session=None, today=None: fetch(session, today) if session
+                        else offline())

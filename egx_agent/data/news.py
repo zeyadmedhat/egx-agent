@@ -50,6 +50,7 @@ MUBASHER_PAGE = 25            # headlines on one of a stock's news pages
 MUBASHER_PAGES = 3            # a stock's older pages are read too while every headline on one was new (the first time)
 SOON_DAYS = 30                # a stock with a dividend, bonus shares or a rights issue going ex this soon is read early
 REREAD_H = 12                 # ... unless its pages were read in the last 12 hours
+MAC_FRESH = timedelta(days=3)  # how long a Mac file stands in for Mubasher's stock pages (app/macfeed.py)
 KEEP_DAYS = 730               # market news older than this is dropped; a stock's own news is kept
 
 # Corporate actions: Mubasher's English type -> our kind (anything else is "other")
@@ -321,6 +322,13 @@ def update_actions(conn: sqlite3.Connection, fetcher: Fetcher | None = None) -> 
     return save_corporate_actions(conn, fetch_corporate_actions(fetcher or Fetcher(), 20 if full else 1) + KNOWN_ACTIONS)
 
 
+def mac_sends(conn: sqlite3.Connection) -> bool:
+    """Has the Mac sent Mubasher's stock pages and owners lists lately (app/macfeed.py)? Mubasher refuses GitHub's
+    servers since 29 Sep 2026, so the website's run then leaves those pages to the Mac."""
+    at = db.get_meta(conn, "mac_feed")
+    return bool(at) and datetime.now() - datetime.fromisoformat(at) < MAC_FRESH
+
+
 def _checked(conn) -> dict:
     try:
         return json.loads(db.get_meta(conn, "news_checked") or "{}")
@@ -378,6 +386,9 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
                            key=lambda s: checked.get(s, {}).get("mubasher", ""))
     start = time.monotonic()
     misses = 0
+    mac = mac_sends(conn)
+    if mac:                       # the Mac read them: counts as working, so an old alarm about them clears
+        res["tried"].append("Mubasher stock pages")
     for sym in order:
         if time.monotonic() - start > budget_s:
             break
@@ -388,6 +399,8 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
             if items is not None:
                 res["new"] += save_news(conn, items)
                 state["tv"] = datetime.now().isoformat(timespec="seconds")
+        if mac:
+            continue
         ok = True
         for lang in ("ar", "en"):
             for page in range(1, MUBASHER_PAGES + 1):      # .../news, .../news/2, ...
