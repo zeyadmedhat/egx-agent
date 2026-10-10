@@ -19,10 +19,13 @@ class Page:
         sym = url.split("/stocks/")[1].split("/")[0]
         self.asked.append(sym)
 
+        status = 403 if self.refused else 500 if sym == "BAD" else 200
+
         def check():
-            if self.refused:
-                raise OSError("403")
-        return type("R", (), {"text": self.pages.get(sym, "<p>no list</p>"), "raise_for_status": staticmethod(check)})
+            if status >= 400:
+                raise OSError(status)
+        return type("R", (), {"text": self.pages.get(sym, "<p>no list</p>"), "status_code": status,
+                              "raise_for_status": staticmethod(check)})
 
 
 def test_the_owners_list_gives_the_free_float_and_is_read_a_few_stocks_a_run(tmp_path):
@@ -38,8 +41,9 @@ def test_the_owners_list_gives_the_free_float_and_is_read_a_few_stocks_a_run(tmp
     assert ownership.update(conn, ["AAA", "BBB", "CCC"], f=f) == 0                                     # fresh
     with pytest.raises(OSError):                           # refused: nothing is marked as read
         ownership.update(conn, ["DDD"], f=Page({}, refused=True))
+    assert ownership.update(conn, ["BAD", "EEE"], f=f) == 2              # a page Mubasher can't show: the next one
     assert dict(conn.execute("SELECT symbol, free_float FROM ownership").fetchall()) == {
-        "AAA": 0.5218, "BBB": None, "CCC": None}
+        "AAA": 0.5218, "BBB": None, "CCC": None, "BAD": None, "EEE": None}
 
 
 def test_one_number_when_the_sources_agree_both_when_they_dont():

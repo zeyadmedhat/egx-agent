@@ -14,7 +14,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta
 
-from .news import MUBASHER, Fetcher
+from .news import BROKEN, MUBASHER, Fetcher
 
 BUDGET = 12                  # stocks a run (a minute at Mubasher's 5 seconds a page)
 REFRESH_DAYS = 30            # owners change rarely
@@ -48,8 +48,9 @@ def update(conn: sqlite3.Connection, symbols: list[str], budget: int = BUDGET, f
     f.last.setdefault(MUBASHER["en"].split("/")[2], time.monotonic())    # the news step may have just read it
     for sym in due:
         r = f.get(f"{MUBASHER['en']}/markets/EGX/stocks/{sym}/profile")
-        r.raise_for_status()            # refused (as GitHub's servers are): stop, and don't mark the rest as read
-        holders = parse(r.text)
+        if r.status_code not in BROKEN:
+            r.raise_for_status()        # refused or down: stop, and don't mark the rest as read
+        holders = parse(r.text) if r.status_code == 200 else []      # a page Mubasher can't show: next month
         conn.execute("INSERT OR REPLACE INTO ownership(symbol, holders, free_float, updated) VALUES (?,?,?,?)",
                      (sym, json.dumps(holders, ensure_ascii=False), free_float(holders),
                       datetime.now().isoformat(timespec="seconds")))

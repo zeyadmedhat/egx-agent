@@ -115,8 +115,8 @@ jobs:
           python -m egx_agent.ai_forecast run --db state/egx.db
 
       - name: The Mac's Mubasher file
-        # Mubasher refuses GitHub's servers, so the Mac reads its stock pages and owners lists and sends them here,
-        # locked (app/macfeed.py). Missing or old, the run reads Mubasher itself as before.
+        # The Mac's Mubasher stock news and owners lists, locked (app/macfeed.py). Missing or old, the run reads the
+        # owners itself as before.
         continue-on-error: true
         run: |
           mkdir -p _macfeed

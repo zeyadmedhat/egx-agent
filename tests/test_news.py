@@ -84,7 +84,7 @@ class FakeFetcher:
         self.asked.append((url, params))
         for key, body in self.routes.items():
             if key in url:
-                return Resp(body(params) if callable(body) else body)
+                return body if isinstance(body, Resp) else Resp(body(params) if callable(body) else body)
         raise ConnectionError(url)
 
 
@@ -187,6 +187,27 @@ def test_a_stock_going_ex_soon_comes_early_and_a_new_stocks_older_pages_are_read
     f.asked.clear()
     news.update(conn, first=["COMI"], budget_s=60, fetcher=f)
     assert not [u for u, _ in f.asked if u.endswith("/news/2")]            # page 1 had nothing new: no need
+
+
+def test_a_stock_page_mubasher_cant_show_goes_to_the_back_instead_of_stopping_the_run(tmp_path):
+    """From 29 Sep 2026 three never-read stocks whose pages are always a 500 came first and stopped every run."""
+    conn = _market(tmp_path)
+    broken = Resp("<html>error</html>", 500)
+    f = FakeFetcher({"corporate-actions": {"rows": [], "numberOfPages": 1}, "news-headlines": _tv([]),
+                     "ABUK/news": broken, "COMI/news": broken,
+                     "english.mubasher.info/markets": "<html>no news</html>", "www.mubasher.info/markets": MUBASHER_PAGE})
+    res = news.update(conn, budget_s=60, fetcher=f)
+    assert "Mubasher stock pages" not in res["failed"] and res["stocks"] == 1           # MHOT was read
+    checked = json.loads(db.get_meta(conn, "news_checked"))
+    assert all("mubasher" in checked[s] for s in ("ABUK", "COMI", "MHOT"))            # all to the back of the queue
+    monkey = FakeFetcher({"corporate-actions": {"rows": [], "numberOfPages": 1}, "news-headlines": _tv([]),
+                          "/markets/EGX/stocks/": broken, "english.mubasher.info": "<html>no news</html>",
+                          "www.mubasher.info": "<html>no news</html>"})
+    news.BROKEN_RUN, before = 2, news.BROKEN_RUN
+    try:                                                                                # every page an error: down
+        assert "Mubasher stock pages" in news.update(conn, budget_s=60, fetcher=monkey)["failed"]
+    finally:
+        news.BROKEN_RUN = before
 
 
 def test_cautions_for_a_buyer(tmp_path):

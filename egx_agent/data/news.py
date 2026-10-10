@@ -50,7 +50,11 @@ MUBASHER_PAGE = 25            # headlines on one of a stock's news pages
 MUBASHER_PAGES = 3            # a stock's older pages are read too while every headline on one was new (the first time)
 SOON_DAYS = 30                # a stock with a dividend, bonus shares or a rights issue going ex this soon is read early
 REREAD_H = 12                 # ... unless its pages were read in the last 12 hours
-MAC_FRESH = timedelta(days=3)  # how long a Mac file stands in for Mubasher's stock pages (app/macfeed.py)
+# A few stocks' pages are always an error on Mubasher's side (AMII, ANFI, GOUR in Oct 2026): they go to the back of
+# the queue. Before, three of them in a row stopped every run as if the site were down, from 29 Sep 2026.
+BROKEN = (404, 500)
+BROKEN_RUN = 10               # ... unless this many in a row are: then the site is down
+MAC_FRESH = timedelta(days=3)  # how long a Mac file stands in for Mubasher's owners lists (app/macfeed.py)
 KEEP_DAYS = 730               # market news older than this is dropped; a stock's own news is kept
 
 # Corporate actions: Mubasher's English type -> our kind (anything else is "other")
@@ -323,8 +327,7 @@ def update_actions(conn: sqlite3.Connection, fetcher: Fetcher | None = None) -> 
 
 
 def mac_sends(conn: sqlite3.Connection) -> bool:
-    """Has the Mac sent Mubasher's stock pages and owners lists lately (app/macfeed.py)? Mubasher refuses GitHub's
-    servers since 29 Sep 2026, so the website's run then leaves those pages to the Mac."""
+    """Has the Mac sent Mubasher's owners lists lately (app/macfeed.py)? The website's run then leaves them to it."""
     at = db.get_meta(conn, "mac_feed")
     return bool(at) and datetime.now() - datetime.fromisoformat(at) < MAC_FRESH
 
@@ -385,10 +388,7 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
     order = first + sorted((s for s in symbols if s not in first),
                            key=lambda s: checked.get(s, {}).get("mubasher", ""))
     start = time.monotonic()
-    misses = 0
-    mac = mac_sends(conn)
-    if mac:                       # the Mac read them: counts as working, so an old alarm about them clears
-        res["tried"].append("Mubasher stock pages")
+    misses = broke = 0
     for sym in order:
         if time.monotonic() - start > budget_s:
             break
@@ -399,14 +399,13 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
             if items is not None:
                 res["new"] += save_news(conn, items)
                 state["tv"] = datetime.now().isoformat(timespec="seconds")
-        if mac:
-            continue
-        ok = True
+        ok, bad = True, False
         for lang in ("ar", "en"):
             for page in range(1, MUBASHER_PAGES + 1):      # .../news, .../news/2, ...
                 url = f"{MUBASHER[lang]}/markets/EGX/stocks/{sym}/news" + (f"/{page}" if page > 1 else "")
                 r = attempt("Mubasher stock pages", lambda: f.get(url))
                 if r is None or r.status_code != 200:
+                    bad = bad or (r is not None and page == 1 and r.status_code in BROKEN)
                     ok = ok and page > 1
                     break
                 items = parse_mubasher(r.text, lang)
@@ -414,10 +413,16 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
                 res["new"] += new
                 if len(items) < MUBASHER_PAGE or new < len(items):     # the last page, or it reached what we have
                     break
-        if ok:
+        if ok or bad:                  # a page Mubasher can't show goes to the back of the queue, like a read one
             state["mubasher"] = datetime.now().isoformat(timespec="seconds")
+        if ok:
             res["stocks"] += 1
-            misses = 0
+            misses = broke = 0
+        elif bad:
+            broke += 1
+            if broke >= BROKEN_RUN:    # every page an error: the site is down after all
+                res["failed"].append("Mubasher stock pages")
+                break
         else:
             misses += 1
             if misses >= 3:            # the site isn't answering: try again next run

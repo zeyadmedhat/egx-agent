@@ -1,10 +1,11 @@
 """Mubasher's stock news and owners lists, read on your Mac and sent to the website's run.
 
-Since 29 Sep 2026 Mubasher refuses GitHub's servers but still answers the Mac (at its 5 seconds a page). So after
-each daily run the Mac locks what it read (gzip + AES-256-GCM, the key made from the Telegram bot token, which only
-the Mac and the website's secrets know) and puts it on the repository's "mac-feed" release. The website's run
-downloads it (.github/workflows/site.yml), opens it and adds what's new; while a Mac file is under
-news.MAC_FRESH old, the run doesn't ask Mubasher for those pages itself.
+After each daily run the Mac locks what it read from Mubasher (gzip + AES-256-GCM, the key made from the Telegram bot
+token, which only the Mac and the website's secrets know) and puts it on the repository's "mac-feed" release. The
+website's run downloads it (.github/workflows/site.yml) and adds what's new: more stocks' news than its own rotation
+reaches, and the owners lists, which it then leaves to the Mac while the file is under news.MAC_FRESH old.
+(Built in Oct 2026 when Mubasher's stock pages seemed to refuse GitHub; it was a few broken pages stopping the
+queue, see news.BROKEN. The website reads the stock news itself too.)
 
     python -m app.macfeed send                                     # on the Mac (app/daily.py does it)
     python -m app.macfeed apply --file _macfeed/mubasher.egxm      # the website's run (app/site_daily.py does it)

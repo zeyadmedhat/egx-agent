@@ -198,7 +198,7 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         except Exception as exc:  # the dividend pages show what was downloaded before
             warnings.append(f"Dividend data not updated ({type(exc).__name__})")
             failed.append("Dividends (TradingView)")
-        try:   # free float's second source, a few stocks a run (sent by the Mac when Mubasher refuses this computer)
+        try:   # free float's second source, a few stocks a run (the Mac's file brings them, app/macfeed.py)
             if not news.mac_sends(conn):
                 ownership.update(conn, [r[0] for r in conn.execute(
                     "SELECT DISTINCT symbol FROM prices WHERE symbol != ? AND date >= date('now', '-30 days')",

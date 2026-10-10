@@ -44,7 +44,7 @@ def dashboard_open(url: str = HEALTH) -> bool:
 
 
 def mac_feed(conn, cfg: dict) -> str:
-    """Mubasher's stock pages and owners lists for the website, which Mubasher refuses (app/macfeed.py)."""
+    """Mubasher's stock news and owners lists the Mac read, for the website (app/macfeed.py)."""
     if not (cfg.get("telegram_token") or "").strip():
         return ""                 # no bot, no website to send to
     try:
