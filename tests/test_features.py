@@ -434,12 +434,12 @@ def test_daily_scan_install_and_remove(tmp_path, monkeypatch):
 
 
 def test_daily_scan_leaves_the_work_to_an_open_dashboard(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")     # never your own settings and bot
     monkeypatch.setattr(daily, "dashboard_open", lambda url=None: True)
     ok, msg = daily.run(tmp_path / "t.db")
     assert ok and "dashboard is open" in msg
     monkeypatch.setattr(daily, "dashboard_open", lambda url=None: False)
     monkeypatch.setattr(daily.scan, "scan_is_stale", lambda conn, *_: False)
-    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
     ok, msg = daily.run(tmp_path / "t.db")
     assert ok and msg == "Prices are up to date. Telegram: off."
 

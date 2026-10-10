@@ -64,6 +64,8 @@ def _no_tradingview_lists(monkeypatch):
     monkeypatch.setattr(flows, "update_split", lambda conn, session=None, **kw: split(conn, session, **kw) if session
                         else offline())
     monkeypatch.setattr(prices.TvProvider, "fetch_hourly", lambda self, symbol, n_bars: None)
+    from app import macfeed
+    monkeypatch.setattr(macfeed, "upload", offline)    # nor the Mac's file to the real release
     fetch = holidays.fetch            # nor EGX's holidays, unless the test passes its own feed
     monkeypatch.setattr(holidays, "fetch", lambda session=None, today=None: fetch(session, today) if session
                         else offline())

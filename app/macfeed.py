@@ -73,20 +73,22 @@ def upload(path: Path) -> None:
                    check=True, capture_output=True, timeout=180)
 
 
-def send(conn: sqlite3.Connection, cfg: dict, now: datetime | None = None, up=upload) -> str:
+def send(conn: sqlite3.Connection, cfg: dict, now: datetime | None = None, up=None) -> str:
     """On the Mac: lock and upload what it read from Mubasher, unless it's unchanged and was sent lately."""
     token = (cfg.get("telegram_token") or "").strip()
     if not token:
         return "not sent (no Telegram bot token in the settings)"
     now = now or datetime.now()
     payload = export(conn)
+    if not payload["news"] and not payload["owners"]:
+        return "not sent (nothing read from Mubasher yet)"     # an empty file would tell the website nothing
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     last = json.loads(db.get_meta(conn, "mac_feed_sent") or "{}")
     if last.get("hash") == digest and now - datetime.fromisoformat(last["at"]) < RESEND:
         return "unchanged"
     FILE.parent.mkdir(parents=True, exist_ok=True)
     FILE.write_bytes(lock({**payload, "made": now.isoformat(timespec="seconds")}, token))
-    up(FILE)
+    (up or upload)(FILE)
     db.set_meta(conn, "mac_feed_sent", json.dumps({"at": now.isoformat(timespec="seconds"), "hash": digest}))
     return f"sent ({len(payload['news'])} headlines, {len(payload['owners'])} owners lists)"
 
