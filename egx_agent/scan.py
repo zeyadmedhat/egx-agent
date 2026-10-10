@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from . import breadth, corporate, db, holidays, levels, portfolio, predict, risk, strategy
-from .data import dividends, flows, macro, news, prices, shariah, universe
+from .data import dividends, flows, macro, news, ownership, prices, shariah, universe
 from .indicators import add_indicators
 
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -195,6 +195,11 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         except Exception as exc:  # the dividend pages show what was downloaded before
             warnings.append(f"Dividend data not updated ({type(exc).__name__})")
             failed.append("Dividends (TradingView)")
+        try:   # free float's second source, a few stocks a run
+            ownership.update(conn, [r[0] for r in conn.execute(
+                "SELECT DISTINCT symbol FROM prices WHERE symbol != ? AND date >= date('now', '-30 days')", (prices.INDEX_SYMBOL,))])
+        except Exception as exc:  # the site shows the free floats it has
+            warnings.append(f"Owners (Mubasher) not updated ({type(exc).__name__})")
         say(0.812, "Reading past dividends from TradingView…")
         failed += history_step(conn, checked)
         say(0.815, "Downloading news, dividends and bonus shares…")

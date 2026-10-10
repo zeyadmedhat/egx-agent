@@ -121,7 +121,7 @@ export function StockPage({ route }) {
           ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} rg=${data.range} />`}
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
           ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
-          ${data.fundamentals && html`<${CompanyPanel} f=${data.fundamentals} />`}
+          ${(data.fundamentals || data.free_float) && html`<${CompanyPanel} f=${data.fundamentals || { values: {} }} ff=${data.free_float} />`}
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
         </aside>
@@ -450,24 +450,27 @@ const COMPANY = [
   ['net_margin', 'Net margin', v => fmt.pct(v, 0, false)],
   ['roe', 'Return on equity', v => fmt.pct(v, 0, false)],
   ['debt_equity', 'Debt / equity', v => `${fmt.num(v, 2)}×`],
-  ['free_float', 'Free float', v => fmt.pct(v, 0, false)],
 ];
 const GROWTH = new Set(['eps_growth', 'revenue_growth']);
 
-function CompanyPanel({ f }) {
+function CompanyPanel({ f, ff }) {
   const v = f.values, med = f.sector_median || {};
   const rows = COMPANY.filter(([k]) => v[k] != null);
   return html`<${Fold} title="Company numbers"
-      hint=${v.pe > 0 ? t('P/E {pe}', { pe: fmt.num(v.pe, 1) }) : v.market_cap ? t('Worth {v}', { v: `${fmt.short(v.market_cap)} ${t('EGP')}` }) : ''}>
+      hint=${v.pe > 0 ? t('P/E {pe}', { pe: fmt.num(v.pe, 1) }) : v.market_cap ? t('Worth {v}', { v: `${fmt.short(v.market_cap)} ${t('EGP')}` })
+        : ff && ff.value != null ? t('Free float {p}', { p: fmt.pct(ff.value, 0, false) }) : ''}>
     <div class="stat-list">${rows.map(([k, label, show]) => html`
       <span class="k">${t(label)}</span>
       <span class=${cls('v', GROWTH.has(k) && tone(v[k]))}>${show(v[k])}${k !== 'market_cap' && med[k] != null
         ? html`<span class="faint" style="font-weight:500"> · ${t('sector')} ${show(med[k])}</span>` : ''}</span>`)}
+      ${ff && html`<span class="k">${t('Free float')}</span><span class="v">${ff.value != null ? fmt.pct(ff.value, 0, false)
+        : html`${fmt.pct(ff.tv, 0, false)} ${t('or')} ${fmt.pct(ff.mub, 0, false)}`}<span class="faint" style="font-weight:500"> · ${t(
+        ff.value == null ? 'TradingView and Mubasher disagree' : ff.tv != null && ff.mub != null ? 'TradingView and Mubasher agree' : ff.tv != null ? 'TradingView' : 'Mubasher\'s owners')}</span></span>`}
     </div>
     ${rows.length < COMPANY.length && html`<p class="faint" style="font-size:12px;margin-top:8px">${t('TradingView has no figure for the rest.')}</p>`}
     <${More} label="What these mean"><p>${t(COMPANY_HOW)}</p><//>
-    <p class="faint" style="font-size:11.5px;margin-top:8px">${t('From TradingView, the latest yearly figures, checked {date}. Sector: the middle of {n} companies in {sector}.', {
-      date: fmt.date((f.updated || '').slice(0, 10)), n: fmt.int(f.peers), sector: t(f.sector || 'Other') })}</p><//>`;
+    ${f.updated && html`<p class="faint" style="font-size:11.5px;margin-top:8px">${t('From TradingView, the latest yearly figures, checked {date}. Sector: the middle of {n} companies in {sector}.', {
+      date: fmt.date((f.updated || '').slice(0, 10)), n: fmt.int(f.peers), sector: t(f.sector || 'Other') })}</p>`}<//>`;
 }
 
 const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower is cheaper, but a growing company usually '
@@ -475,7 +478,7 @@ const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower
   + 'against the 12 before (in EGP, so inflation lifts it too). Net margin: profit from each pound of sales. Return on '
   + 'equity: yearly profit on the owners\' money. Debt / equity: borrowing against the owners\' money; over 1 is a lot for '
   + 'most companies except banks. Free float: the share of the company anyone can trade, not held by owners of 5% or more, '
-  + 'insiders or a depository bank (TradingView\'s count, stricter than the exchange\'s). A small float moves more on less money. '
+  + 'insiders or a depository bank (TradingView\'s count, and 100% minus the 5% holders on Mubasher\'s list; both are stricter than the exchange\'s count and they can disagree). A small float moves more on less money. '
   + 'The agent\'s signals don\'t use these: they are here to know the company.';
 
 // Your position: the same card as Today and My Portfolio (live price, P&L, stop to target), and where the stop and

@@ -162,6 +162,12 @@ CREATE TABLE IF NOT EXISTS dividend_history (
     yield REAL NOT NULL,            -- the dividend ÷ the close the session before (the price drop it explains)
     PRIMARY KEY (symbol, ex_date)
 );
+CREATE TABLE IF NOT EXISTS ownership (
+    symbol TEXT PRIMARY KEY,        -- each company's owners from Mubasher's profile page (data/ownership.py)
+    holders TEXT NOT NULL,          -- JSON: [[name, percent], ...] as listed
+    free_float REAL,                -- 1 - the holders of 5% or more; NULL without a usable list
+    updated TEXT
+);
 CREATE TABLE IF NOT EXISTS earnings (
     symbol TEXT PRIMARY KEY,        -- when each company's results come, from TradingView (data/dividends.py)
     next_date TEXT,                 -- TradingView's expected date for the next results ('' if none or unreliable)

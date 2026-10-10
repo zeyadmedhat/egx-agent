@@ -161,7 +161,7 @@ function PickCard({ s, m, wk, odds, fee, model, bell }) {
         <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}<span class="faint"> · ${tn(i.sector)}</span></div>
       </div>
     </div>
-    <div class="sig-tags"><${Badges} info=${i} compact /><${IndexPills} info=${i} />${s.free_float != null && html`<span class="idx-pill" title=${t('Free float: the share of the company anyone can trade (TradingView)')}>${t('Free float {p}', { p: fmt.pct(s.free_float, 0, false) })}</span>`}</div>
+    <div class="sig-tags"><${Badges} info=${i} compact /><${IndexPills} info=${i} />${s.free_float && html`<span class="idx-pill" title=${t('Free float: the share of the company anyone can trade (TradingView, Mubasher)')}>${t('Free float {p}', { p: s.free_float.value != null ? fmt.pct(s.free_float.value, 0, false) : `${fmt.pct(Math.min(s.free_float.tv, s.free_float.mub), 0, false)}–${fmt.pct(Math.max(s.free_float.tv, s.free_float.mub), 0, false)}` })}</span>`}</div>
     <${Opinions} s=${s} wk=${wk} />
     <div>
       <div class="buy-line"><span><${Term} k="buyupto">${t('Buy up to')}<//> <b>${fmt.price(s.entry_high)}</b></span>

@@ -12,7 +12,7 @@ import pandas as pd
 
 from egx_agent import (ai_forecast, breadth, config, corporate, db, holidays, levels, mood, portfolio, predict, ranges,
                        record, risk, scan, strategy)
-from egx_agent.data import dividends, flows, fundamentals, macro, news, prices, shariah, universe
+from egx_agent.data import dividends, flows, fundamentals, macro, news, ownership, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
 STATUS_ORDER = {"ADJUST": 0, "EXIT": 1, "BOUNCE": 2, "REVIEW": 3, "TIGHTEN STOP": 4, "HOLD": 5, "NO DATA": 6}
@@ -620,6 +620,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
                              **{k: preds.get(k) for k in ("base", "count", "date", "top_n", "bands")}}
     out["corporate"] = corporate_history(d.conn, sym, last.close)
     out["fundamentals"] = dividends.company_numbers(d.conn, sym, d.table["sector"])
+    out["free_float"] = free_floats(d).get(sym)
     out["news"] = news.stock_news(d.conn, sym)
     out["cautions"] = cautions_map(d).get(sym, [])
     out["ai"] = ai_view(d, sym, ind["close"])
@@ -917,17 +918,17 @@ def company_values(conn: sqlite3.Connection) -> dict[str, dict]:
             for r in conn.execute("SELECT symbol, data FROM fundamentals")}
 
 
-def free_floats(d: Data) -> dict[str, float]:
-    """Each company's free float (TradingView, data/dividends.py): shown, not used. Tested in 2026-10 as inputs to the
-    10-session model (float %, the float's value, its rank, how fast it trades): the model's own top picks did a
-    little better, but the rules plus its picks made 25.8% a year against 32.5% and won fewer trades, on all 4 seeds."""
+def free_floats(d: Data) -> dict[str, dict]:
+    """Each company's free float from TradingView (data/dividends.py) and Mubasher's owners (data/ownership.py):
+    {"value"} when they agree or only one has it, both when they don't (ownership.combined). Shown, not used. Tested
+    in 2026-10 as inputs to the 10-session model (float %, the float's value, its rank, how fast it trades): the
+    model's own top picks did a little better, but the rules plus its picks made 25.8% a year against 32.5% and won
+    fewer trades, on all 4 seeds."""
     def build():
-        out = {}
-        for r in d.conn.execute("SELECT symbol, data FROM fundamentals"):
-            v = json.loads(r["data"]).get("free_float")
-            if v is not None:
-                out[r["symbol"]] = v
-        return out
+        tv = {r["symbol"]: json.loads(r["data"]).get("free_float") for r in d.conn.execute("SELECT symbol, data FROM fundamentals")}
+        mub = dict(d.conn.execute("SELECT symbol, free_float FROM ownership").fetchall())
+        out = {s: ownership.combined(tv.get(s), mub.get(s)) for s in set(tv) | set(mub)}
+        return {s: v for s, v in out.items() if v}
     return d.cache.get(d.version, ("free_floats",), build)
 
 
