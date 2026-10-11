@@ -16,8 +16,8 @@ def test_the_macs_mubasher_file_reaches_the_website(tmp_path, monkeypatch):
     news.save_news(mac, [{"id": "m1", "source": "mubasher", "lang": "ar", "published": day, "title": "توزيع أرباح",
                           "url": "u"}], "AAA")
     cols = "INSERT INTO ownership(symbol, holders, free_float, updated, af_holders, af_free_float) VALUES "
-    mac.execute(cols + "('AAA', '[]', 0.4, '2026-10-10T20:00:00', '[[\"Q\", 60]]', 0.4)")
-    site.execute(cols + "('AAA', '[]', 0.3, '2026-09-01T20:00:00', NULL, NULL)")
+    mac.execute(cols + "('AAA', '[[\"Q\", 60]]', 0.4, '2026-10-10T20:00:00', '[[\"Q\", 60]]', 0.4)")
+    site.execute(cols + "('AAA', '[[\"Q\", 55]]', 0.45, '2026-09-01T20:00:00', '[[\"Q\", 55]]', 0.45)")
     site.execute(cols + "('BBB', '[]', 0.6, '2026-10-11T08:00:00', NULL, NULL)")
     sent = []
     assert macfeed.send(mac, {"telegram_token": "123:abc"}, up=sent.append).startswith("sent (1 headlines, 1 owners")
@@ -32,5 +32,7 @@ def test_the_macs_mubasher_file_reaches_the_website(tmp_path, monkeypatch):
     assert [tuple(r) for r in site.execute("SELECT symbol, title FROM news")] == [("AAA", "توزيع أرباح")]
     assert {r[0]: r[1] for r in site.execute("SELECT symbol, free_float FROM ownership")} == {"AAA": 0.4, "BBB": 0.6}
     assert site.execute("SELECT af_free_float FROM ownership WHERE symbol='AAA'").fetchone()[0] == 0.4
+    assert [tuple(r) for r in site.execute("SELECT symbol, holder, before, after FROM owner_changes")] == [
+        ("AAA", "Q", 55, 60)]                                                       # the website notes the move too
     assert macfeed.apply(site, sent[0], "123:abc") == "nothing newer from the Mac"
     assert macfeed.send(mac, {}).startswith("not sent")

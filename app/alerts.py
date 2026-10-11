@@ -262,15 +262,38 @@ def _caution_lines(items: list[dict], indent: str = "      ", lang: str = "en") 
     return out
 
 
-def _held_news(d: views.Data, symbols: list[str], since: str, limit: int = 5) -> list[str]:
-    """New headlines about the stocks you hold (newest first)."""
-    rows = []
-    for sym in symbols:
-        rows += [{**n, "symbol": sym} for n in news.stock_news(d.conn, sym, 5) if n["published"] >= since]
-    rows.sort(key=lambda n: n["published"], reverse=True)
+def _pct(v: float) -> str:
+    return f"{v:.1f}%"
+
+
+def changes_lines(d: views.Data, symbols: list[str], lang: str = "en", news_limit: int = 5) -> list[str]:
+    """What changed for the stocks you hold since the session before (views.stock_changes): new headlines, a cash
+    dividend or a bonus/rights issue announced, a big owner buying or selling."""
+    ch = views.stock_changes(d, symbols)["by_symbol"]
+    ar, lines, heads = lang == "ar", [], []
+    for sym in sorted(ch):
+        c, b = ch[sym], f"<b>{_e(sym)}</b>"
+        for x in c.get("dividends", []):
+            lines.append(f"💵 {b}: توزيع نقدي {x['amount']:g} جنيه، الاستحقاق {_date(x['ex_date'], lang)}" if ar else
+                         f"💵 {b}: cash dividend of {x['amount']:g} EGP announced, ex-date {_date(x['ex_date'])}")
+        for x in c.get("actions", []):
+            lines.append(f"📣 {b}: {_e(x['label'])}" + (f" ({_date(x['effective'], lang)})" if x["effective"] else ""))
+        for m in c.get("owners", []):
+            who, was, now = _e(m["holder"]), m["before"], m["after"]
+            if ar:
+                what = (f"مساهم كبير جديد بنسبة {_pct(now)}" if was is None else
+                        f"خرج من قائمة كبار المساهمين (كان {_pct(was)})" if now is None else
+                        f"{'رفع' if now > was else 'خفّض'} حصته من {_pct(was)} إلى {_pct(now)}")
+            else:
+                what = (f"new big owner with {_pct(now)}" if was is None else
+                        f"no longer on the big owners list (had {_pct(was)})" if now is None else
+                        f"{'raised' if now > was else 'cut'} its stake from {_pct(was)} to {_pct(now)}")
+            lines.append(f"👤 {b}: {who} {what}")
+        heads += [{**n, "symbol": sym} for n in c.get("news", [])]
+    heads.sort(key=lambda n: n["published"], reverse=True)
     dot = {1: "🟢", -1: "🔴"}
-    return [f"{dot.get(n['tone'], '⚪')} <b>{_e(n['symbol'])}</b>: {_e(n['title'])} "
-            f"({_e(news.SOURCES.get(n['source'], n['source']))})" for n in rows[:limit]]
+    return lines + [f"{dot.get(n['tone'], '⚪')} <b>{_e(n['symbol'])}</b>: {_e(n['title'])} "
+                    f"({_e(news.SOURCES.get(n['source'], n['source']))})" for n in heads[:news_limit]]
 
 
 def _cold_lines(d: views.Data, lang: str = "en") -> list[str]:
@@ -339,8 +362,7 @@ def build_message(d: views.Data) -> tuple[str, bool]:
     held = sorted({p["symbol"] for p in views.open_positions(d)})
     held_warn = [ln for sym in held for ln in _caution_lines(warn.get(sym), f"<b>{_e(sym)}</b> ")
                  if "Ex-dividend" in ln or "re-based" in ln or "Rights" in ln]
-    since = (datetime.fromisoformat(o["scan_date"]) - pd.Timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
-    held_news = _held_news(d, held, since)
+    held_news = changes_lines(d, held)
     if held_warn or held_news:
         tail += ["", "💼 <b>Your stocks</b>"] + held_warn + held_news
     paper = portfolio.account_summary(d.conn, "paper", d.cfg, d.closes())
@@ -475,6 +497,8 @@ def personal_part(d: views.Data, positions: list[dict], lang: str = "en") -> tup
         lines.append(("تحتفظ بـ: " if ar else "Holding: ") + ("، " if ar else ", ").join(
             f"{_e(h['symbol'])} ({'الوقف' if ar else 'stop'} {views.px(h['stop'])}، {'اليوم' if ar else 'day'} {h['day']})"
             if ar else f"{_e(h['symbol'])} (stop {views.px(h['stop'])}, day {h['day']})" for h in o["holds"]))
+    if new := changes_lines(d, sorted({p["symbol"] for p in positions}), lang, 3):
+        lines += ["", "🆕 <b>جديد في أسهمك</b>" if lang == "ar" else "🆕 <b>New for your stocks</b>"] + new
     return lines, bool(items)
 
 

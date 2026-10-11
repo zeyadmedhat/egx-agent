@@ -5,7 +5,8 @@ import json
 import math
 import sqlite3
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -400,6 +401,7 @@ def today(d: Data) -> dict:
     return clean({
         "market": {**m, "buys": len(buys)} if m else None, "scan_date": scan_date, "buys": buys, "watch": watch,
         "positions": positions, "spark": spark, "orders": orders(d, positions),
+        "changes": stock_changes(d, [p["symbol"] for p in positions]),
         "breadth": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
                     **breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None)} if b else None,
         "mood": mood_brief(d),
@@ -622,6 +624,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     out["fundamentals"] = dividends.company_numbers(d.conn, sym, d.table["sector"])
     out["free_float"] = free_floats(d).get(sym)
     out["analysts"] = dividends.analyst_targets(d.conn, sym)
+    out["owner_moves"] = ownership.recent_moves(d.conn, (date.today() - timedelta(days=365)).isoformat(), sym)
     out["news"] = news.stock_news(d.conn, sym)
     out["cautions"] = cautions_map(d).get(sym, [])
     out["ai"] = ai_view(d, sym, ind["close"])
@@ -917,6 +920,35 @@ def company_values(conn: sqlite3.Connection) -> dict[str, dict]:
     back = {v: k for k, v in prices.TV_ALIASES.items()}
     return {back.get(r["symbol"], r["symbol"]): json.loads(r["data"])
             for r in conn.execute("SELECT symbol, data FROM fundamentals")}
+
+
+def stock_changes(d: Data, symbols: Iterable[str] | None = None) -> dict:
+    """What's new for each stock since the session before the last close: {since, by_symbol: {symbol: {news,
+    dividends, actions, owners}}}, the stocks with something only. Home's "What changed for your stocks" and the
+    evening Telegram pick the stocks you hold; a stop that moved comes from the positions themselves."""
+    idx = d.indicators(prices.INDEX_SYMBOL).index
+    if len(idx) < 2:
+        return {"since": None, "by_symbol": {}}
+    prev = str(idx[-2].date())
+    since = prev + "T14:30"                     # after that session's close
+    keep = set(symbols) if symbols is not None else None
+    out: dict[str, dict] = {}
+
+    def add(sym, kind, item):
+        if sym and (keep is None or sym in keep):
+            out.setdefault(sym, {}).setdefault(kind, []).append(item)
+    for n in d.conn.execute("SELECT symbol, source, published, title, url, tone FROM news WHERE symbol != '' "
+                            "AND published >= ? ORDER BY published DESC", (since,)):
+        if len(out.get(n["symbol"], {}).get("news", [])) < 3:
+            add(n["symbol"], "news", {k: n[k] for k in ("source", "published", "title", "url", "tone")})
+    for r in d.conn.execute("SELECT symbol, ex_date, pay_date, amount FROM cash_dividends WHERE first_seen >= ? "
+                            "AND ex_date >= ?", (since, prev)):
+        add(r["symbol"], "dividends", {k: r[k] for k in ("ex_date", "pay_date", "amount")})
+    for r in d.conn.execute("SELECT symbol, kind, type, effective FROM corp_actions WHERE announced >= ?", (prev,)):
+        add(r["symbol"], "actions", {"label": news.KIND_LABELS.get(r["kind"], r["type"]), "effective": r["effective"]})
+    for m in ownership.recent_moves(d.conn, since):
+        add(m["symbol"], "owners", {k: m[k] for k in ("holder", "before", "after")})
+    return {"since": prev, "by_symbol": out}
 
 
 def free_floats(d: Data) -> dict[str, dict]:

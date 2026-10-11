@@ -28,6 +28,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from egx_agent import config, db
+from egx_agent.data import ownership
 
 from .backup import _key
 
@@ -102,11 +103,9 @@ def apply(conn: sqlite3.Connection, path: Path, token: str) -> str:
     conn.executemany(f"INSERT OR IGNORE INTO news({','.join(NEWS_COLS)}) VALUES ({','.join('?' * len(NEWS_COLS))})",
                      data["news"])
     new = conn.total_changes - before
-    for row in data["owners"]:            # a file from before Arab Finance has the first 4
-        cols = OWNER_COLS[:len(row)]
-        conn.execute(f"INSERT INTO ownership({','.join(cols)}) VALUES ({','.join('?' * len(cols))}) ON CONFLICT(symbol) "
-                     f"DO UPDATE SET {', '.join(f'{c}=excluded.{c}' for c in cols[1:])} "
-                     "WHERE excluded.updated > COALESCE(ownership.updated, '')", row)
+    for row in data["owners"]:            # noting each big owner's move, as on the Mac
+        sym, holders, _, updated, af = (row + [None])[:5]          # a file from before Arab Finance has the first 4
+        ownership.save(conn, sym, json.loads(holders or "[]"), json.loads(af) if af else None, updated)
     conn.commit()
     db.set_meta(conn, "mac_feed", data["made"])
     if new:

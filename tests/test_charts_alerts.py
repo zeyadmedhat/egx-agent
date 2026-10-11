@@ -137,3 +137,27 @@ def test_the_worker_hands_over_messages_it_already_answered(tmp_path, monkeypatc
     alerts.watch_command(conn, "5", "/watch vvv")
     assert "Removed all your alerts (2)" in alerts.watch_command(conn, "5", "/unwatch all")
     assert alerts.worker_state(conn, "secretcode1")["alerts"] == {}
+
+
+def test_what_changed_for_your_stocks_since_the_session_before(tmp_path):
+    conn = db.connect(tmp_path / "egx.db")
+    db.upsert_prices(conn, prices.INDEX_SYMBOL, pd.DataFrame({"date": ["2026-10-08", "2026-10-11"], "open": 1.0,
+                                                               "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0}))
+    conn.execute("INSERT INTO news(id, symbol, source, lang, published, title, url, tone) VALUES "
+                 "('a', 'AAA', 'mubasher', 'en', '2026-10-09T10:00', 'New contract', 'u', 1), "
+                 "('b', 'AAA', 'mubasher', 'en', '2026-10-08T11:00', 'Before the close', 'u', 0), "
+                 "('c', 'BBB', 'mubasher', 'en', '2026-10-10T10:00', 'Not yours', 'u', 0)")
+    conn.execute("INSERT INTO cash_dividends(symbol, ex_date, amount, first_seen) VALUES "
+                 "('AAA', '2026-10-20', 1.5, '2026-10-10T20:00:00'), ('AAA', '2026-04-01', 1.0, '2026-03-01T20:00:00')")
+    conn.execute("INSERT INTO owner_changes(symbol, holder, before, after, seen, source) VALUES "
+                 "('AAA', 'Fund A', 20.0, 23.5, '2026-10-11T08:00:00', 'arabfinance')")
+    d = views.Data(conn, CFG, views.Cache())
+    ch = views.stock_changes(d, ["AAA"])
+    assert ch["since"] == "2026-10-08" and list(ch["by_symbol"]) == ["AAA"]
+    a = ch["by_symbol"]["AAA"]
+    assert [n["title"] for n in a["news"]] == ["New contract"] and a["dividends"][0]["amount"] == 1.5
+    assert a["owners"] == [{"holder": "Fund A", "before": 20.0, "after": 23.5}]
+    lines = alerts.changes_lines(d, ["AAA"])
+    assert "cash dividend of 1.5 EGP" in lines[0] and "Fund A raised its stake from 20.0% to 23.5%" in lines[1]
+    assert "New contract" in lines[2] and len(lines) == 3
+    assert "رفع حصته" in alerts.changes_lines(d, ["AAA"], "ar")[1]

@@ -1467,3 +1467,13 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 /* "How far it could move" and the AI card inside their folds (stock page): the fold is the card and has the title */
 .fold-body > .range-card, .fold-body > .ai-card { border: 0; box-shadow: none; margin: 0; border-radius: 0; background: none; }
 .fold-body > .range-card .range-head h3, .fold-body > .ai-card .ai-head h3 { display: none; }
+
+/* Home: what changed for your stocks */
+.changes { display: grid; gap: 12px; }
+.change { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: start; font-size: 13.5px; }
+.change .sym { font-weight: 700; }
+.change .items { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.change .items a { color: inherit; }
+.change .items .dot { font-size: 9px; color: var(--text-3); vertical-align: 2px; }
+.change .items .dot.up { color: var(--up); }
+.change .items .dot.down { color: var(--down); }

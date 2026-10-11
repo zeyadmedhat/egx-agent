@@ -3,7 +3,7 @@ import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO, 
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, WatchStar,
   Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard, sessionState,
-  Bell, useBells,
+  Bell, useBells, ownerText,
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
@@ -125,6 +125,7 @@ export function StockPage({ route }) {
           ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
           ${(data.fundamentals || data.free_float) && html`<${CompanyPanel} f=${data.fundamentals || { values: {} }} ff=${data.free_float} />`}
           ${data.analysts && html`<${AnalystPanel} a=${data.analysts} close=${st.close} />`}
+          ${data.owner_moves && data.owner_moves.length > 0 && html`<${OwnerMoves} list=${data.owner_moves} />`}
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
         </aside>
@@ -498,6 +499,20 @@ function AnalystPanel({ a, close }) {
     <p class="faint" style="font-size:11.5px;margin-top:8px">${t('From TradingView, {n} analysts, checked {date}.', {
       n: fmt.int(a.n), date: fmt.date((a.updated || '').slice(0, 10)) })}</p><//>`;
 }
+
+// Big owners buying or selling: each time the owners lists are read again (about monthly), what moved
+// (data/ownership.py owner_moves), the last 12 months.
+function OwnerMoves({ list }) {
+  return html`<${Fold} title="Big owners' moves" hint=${t('{n} in a year', { n: list.length })}>
+    <div class="stat-list">${list.map(m => html`
+      <span class="k">${fmt.date(m.seen.slice(0, 10), false)}</span><span class="v" style="font-weight:500" dir="auto">${ownerText(m)}</span>`)}</div>
+    <${More} label="About these"><p>${t(OWNERS_HOW)}</p><//><//>`;
+}
+
+const OWNERS_HOW = 'Each company\'s list of big owners (Arab Finance\'s, from the latest disclosure, or Mubasher\'s) is read '
+  + 'again about once a month and compared with the last one. A stake that moved half a point or more, a new owner and '
+  + 'one that left the list are shown on the day the new list was read, which can be weeks after the trade. An owner '
+  + 'that left usually fell under 5% or sold out. The agent\'s signals don\'t use these.';
 
 const ANALYST_HOW = 'Where brokers\' analysts think the price will be in about 12 months, and whether they say buy, hold or '
   + 'sell. TradingView doesn\'t say when each target was set, so one can be months old, and a target far below today\'s '

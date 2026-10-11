@@ -173,6 +173,15 @@ CREATE TABLE IF NOT EXISTS ownership (
     free_float REAL,                -- 1 - the holders of 5% or more; NULL without a usable list
     updated TEXT
 );
+CREATE TABLE IF NOT EXISTS owner_changes (
+    symbol TEXT NOT NULL,           -- a big owner's stake moving between two owners lists (data/ownership.py save)
+    holder TEXT NOT NULL,
+    before REAL,                    -- % on the list before (NULL: new on the list)
+    after REAL,                     -- % now (NULL: no longer on the list)
+    seen TEXT NOT NULL,             -- when the newer list was read
+    source TEXT,                    -- arabfinance or mubasher
+    PRIMARY KEY (symbol, holder, seen)
+);
 CREATE TABLE IF NOT EXISTS earnings (
     symbol TEXT PRIMARY KEY,        -- when each company's results come, from TradingView (data/dividends.py)
     next_date TEXT,                 -- TradingView's expected date for the next results ('' if none or unreliable)

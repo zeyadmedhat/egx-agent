@@ -3,7 +3,7 @@
 import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, todayISO, copyText, STATIC } from '../lib.js';
 import {
   Icon, Badges, Empty, Callout, PageHead, SectionHead, PageLoading, JobControl, SessionBadge, useQuotes, livePosition,
-  PositionCard,
+  PositionCard, ownerText,
 } from '../ui.js';
 import { t, isAr, tn } from '../i18n.js';
 
@@ -33,7 +33,37 @@ export function TodayPage() {
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
       ${m.warnings.map(w => html`<${Callout} tone="warn">${tn(w)}<//>`)}</div>`}
     ${data.orders && html`<${OrdersCard} o=${data.orders} />`}
+    ${data.positions.length > 0 && html`<${Changes} ch=${data.changes} positions=${data.positions} />`}
     ${data.positions.length > 0 && html`<${Positions} positions=${data.positions} cfg=${data.cfg} alerts=${alerts} />`}`;
+}
+
+// "What changed for your stocks": since the session before the last close (views.stock_changes), each stock you hold
+// with a stop that moved, a dividend or bonus/rights issue announced, a big owner buying or selling, new headlines.
+const DOT = { 1: 'up', '-1': 'down' };
+function Changes({ ch, positions }) {
+  const by = (ch && ch.by_symbol) || {};
+  const rows = [...new Set(positions.map(p => p.symbol))].map(sym => {
+    const c = by[sym] || {}, items = [];
+    for (const p of positions.filter(x => x.symbol === sym && x.prev_stop != null && x.prev_stop !== x.stop)) {
+      items.push(html`<span>${t('Stop raised from {a} to {b}', { a: fmt.price(p.prev_stop), b: fmt.price(p.stop) })}</span>`);
+    }
+    for (const x of c.dividends || []) {
+      items.push(html`<span>${t('Cash dividend of {v} EGP announced, ex-date {date}', { v: fmt.num(x.amount, 2), date: fmt.date(x.ex_date, false) })}</span>`);
+    }
+    for (const x of c.actions || []) items.push(html`<span>${t(x.label)}${x.effective ? ` · ${fmt.date(x.effective, false)}` : ''}</span>`);
+    for (const m of c.owners || []) items.push(html`<span dir="auto">${ownerText(m)}</span>`);
+    for (const n of c.news || []) {
+      items.push(html`<a href=${n.url} target="_blank" rel="noopener" dir="auto"><span class=${cls('dot', DOT[n.tone])}>●</span> ${n.title}</a>`);
+    }
+    return { sym, items };
+  }).filter(r => r.items.length);
+  return html`<section class="section"><div class="card">
+    <div class="card-title"><${Icon} name="news" size=${15} />${t('What changed for your stocks')}
+      ${ch && ch.since && html`<span class="right faint">${t('since {date}', { date: fmt.date(ch.since, false) })}</span>`}</div>
+    ${rows.length ? html`<div class="changes">${rows.map(r => html`<div class="change" key=${r.sym}>
+        <a class="sym" href=${stockHref(r.sym)}>${r.sym}</a><div class="items">${r.items}</div></div>`)}</div>`
+      : html`<p class="muted" style="font-size:13px">${t('Nothing new: no headlines, dividends, owner moves or stop changes.')}</p>`}
+  </div></section>`;
 }
 
 // "Today in one minute": the market, the signals and your positions in a few plain sentences, from this page's data.

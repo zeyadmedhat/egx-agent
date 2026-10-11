@@ -874,3 +874,12 @@ export function Bell({ sym, tg, bells, setBells }) {
     title=${t('A Telegram message when {sym} gets a BUY signal. Telegram must be connected first: Settings → Connect Telegram.', { sym })}>
     <${Icon} name="bell" size=${15} /></a>`;
 }
+
+// A big owner's move between two owners lists (data/ownership.py owner_moves): Home and the stock page.
+const pct1 = v => `${fmt.num(v, 1)}%`;
+export function ownerText(m) {
+  if (m.before == null) return t('{who}: new big owner with {p}', { who: m.holder, p: pct1(m.after) });
+  if (m.after == null) return t('{who}: no longer on the big owners list (had {p})', { who: m.holder, p: pct1(m.before) });
+  return t(m.after > m.before ? '{who} raised its stake from {a} to {b}' : '{who} cut its stake from {a} to {b}',
+    { who: m.holder, a: pct1(m.before), b: pct1(m.after) });
+}

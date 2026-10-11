@@ -62,3 +62,20 @@ def test_the_lower_owners_list_is_shown_and_tradingview_only_without_one():
     assert ownership.combined(1.0, 0.262, 0.257)["value"] == 0.257 and not ownership.combined(1.0, 0.262, 0.257)["differ"]
     assert ownership.combined(0.30, None, None)["value"] == 0.30                           # no list: TradingView's
     assert ownership.combined(1.0, None, None) is None and ownership.combined(None, None) is None
+
+
+def test_a_big_owners_move_is_noted_when_the_list_is_read_again(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    old = [["Fund A", 20.0], ["Bank B", 6.0], ["Old Name Co", 7.2], ["Tiny", 0.3]]
+    new = [["Fund A", 23.5], ["Bank B", 6.2], ["New Name Co", 7.2], ["Tiny", 0.9], ["Buyer C", 5.1]]
+    assert ownership.owner_moves(old, new) == [("Fund A", 20.0, 23.5), ("Buyer C", None, 5.1)]   # renames, rounding,
+    assert ownership.owner_moves(new, [["Fund A", 23.5]]) == [("Bank B", 6.2, None), ("New Name Co", 7.2, None),
+                                                              ("Buyer C", 5.1, None)]           # tiny holders: not moves
+    assert ownership.save(conn, "AAA", old, old, "2026-09-01T10:00:00")
+    assert not ownership.save(conn, "AAA", new, new, "2026-08-01T10:00:00")       # older than what's stored
+    assert ownership.save(conn, "AAA", [], None, "2026-10-01T10:00:00")           # nothing to compare: no moves
+    assert ownership.recent_moves(conn, "2026-01-01") == []
+    assert ownership.save(conn, "AAA", [], new, "2026-10-09T10:00:00")            # Arab Finance's list, against its last
+    assert [(m["holder"], m["before"], m["after"]) for m in ownership.recent_moves(conn, "2026-10-09", "AAA")] == [
+        ("Buyer C", None, 5.1), ("Fund A", 20.0, 23.5)]
+    assert ownership.recent_moves(conn, "2026-10-10") == []

@@ -131,6 +131,7 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "breadth_today": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
                           **breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None)} if b else None,
         "mood_today": views.mood_brief(d),
+        "changes": views.stock_changes(d),     # Home picks the stocks you hold
         "strategy": strategy_settings(cfg),
         "personal_defaults": {k: SITE_DEFAULTS.get(k, config.DEFAULTS[k]) for k in personal_keys()},
         "sections": site_sections(),
