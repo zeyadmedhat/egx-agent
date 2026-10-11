@@ -15,9 +15,10 @@ def test_the_macs_mubasher_file_reaches_the_website(tmp_path, monkeypatch):
     day = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%dT10:00")
     news.save_news(mac, [{"id": "m1", "source": "mubasher", "lang": "ar", "published": day, "title": "توزيع أرباح",
                           "url": "u"}], "AAA")
-    mac.execute("INSERT INTO ownership VALUES ('AAA', '[]', 0.4, '2026-10-10T20:00:00')")
-    site.execute("INSERT INTO ownership VALUES ('AAA', '[]', 0.3, '2026-09-01T20:00:00')")
-    site.execute("INSERT INTO ownership VALUES ('BBB', '[]', 0.6, '2026-10-11T08:00:00')")
+    cols = "INSERT INTO ownership(symbol, holders, free_float, updated, af_holders, af_free_float) VALUES "
+    mac.execute(cols + "('AAA', '[]', 0.4, '2026-10-10T20:00:00', '[[\"Q\", 60]]', 0.4)")
+    site.execute(cols + "('AAA', '[]', 0.3, '2026-09-01T20:00:00', NULL, NULL)")
+    site.execute(cols + "('BBB', '[]', 0.6, '2026-10-11T08:00:00', NULL, NULL)")
     sent = []
     assert macfeed.send(mac, {"telegram_token": "123:abc"}, up=sent.append).startswith("sent (1 headlines, 1 owners")
     assert macfeed.send(mac, {"telegram_token": "123:abc"}, up=sent.append) == "unchanged" and len(sent) == 1
@@ -30,5 +31,6 @@ def test_the_macs_mubasher_file_reaches_the_website(tmp_path, monkeypatch):
     assert news.mac_sends(site)
     assert [tuple(r) for r in site.execute("SELECT symbol, title FROM news")] == [("AAA", "توزيع أرباح")]
     assert {r[0]: r[1] for r in site.execute("SELECT symbol, free_float FROM ownership")} == {"AAA": 0.4, "BBB": 0.6}
+    assert site.execute("SELECT af_free_float FROM ownership WHERE symbol='AAA'").fetchone()[0] == 0.4
     assert macfeed.apply(site, sent[0], "123:abc") == "nothing newer from the Mac"
     assert macfeed.send(mac, {}).startswith("not sent")

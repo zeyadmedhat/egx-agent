@@ -919,15 +919,17 @@ def company_values(conn: sqlite3.Connection) -> dict[str, dict]:
 
 
 def free_floats(d: Data) -> dict[str, dict]:
-    """Each company's free float from TradingView (data/dividends.py) and Mubasher's owners (data/ownership.py):
-    {"value"} when they agree or only one has it, both when they don't (ownership.combined). Shown, not used. Tested
-    in 2026-10 as inputs to the 10-session model (float %, the float's value, its rank, how fast it trades): the
-    model's own top picks did a little better, but the rules plus its picks made 25.8% a year against 32.5% and won
-    fewer trades, on all 4 seeds."""
+    """Each company's free float: the lower of Arab Finance's and Mubasher's owners lists, TradingView's when neither
+    has one (ownership.combined; worked out from the lists each time, so a better rule fixes the old ones too). Shown,
+    not used. Tested in 2026-10 as inputs to the 10-session model (float %, the float's value, its rank, how fast it
+    trades): the model's own top picks did a little better, but the rules plus its picks made 25.8% a year against
+    32.5% and won fewer trades, on all 4 seeds."""
     def build():
         tv = {r["symbol"]: json.loads(r["data"]).get("free_float") for r in d.conn.execute("SELECT symbol, data FROM fundamentals")}
-        mub = dict(d.conn.execute("SELECT symbol, free_float FROM ownership").fetchall())
-        out = {s: ownership.combined(tv.get(s), mub.get(s)) for s in set(tv) | set(mub)}
+        lists = {r["symbol"]: (ownership.free_float(json.loads(r["holders"] or "[]")),
+                               ownership.free_float(json.loads(r["af_holders"]), 0) if r["af_holders"] else None)
+                 for r in d.conn.execute("SELECT symbol, holders, af_holders FROM ownership")}
+        out = {s: ownership.combined(tv.get(s), *lists.get(s, (None, None))) for s in set(tv) | set(lists)}
         return {s: v for s, v in out.items() if v}
     return d.cache.get(d.version, ("free_floats",), build)
 

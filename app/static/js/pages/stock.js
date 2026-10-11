@@ -466,14 +466,14 @@ function CompanyPanel({ f, ff }) {
   const rows = COMPANY.filter(([k]) => v[k] != null);
   return html`<${Fold} title="Company numbers"
       hint=${v.pe > 0 ? t('P/E {pe}', { pe: fmt.num(v.pe, 1) }) : v.market_cap ? t('Worth {v}', { v: `${fmt.short(v.market_cap)} ${t('EGP')}` })
-        : ff && ff.value != null ? t('Free float {p}', { p: fmt.pct(ff.value, 0, false) }) : ''}>
+        : ff ? t('Free float {p}', { p: fmt.pct(ff.value, 0, false) }) : ''}>
     <div class="stat-list">${rows.map(([k, label, show]) => html`
       <span class="k">${t(label)}</span>
       <span class=${cls('v', GROWTH.has(k) && tone(v[k]))}>${show(v[k])}${k !== 'market_cap' && med[k] != null
         ? html`<span class="faint" style="font-weight:500"> · ${t('sector')} ${show(med[k])}</span>` : ''}</span>`)}
-      ${ff && html`<span class="k">${t('Free float')}</span><span class="v">${ff.value != null ? fmt.pct(ff.value, 0, false)
-        : html`${fmt.pct(ff.tv, 0, false)} ${t('or')} ${fmt.pct(ff.mub, 0, false)}`}<span class="faint" style="font-weight:500"> · ${t(
-        ff.value == null ? 'TradingView and Mubasher disagree' : ff.tv != null && ff.mub != null ? 'TradingView and Mubasher agree' : ff.tv != null ? 'TradingView' : 'Mubasher\'s owners')}</span></span>`}
+      ${ff && html`<span class="k">${t('Free float')}</span><span class="v">${fmt.pct(ff.value, 0, false)}<span class="faint" style="font-weight:500"> · ${
+        ff.af != null && ff.mub != null ? (ff.differ ? t('the lower of Arab Finance {a} and Mubasher {m}', { a: fmt.pct(ff.af, 0, false), m: fmt.pct(ff.mub, 0, false) })
+          : t('Arab Finance and Mubasher agree')) : t(ff.af != null ? "Arab Finance's owners list" : ff.mub != null ? "Mubasher's owners list" : 'TradingView')}</span></span>`}
     </div>
     ${rows.length < COMPANY.length && html`<p class="faint" style="font-size:12px;margin-top:8px">${t('TradingView has no figure for the rest.')}</p>`}
     <${More} label="What these mean"><p>${t(COMPANY_HOW)}</p><//>
@@ -486,7 +486,10 @@ const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower
   + 'against the 12 before (in EGP, so inflation lifts it too). Net margin: profit from each pound of sales. Return on '
   + 'equity: yearly profit on the owners\' money. Debt / equity: borrowing against the owners\' money; over 1 is a lot for '
   + 'most companies except banks. Free float: the share of the company anyone can trade, not held by owners of 5% or more, '
-  + 'insiders or a depository bank (TradingView\'s count, and 100% minus the 5% holders on Mubasher\'s list; both are stricter than the exchange\'s count and they can disagree). A small float moves more on less money. '
+  + 'from the owners lists of Arab Finance (the latest disclosure) and Mubasher: 100% minus the big holders, the lower '
+  + 'of the two, since a list that misses an owner makes the float look bigger (TradingView\'s when neither has a list). '
+  + 'Family members or related companies that each hold under 5% still count as free, and the exchange also counts '
+  + 'shares held as GDRs as not free, so its own figure can be lower. A small float moves more on less money. '
   + 'The agent\'s signals don\'t use these: they are here to know the company.';
 
 // Your position: the same card as Today and My Portfolio (live price, P&L, stop to target), and where the stop and

@@ -37,7 +37,7 @@ FILE = config.ROOT / "data" / "macfeed" / "mubasher.egxm"
 NEWS_DAYS = 45                            # the headlines sent: a stock's Mubasher news of the last 45 days
 RESEND = timedelta(hours=20)              # an unchanged file is sent again after this, so the website knows it's fresh
 NEWS_COLS = ("id", "symbol", "source", "lang", "published", "title", "url", "tags", "tone", "first_seen")
-OWNER_COLS = ("symbol", "holders", "free_float", "updated")
+OWNER_COLS = ("symbol", "holders", "free_float", "updated", "af_holders", "af_free_float")
 
 
 def export(conn: sqlite3.Connection) -> dict:
@@ -102,9 +102,11 @@ def apply(conn: sqlite3.Connection, path: Path, token: str) -> str:
     conn.executemany(f"INSERT OR IGNORE INTO news({','.join(NEWS_COLS)}) VALUES ({','.join('?' * len(NEWS_COLS))})",
                      data["news"])
     new = conn.total_changes - before
-    conn.executemany(f"INSERT INTO ownership({','.join(OWNER_COLS)}) VALUES (?,?,?,?) ON CONFLICT(symbol) DO UPDATE "
-                     "SET holders=excluded.holders, free_float=excluded.free_float, updated=excluded.updated "
-                     "WHERE excluded.updated > COALESCE(ownership.updated, '')", data["owners"])
+    for row in data["owners"]:            # a file from before Arab Finance has the first 4
+        cols = OWNER_COLS[:len(row)]
+        conn.execute(f"INSERT INTO ownership({','.join(cols)}) VALUES ({','.join('?' * len(cols))}) ON CONFLICT(symbol) "
+                     f"DO UPDATE SET {', '.join(f'{c}=excluded.{c}' for c in cols[1:])} "
+                     "WHERE excluded.updated > COALESCE(ownership.updated, '')", row)
     conn.commit()
     db.set_meta(conn, "mac_feed", data["made"])
     if new:

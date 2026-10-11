@@ -275,10 +275,11 @@ def _add_columns(conn: sqlite3.Connection, pairs) -> None:
 # BUY (rules | model); predictions.why: what pushed the model's score up or down; predictions.exp_ret: what trades it
 # scored like that averaged in its tests (predict.ret_calibrator); predictions.level: the week's state
 # (predict.week_state: good | other | weak); stocks.listed_by: where the stock
-# came from (NULL = Kashif, tradingview = TradingView's EGX list, for stocks Kashif doesn't cover)
+# came from (NULL = Kashif, tradingview = TradingView's EGX list, for stocks Kashif doesn't cover); ownership.af_*:
+# Arab Finance's owners list and its free float (data/ownership.py)
 MARKET_COLUMNS = (("stocks", "price_note"), ("stocks", "listed_by"), ("scans", "priority", "REAL"),
                   ("scans", "source"), ("predictions", "why"), ("predictions", "exp_ret", "REAL"),
-                  ("predictions", "level"))
+                  ("predictions", "level"), ("ownership", "af_holders"), ("ownership", "af_free_float", "REAL"))
 
 
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
