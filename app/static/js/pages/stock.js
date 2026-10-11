@@ -124,6 +124,7 @@ export function StockPage({ route }) {
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
           ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
           ${(data.fundamentals || data.free_float) && html`<${CompanyPanel} f=${data.fundamentals || { values: {} }} ff=${data.free_float} />`}
+          ${data.analysts && html`<${AnalystPanel} a=${data.analysts} close=${st.close} />`}
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
         </aside>
@@ -480,6 +481,28 @@ function CompanyPanel({ f, ff }) {
     ${f.updated && html`<p class="faint" style="font-size:11.5px;margin-top:8px">${t('From TradingView, the latest yearly figures, checked {date}. Sector: the middle of {n} companies in {sector}.', {
       date: fmt.date((f.updated || '').slice(0, 10)), n: fmt.int(f.peers), sector: t(f.sector || 'Other') })}</p>`}<//>`;
 }
+
+// Analysts' 12-month targets from TradingView (data/dividends.py ANALYSTS), against today's close.
+function AnalystPanel({ a, close }) {
+  const gap = close ? a.avg / close - 1 : null;
+  return html`<${Fold} title="Analysts' targets"
+      hint=${gap != null ? t('{p} to the average', { p: fmt.pct(gap, 0) }) : fmt.price(a.avg)}>
+    <div class="stat-list">
+      <span class="k">${t('Average target')}</span>
+      <span class="v">${fmt.price(a.avg)}${gap != null ? html` <span class=${tone(gap)}>${fmt.pct(gap, 0)}</span>` : ''}</span>
+      ${a.n > 1 && html`<span class="k">${t('Lowest – highest')}</span><span class="v">${fmt.price(a.low)} – ${fmt.price(a.high)}</span>`}
+      <span class="k">${t('Ratings')}</span>
+      <span class="v">${t('{b} buy · {h} hold · {s} sell', { b: a.buy, h: a.hold, s: a.sell })}</span>
+    </div>
+    <${More} label="About these"><p>${t(ANALYST_HOW)}</p><//>
+    <p class="faint" style="font-size:11.5px;margin-top:8px">${t('From TradingView, {n} analysts, checked {date}.', {
+      n: fmt.int(a.n), date: fmt.date((a.updated || '').slice(0, 10)) })}</p><//>`;
+}
+
+const ANALYST_HOW = 'Where brokers\' analysts think the price will be in about 12 months, and whether they say buy, hold or '
+  + 'sell. TradingView doesn\'t say when each target was set, so one can be months old, and a target far below today\'s '
+  + 'price usually is. Studies find analysts\' targets run too high on average and miss by a lot, so read them as one '
+  + 'opinion. Most EGX companies have one to four analysts, many have none. The agent\'s signals don\'t use them.';
 
 const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower is cheaper, but a growing company usually '
   + 'costs more. Price / book: the price against what the company owns minus what it owes. Growth: the last 12 months '

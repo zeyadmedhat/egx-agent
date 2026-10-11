@@ -41,7 +41,12 @@ FUNDAMENTALS = {"market_cap_basic": ("market_cap", 1), "price_earnings_ttm": ("p
                 # free float: the shares not held by owners of 5% or more, insiders or a depository bank (TradingView's
                 # count, stricter than EGX's; about 160 EGX companies in 2026-10)
                 "float_shares_percent_current": ("free_float", 0.01), "float_shares_outstanding_current": ("float_shares", 1)}
-COLUMNS = COLUMNS + list(FUNDAMENTALS) + fundamentals.COLUMNS     # and each company's past results
+# Analysts' 12-month price targets and ratings, from the same list (about 45 EGX companies in 2026-10, most with 1 to 4
+# analysts). TradingView doesn't say when each was set. Lines quoted in dollars (FAITA, VLMR, …) mix currencies: left out.
+ANALYSTS = ["price_target_average", "price_target_low", "price_target_high", "recommendation_total",
+            "recommendation_buy", "recommendation_over", "recommendation_hold", "recommendation_under",
+            "recommendation_sell", "currency"]
+COLUMNS = COLUMNS + list(FUNDAMENTALS) + ANALYSTS + fundamentals.COLUMNS     # and each company's past results
 EARNINGS_STALE_DAYS = 400     # a company whose last results on TradingView are older gets no expected date: it
                               # doesn't report there regularly, so the estimate would be a guess
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -86,6 +91,15 @@ def save(conn: sqlite3.Connection, rows: list[dict]) -> int:
         if nums:
             conn.execute("INSERT OR REPLACE INTO fundamentals(symbol, data, updated) VALUES (?,?,?)",
                          (sym, json.dumps(nums), now))
+        if r.get("price_target_average") and r.get("recommendation_total") and r.get("currency", "EGP") == "EGP":
+            n = lambda *cols: int(sum(r.get(c) or 0 for c in cols))
+            targets = {"avg": r["price_target_average"], "low": r["price_target_low"], "high": r["price_target_high"],
+                       "n": n("recommendation_total"), "buy": n("recommendation_buy", "recommendation_over"),
+                       "hold": n("recommendation_hold"), "sell": n("recommendation_sell", "recommendation_under")}
+            conn.execute("INSERT OR REPLACE INTO analyst_targets(symbol, data, updated) VALUES (?,?,?)",
+                         (sym, json.dumps(targets), now))
+        else:
+            conn.execute("DELETE FROM analyst_targets WHERE symbol=?", (sym,))     # no longer covered
     fundamentals.save(conn, rows, {v: k for k, v in prices.TV_ALIASES.items()})   # under the agent's own symbols
     conn.commit()
     return conn.execute("SELECT COUNT(*) FROM cash_dividends").fetchone()[0] - before
@@ -111,6 +125,13 @@ def company_numbers(conn: sqlite3.Connection, symbol: str, sectors: pd.Series) -
             median[key] = float(pd.Series(vals).median())
     updated = conn.execute("SELECT updated FROM fundamentals WHERE symbol=?", (symbol,)).fetchone()["updated"]
     return {"values": mine, "sector": sector, "sector_median": median, "peers": len(peers), "updated": updated}
+
+
+def analyst_targets(conn: sqlite3.Connection, symbol: str) -> dict | None:
+    """Analysts' targets for a stock (save): avg, low, high, n analysts and how many say buy, hold and sell."""
+    row = conn.execute("SELECT data, updated FROM analyst_targets WHERE symbol=?",
+                       (prices.TV_ALIASES.get(symbol, symbol),)).fetchone()
+    return {**json.loads(row["data"]), "updated": row["updated"]} if row else None
 
 
 # ------------------------------------------------------------------ the whole history, from the prices

@@ -621,6 +621,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     out["corporate"] = corporate_history(d.conn, sym, last.close)
     out["fundamentals"] = dividends.company_numbers(d.conn, sym, d.table["sector"])
     out["free_float"] = free_floats(d).get(sym)
+    out["analysts"] = dividends.analyst_targets(d.conn, sym)
     out["news"] = news.stock_news(d.conn, sym)
     out["cautions"] = cautions_map(d).get(sym, [])
     out["ai"] = ai_view(d, sym, ind["close"])

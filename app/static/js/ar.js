@@ -1806,4 +1806,13 @@ export const AR = {
   "It learned from every liquid EGX stock's past and was tested on years it hadn't seen, so weigh it more than these lines.": "تعلّم من تاريخ كل الأسهم السائلة في البورصة المصرية واختُبر على سنوات لم يرها، لذا أعطه وزنًا أكبر من هذه الخطوط.",
   "No price that way has a real chance.": "لا يوجد سعر في هذا الاتجاه بفرصة حقيقية.",
   "Chance it trades there by {date}": "فرصة الوصول إليه حتى {date}",
+  "Analysts' targets": "مستهدفات المحللين",
+  "{p} to the average": "{p} حتى المتوسط",
+  "Average target": "متوسط السعر المستهدف",
+  "Lowest – highest": "الأدنى – الأعلى",
+  "Ratings": "التوصيات",
+  "{b} buy · {h} hold · {s} sell": "{b} شراء · {h} احتفاظ · {s} بيع",
+  "About these": "عن هذه الأرقام",
+  "From TradingView, {n} analysts, checked {date}.": "من TradingView، {n} محللين، آخر تحقق {date}.",
+  "Where brokers' analysts think the price will be in about 12 months, and whether they say buy, hold or sell. TradingView doesn't say when each target was set, so one can be months old, and a target far below today's price usually is. Studies find analysts' targets run too high on average and miss by a lot, so read them as one opinion. Most EGX companies have one to four analysts, many have none. The agent's signals don't use them.": "أين يتوقع محللو شركات الوساطة أن يكون السعر بعد نحو 12 شهرًا، وهل يوصون بالشراء أم الاحتفاظ أم البيع. لا يذكر TradingView متى وُضع كل مستهدف، فقد يكون عمره شهورًا، والمستهدف الأقل كثيرًا من سعر اليوم غالبًا ما يكون قديمًا. تجد الدراسات أن مستهدفات المحللين أعلى من الواقع في المتوسط وتخطئ كثيرًا، فاعتبرها رأيًا واحدًا. معظم شركات البورصة المصرية يغطيها من محلل إلى أربعة، وكثير منها بلا تغطية. إشارات الوكيل لا تستخدمها.",
 };

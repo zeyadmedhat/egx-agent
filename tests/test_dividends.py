@@ -121,3 +121,17 @@ def test_company_results_in_brief_for_the_signal_cards(tmp_path):
     assert brief["AIHC"] == {"growth": pytest.approx(95 / 47 - 1, abs=1e-4), "sales": 0.25, "margin": 0.2375,
                              "pe": pytest.approx(9.5 / 0.95, abs=1e-4)}
     assert brief["LOSS"] == {"growth": -3.5, "sales": 0.0, "margin": -0.1}      # -20 on 200 of sales
+
+
+def test_analysts_targets_come_with_the_dividends(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    covered = {**_row("COMI", 4.7), "price_target_average": 177.2, "price_target_low": 150, "price_target_high": 244.6,
+               "recommendation_total": 7, "recommendation_buy": 4, "recommendation_over": 1, "recommendation_hold": 2,
+               "recommendation_under": 0, "recommendation_sell": 0, "currency": "EGP"}
+    dollars = {**covered, "name": "VLMR", "currency": "USD"}           # a dollar line: its targets mix currencies
+    dividends.save(conn, [covered, dollars])
+    a = dividends.analyst_targets(conn, "COMI")
+    assert (a["avg"], a["low"], a["high"], a["n"], a["buy"], a["hold"], a["sell"]) == (177.2, 150, 244.6, 7, 5, 2, 0)
+    assert dividends.analyst_targets(conn, "VLMR") is None
+    dividends.save(conn, [_row("COMI", 4.7)])                          # no longer covered
+    assert dividends.analyst_targets(conn, "COMI") is None

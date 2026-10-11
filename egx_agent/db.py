@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     data TEXT NOT NULL,             -- JSON: market_cap, pe, pb, eps_growth, revenue_growth, net_margin, roe, debt_equity
     updated TEXT
 );
+CREATE TABLE IF NOT EXISTS analyst_targets (
+    symbol TEXT PRIMARY KEY,        -- analysts' 12-month targets from TradingView (data/dividends.py ANALYSTS)
+    data TEXT NOT NULL,             -- JSON: avg, low, high, n, buy, hold, sell
+    updated TEXT
+);
 CREATE TABLE IF NOT EXISTS fin_history (
     symbol TEXT PRIMARY KEY,        -- each company's past quarters and years from TradingView (data/fundamentals.py)
     data TEXT NOT NULL,             -- JSON: q_end, y_end (timestamps), shares, q/y: {ni, rev, ...: lists, newest first}
