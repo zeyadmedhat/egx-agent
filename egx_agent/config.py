@@ -113,7 +113,7 @@ DEFAULTS: dict = {
     # 33.7% a year, worst drop −17.9% against −18.3%. +0.5% (fees only) changed nothing, +0.75–1% and +2% made less.
     "breakeven_pct": 1.5,
     "review_day": 10,                # ~2 weeks
-    "max_hold_days": 20,             # ~1 month (hard time stop)
+    "max_hold_days": 15,             # ~3 weeks (hard time stop): better than 20 in the 12 Oct 2026 replay
     # Automation
     "auto_paper": True,
     "history_years": 5,

@@ -19,5 +19,5 @@ stop_min_pct: 4.0
 stop_max_pct: 12.0
 target_r: 2.0
 review_day: 10
-max_hold_days: 20
+max_hold_days: 15
 history_years: 5

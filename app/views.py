@@ -441,7 +441,6 @@ def corporate_history(conn: sqlite3.Connection, sym: str, close: float) -> dict:
 
 
 EVENT_KINDS = ("dividend", "bonus", "split", "rights", "placement", "treasury_buy", "consolidation", "reduction")
-HOLD_CALENDAR_DAYS = 30       # about 20 sessions: the longest a trade is held
 
 
 def cautions_map(d: Data) -> dict[str, list[dict]]:
@@ -454,13 +453,14 @@ def cautions_map(d: Data) -> dict[str, list[dict]]:
             "SELECT symbol, MIN(ex_date) AS ex_date, amount FROM cash_dividends WHERE ex_date > ? GROUP BY symbol",
             (today,))}
         results = dividends.next_results(d.conn, today)
+        hold_days = round(d.cfg["max_hold_days"] * 7 / 5) + 1      # the longest a trade is held, in calendar days
         since = (date.fromisoformat(today) - pd.Timedelta(days=7)).isoformat()
         maybe = {r[0] for r in d.conn.execute(
             "SELECT symbol FROM corp_actions WHERE effective > ? UNION SELECT symbol FROM news "
             "WHERE symbol != '' AND tone < 0 AND published >= ?", (today, since))} | set(nxt) | set(results)
         out = {}
         for sym in sorted(maybe & set(d.table.index)):
-            c = news.cautions(d.conn, sym, today, HOLD_CALENDAR_DAYS, div=nxt.get(sym), results=results.get(sym))
+            c = news.cautions(d.conn, sym, today, hold_days, div=nxt.get(sym), results=results.get(sym))
             if c:
                 out[sym] = c
         return out
@@ -1544,7 +1544,7 @@ SETTINGS_SECTIONS = [
            "when there's no resistance within reach."),
         _f("review_day", "Review if no progress by session", 3, 30, 1, kind="int"),
         _f("max_hold_days", "Hard exit after sessions", 5, 40, 1, kind="int",
-           help="20 sessions ≈ 1 month (EGX trades Sunday–Thursday)."),
+           help="15 sessions ≈ 3 weeks, 20 ≈ 1 month (EGX trades Sunday–Thursday). 15 did best in the 2016–2026 replay."),
     ]},
 ]
 for _sec in SETTINGS_SECTIONS:   # your own numbers, or the strategy everyone on the website shares
