@@ -7,14 +7,11 @@
 name: Daily scan and website
 
 on:
-  schedule:                     # UTC. EGX closes 14:30 Cairo (UTC+3 in summer, UTC+2 in winter); prices are
-    - cron: "50 12 * * 0-4"     # usually there an hour later. The later runs catch late prices; a run with
-    - cron: "55 13 * * 0-4"     # nothing new only rebuilds the site.
-    - cron: "20 16 * * 0-4"
-    - cron: "20 19 * * 0-4"
-    - cron: "40 */3 * * *"      # every 3 hours, every day: connects friends who pressed Start in Telegram
-    - cron: "*/30 7-12 * * 0-4" # during the session (10:00–14:30 Cairo, summer or winter time): the live prices
-                                # scanned every half hour (scan.session_scan_due), scanned again after the close
+  schedule:                     # UTC, trading days (Sun–Thu): 9:30 Cairo before the open and 15:30 after the close
+    - cron: "30 6 * * 0-4"      # (EGX closes 14:30; its closing prices count as final from 15:30, scan.DATA_READY).
+    - cron: "30 7 * * 0-4"      # Each has a summer (UTC+3) and a winter (UTC+2) time; the "when" job lets only the
+    - cron: "30 12 * * 0-4"     # one at 9:30 or 15:30 Cairo go on. During the session the Telegram bot asks for a
+    - cron: "30 13 * * 0-4"     # run every half hour, 10:30–14:00, and backs these two up (worker/bot.js scanDue).
   workflow_dispatch:            # "Run workflow": the Run scan button on the site opens this page for the owner
     inputs:
       force_scan:
@@ -36,7 +33,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  when:
+    # A scheduled run goes on only at 9:30–10:29 or 15:30–16:29 Cairo (GitHub often starts late); every other run does.
+    runs-on: ubuntu-24.04
+    outputs:
+      go: ${{ steps.t.outputs.go }}
+    steps:
+      - id: t
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          now=$(TZ=Africa/Cairo date +%H%M)
+          if { [ "$now" -ge 930 ] && [ "$now" -lt 1030 ]; } || { [ "$now" -ge 1530 ] && [ "$now" -lt 1630 ]; }; then go=true; else go=false; fi
+          echo "Cairo time $now: go=$go"
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: when
+    if: needs.when.outputs.go == 'true'
     runs-on: ubuntu-24.04   # pinned: "latest" moves to a new Ubuntu by itself, which could break a run overnight
     timeout-minutes: 60
     outputs:

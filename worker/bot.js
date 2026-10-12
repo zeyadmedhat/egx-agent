@@ -855,13 +855,16 @@ export function parseHoldings(text) {
 }
 
 // ------------------------------------------------------------------ on-time scans
-// GitHub starts scheduled runs late, or not at all, when it's busy. After each close, every 10 minutes, the bot
-// checks whether that close's scan has reached it; if not, at each of these times (minutes after midnight, Cairo) it
-// asks GitHub to run the scan now. Not on the holidays EGX announced (info.hol, from egx_agent/holidays.py).
-const SLOTS = [940, 970, 1000, 1060, 1150, 1270]      // 15:40, 16:10, 16:40, 17:40, 19:10, 21:10
+// The website's runs (Cairo time, trading days only, not on the holidays EGX announced: info.hol from
+// egx_agent/holidays.py): GitHub's own timer starts one at 9:30 before the open and one at 15:30 after the close
+// (.github/workflows/site.yml), and the bot asks for one every half hour of the session, 10:30–14:00, for the live
+// prices. GitHub's timer runs late or not at all when it's busy, so the bot backs it up at the same two times: at
+// 10:05 if no run has reported since 9:30, and at 16:00 if that close's final scan hasn't arrived.
 const MORNING = [570, 600]                            // the reminder before the open: 9:30–10:00 Cairo
-const LAST_MINUTE = 1350                              // 22:30
 const SESSION_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu"]
+const SESSION = [630, 869]                            // 10:30–14:00: the live prices every half hour (scan.session_scan_due)
+const MORNING_RUN = 570, MORNING_CHECK = 605          // GitHub's 9:30 run; the bot checks for it at 10:05
+const CLOSE_CHECK = 960, LAST_MINUTE = 1350           // after the close: checked from 16:00 (GitHub's run is at 15:30)
 
 export function cairo(now = new Date()) {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit",
@@ -870,19 +873,21 @@ export function cairo(now = new Date()) {
   return { day: `${p.year}-${p.month}-${p.day}`, minute: +p.hour * 60 + +p.minute, weekday: p.weekday }
 }
 
-const SESSION = [630, 885]                            // 10:30–14:45: the live prices every half hour (scan.session_scan_due)
-
-// The slot to ask for now ("2026-09-30 940", or "2026-09-30 s660" during the session), or why not.
-export function scanDue(info, now) {
+// The run to ask for now ("2026-09-30 s660" during the session, "… m570" or "… c960" as GitHub's backup), or why not.
+// lastRun: when a website run last reported to the bot (cairo()), or null.
+export function scanDue(info, now, lastRun = null) {
   if (!SESSION_DAYS.includes(now.weekday) || ((info && info.hol) || []).includes(now.day)) return { why: "no session today" }
   if (now.minute >= SESSION[0] && now.minute <= SESSION[1]) {
     return { key: `${now.day} s${SESSION[0] + Math.floor((now.minute - SESSION[0]) / 30) * 30}` }
   }
+  if (now.minute >= MORNING_CHECK && now.minute < SESSION[0]) {
+    const ran = lastRun && lastRun.day === now.day && lastRun.minute >= MORNING_RUN
+    return ran ? { why: "the morning run is in" } : { key: `${now.day} m${MORNING_RUN}` }
+  }
+  if (now.minute < CLOSE_CHECK) return { why: "not a run time" }
   if (now.minute > LAST_MINUTE) return { why: "too late today" }
-  const slot = [...SLOTS].reverse().find(m => m <= now.minute)
-  if (slot == null) return { why: "before the close's prices" }
   if (info && info.scan === now.day && info.final !== false) return { why: "today's scan is in" }
-  return { key: `${now.day} ${slot}` }
+  return { key: `${now.day} c${CLOSE_CHECK}` }
 }
 
 // ------------------------------------------------------------------ the website inside Telegram (a mini app)
@@ -1025,6 +1030,7 @@ export class Bot {
     if (url.pathname === "/state" && req.method === "POST") {
       const state = await req.json()
       await store.put("state", state)
+      await store.put("last_run", new Date().toISOString())                // GitHub's 9:30 run happened (scanDue)
       await store.put("log", ((await store.get("log")) || []).filter(u => u.update_id > state.seen))
       await store.put("web", ((await store.get("web")) || []).filter(w => w.seq > (state.web_seen || 0)))
       const want = `${url.origin}/telegram`, info = await telegram(env, "getWebhookInfo", {})
@@ -1296,7 +1302,8 @@ export class Bot {
     const env = this.env, store = this.ctx.storage, c = cairo(now)
     const morning = await this.morning(c)
     if (!env.GH_TOKEN || !env.GITHUB_REPO) return json({ ok: false, why: "no GitHub key", morning })
-    const state = await store.get("state"), due = scanDue(state && state.info, c)
+    const state = await store.get("state"), ran = await store.get("last_run")
+    const due = scanDue(state && state.info, c, ran ? cairo(new Date(ran)) : null)
     if (!due.key) return json({ ok: true, why: due.why, morning })
     const last = await store.get("dispatch")
     if (last && last.key === due.key) return json({ ok: true, why: "asked already", morning })

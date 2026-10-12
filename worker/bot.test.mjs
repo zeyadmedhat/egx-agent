@@ -185,19 +185,25 @@ console.log("buttons and languages ok")
 
 // On-time scans: when the bot asks GitHub to scan
 const at = (day, hm, weekday = "Wed") => ({ day, minute: +hm.slice(0, 2) * 60 + +hm.slice(3), weekday })
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:30")).key, undefined)          // prices not out yet
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:45")).key, "2026-09-30 940")
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "16:20")).key, "2026-09-30 970")
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:30")).key, undefined)          // GitHub's own run
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:55")).key, undefined)
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "16:00")).key, "2026-09-30 c960")  // it didn't come
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "19:20")).key, "2026-09-30 c960")  // the same ask: once
 assert.equal(scanDue({ scan: "2026-09-30", final: true }, at("2026-09-30", "16:20")).key, undefined)  // it's in
-assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "16:20")).key, "2026-09-30 970")
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "16:20")).key, "2026-09-30 c960")
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-10-02", "16:20", "Fri")).key, undefined)
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "23:00")).key, undefined)
 assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "10:35")).key, "2026-09-30 s630")   // session
 assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "11:05")).key, "2026-09-30 s660")
-assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "14:40")).key, "2026-09-30 s870")
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "10:10")).key, undefined)          // not yet
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "14:05")).key, "2026-09-30 s840")   // the last
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "14:30")).key, undefined)
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "09:40")).key, undefined)          // GitHub's 9:30 run
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "10:05"), at("2026-09-30", "09:48")).key, undefined)  // it ran
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "10:05"), at("2026-09-29", "16:10")).key, "2026-09-30 m570")
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "10:15")).key, "2026-09-30 m570")
 assert.equal(scanDue({ scan: "2026-10-07", hol: ["2026-10-08"] }, at("2026-10-08", "11:05", "Thu")).key, undefined)  // holiday
 assert.equal(scanDue({ scan: "2026-10-07", hol: ["2026-10-08"] }, at("2026-10-08", "16:20", "Thu")).key, undefined)
+assert.equal(scanDue({ scan: "2026-10-07", hol: ["2026-10-08"] }, at("2026-10-08", "10:10", "Thu")).key, undefined)
 assert.deepEqual(cairo(new Date("2026-09-30T13:05:00Z")), { day: "2026-09-30", minute: 16 * 60 + 5, weekday: "Wed" })
 console.log("scan times ok")
 
