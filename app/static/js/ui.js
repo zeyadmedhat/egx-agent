@@ -395,8 +395,10 @@ export function Chance({ p, base, top }) {
     return html`<span class="chance-off" title="Not in the model's top 10% today. Its test results are about its top picks, so it doesn't give a chance for the rest.">${t('not a top pick')}</span>`;
   }
   const ratio = base ? p / base : 1;
-  return html`<span class=${cls('chance', ratio >= 1.3 ? 'up' : ratio <= 0.8 ? 'low' : '')}
-    title=${base ? `The average actively traded stock: ${fmt.pct(base, 0, false)}` : ''}>${fmt.pct(p, 0, false)}</span>`;
+  // the bar: the line in the middle is the average stock, so a bar past it beats the average (twice it fills the bar)
+  return html`<span class="chance-cell" title=${base ? t('The average actively traded stock: {v}', { v: fmt.pct(base, 0, false) }) : ''}>
+    <span class=${cls('chance', ratio >= 1.3 ? 'up' : ratio <= 0.8 ? 'low' : '')}>${fmt.pct(p, 0, false)}</span>
+    ${base > 0 && html`<span class="chance-bar" aria-hidden="true"><i class=${ratio >= 1 ? 'up' : ''} style=${`width:${Math.min(ratio / 2, 1) * 100}%`}></i></span>`}</span>`;
 }
 
 // Why the prediction model scored a stock as it did: the measures that pushed its score up (green) and down (red),

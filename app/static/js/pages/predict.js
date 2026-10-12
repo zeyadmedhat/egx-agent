@@ -48,6 +48,7 @@ export function PredictPage() {
         sub=${t('tested {a} – {b}', { a: fmt.date(r.from), b: fmt.date(r.to) })} />
     </div>
     ${data.health && ['weak', 'bad'].includes(data.health.status) && html`<div style="margin-top:12px"><${Health} h=${data.health} /></div>`}
+    <${YearBars} years=${r.years} pick="top" label="Its top 10%" />
 
     <section class="section">
       <${SectionHead} title="Today's ranking" count=${data.rows.length}
@@ -77,6 +78,7 @@ function Week({ data, rows, filters }) {
       <${Kpi} label="Years they beat the average stock" value=${`${tst.good_years} / ${years.length}`}
         sub=${years.length ? t('tested {a} – {b}', { a: years[0].year, b: years[years.length - 1].year }) : ''} />
     </div>
+    <${YearBars} years=${years} pick="strong" label="Strong picks" />
 
     <section class="section">
       <${SectionHead} title="Next week's ranking" count=${data.rows.length}
@@ -155,11 +157,13 @@ function ChanceTable({ rows, base }) {
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
     { key: 'p10', label: 'Chance in 2 weeks', align: 'r', title: 'Chance it reaches the target before the stop within 10 sessions',
       render: r => html`<${Chance} p=${r.p10} base=${base[10]} top=${r.top10} />` },
-    { key: 'stop_pct', label: 'Stop / target', align: 'r', title: "The chart's stop-loss and target for a buy at this close",
-      render: r => html`<span class="down">${fmt.pct(-r.stop_pct, 1)}</span> <span class="faint">/</span> <span class="up">${fmt.pct(r.target_pct, 1)}</span>` },
+    { key: 'target_pct', label: 'Target / stop', align: 'r', title: "The chart's target and stop-loss for a buy at this close",
+      render: r => html`<div class="up" style="white-space:nowrap"><b>${fmt.price(r.target)}</b> <span class="faint">${fmt.pct(r.target_pct, 1)}</span></div>
+        <div class="down" style="white-space:nowrap"><b>${fmt.price(r.stop)}</b> <span class="faint">${fmt.pct(-r.stop_pct, 1)}</span></div>` },
     { key: 'action', label: 'Agent', sortValue: r => (r.action === 'BUY' ? 0 : r.action ? 1 : r.held ? 2 : 3),
       render: r => html`<div class="row" style="gap:6px">${r.action && html`<${StatusChip} status=${r.action} />`}
         ${r.held && html`<span class="tag"><${Icon} name="briefcase" size=${12} />${t('Held')}</span>`}</div>` },
+    { key: 'why', label: 'Why', sortable: false, render: r => html`<${Reason} items=${r[`why${HZ}`]} />` },
     { key: 'shariah', label: 'Shariah', sortable: false, render: r => html`<${Badges} info=${r.info} compact />` },
   ];
   return html`<${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol} limit=${10}
@@ -226,4 +230,20 @@ function About({ m, data, r, onTrain, running }) {
         <${Icon} name="refresh" />${t('Retrain now')}</button>`}
     </div>
   </div>`;
+}
+
+// Each tested year: how often its picks reached the target first, against the average stock (bars of the same scale).
+function YearBars({ years, pick, label }) {
+  if (!years || !years.length) return null;
+  const max = Math.max(...years.flatMap(y => [y[pick].hit, y.all.hit]));
+  const bar = (v, c) => html`<span class="yb-bar"><i class=${c} style=${`width:${(v / max) * 100}%`}></i></span>`;
+  return html`<${Fold} title="Each year it was tested" hint=${t('{label} against the average stock: how often the target came first', { label: t(label) })}>
+    <div class="year-bars">
+      <div class="yb-key"><span><i class="up"></i>${t(label)}</span><span><i class="avg"></i>${t('The average stock')}</span></div>
+      ${years.map(y => html`<div class="yb-row" key=${y.year}><span class="yb-year">${y.year}</span>
+        <div class="yb-pair">${bar(y[pick].hit, 'up')}${bar(y.all.hit, 'avg')}</div>
+        <span class="yb-v"><b class=${y[pick].hit > y.all.hit ? 'up' : 'down'}>${fmt.pct(y[pick].hit, 0, false)}</b>
+          <span class="faint"> ${fmt.pct(y.all.hit, 0, false)}</span></span></div>`)}
+    </div>
+    <p class="faint" style="font-size:12px;margin-top:8px">${t('Each year was predicted by a version that had never seen it.')}</p><//>`;
 }

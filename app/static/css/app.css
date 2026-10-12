@@ -712,6 +712,25 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .chance.up { color: var(--up); }
 .chance.low { color: var(--text-3); font-weight: 600; }
 .chance-off { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.chance-cell { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.chance-bar { position: relative; width: 64px; height: 5px; border-radius: 3px; background: var(--border, rgba(127,127,127,.2)); overflow: hidden; }
+.chance-bar i { position: absolute; inset: 0 auto 0 0; background: var(--text-3); border-radius: 3px; }
+.chance-bar i.up { background: var(--up); }
+.chance-bar::after { content: ""; position: absolute; left: 50%; top: -1px; bottom: -1px; width: 2px; background: var(--text-2); }
+
+/* Rankings: each tested year, its picks against the average stock */
+.year-bars { display: grid; gap: 7px; }
+.yb-key { display: flex; gap: 16px; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+.yb-key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; vertical-align: -1px; }
+.yb-row { display: grid; grid-template-columns: 44px 1fr 86px; gap: 10px; align-items: center; font-size: 13px; }
+.yb-year { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.yb-pair { display: grid; gap: 3px; }
+.yb-bar { display: block; height: 7px; border-radius: 4px; background: transparent; }
+.yb-bar i, .yb-key i { display: block; height: 100%; border-radius: 4px; }
+.yb-key i { display: inline-block; }
+.yb-bar i.up, .yb-key i.up { background: var(--up); }
+.yb-bar i.avg, .yb-key i.avg { background: var(--text-3); opacity: .55; }
+.yb-v { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .switch-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
   font-size: 13px; font-weight: 600; color: inherit; white-space: nowrap; }
 .switch-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }

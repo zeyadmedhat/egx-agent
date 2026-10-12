@@ -1830,4 +1830,10 @@ export const AR = {
   "resistance {v}": "المقاومة {v}",
   "on a level: {what}": "على مستوى: {what}",
   "Prices where buyers or sellers stepped in before: the index's swing lows and highs of the last year, Fibonacci retracements (23.6–78.6%) and extensions of its latest big rise, its 20- and 50-day averages, monthly pivot points, the level where the most shares traded in 6 months and the 1-year high, the same tools as each stock's levels. Levels that sit together make one zone; the more tools agree, the stronger it is. They show where the index has turned before, not where it will turn.": "أسعار تدخّل عندها المشترون أو البائعون من قبل: قيعان وقمم المؤشر في العام الأخير، وارتدادات فيبوناتشي (23.6–78.6%) وامتداداتها لآخر صعود كبير، ومتوسطاه لـ20 و50 يومًا، ونقاط الارتكاز الشهرية، والمستوى الذي تداول عنده أكبر عدد من الأسهم في 6 أشهر، وأعلى سعر في عام، وهي نفس أدوات مستويات كل سهم. المستويات المتقاربة تصبح منطقة واحدة، وكلما اتفقت أدوات أكثر كانت أقوى. توضح أين انعكس المؤشر من قبل، لا أين سينعكس.",
+  "Each year it was tested": "كل عام اختُبر فيه",
+  "{label} against the average stock: how often the target came first": "{label} مقابل السهم المتوسط: كم مرة جاء الهدف أولًا",
+  "Strong picks": "الاختيارات القوية",
+  "The average stock": "السهم المتوسط",
+  "Each year was predicted by a version that had never seen it.": "كل عام توقّعته نسخة لم تره من قبل.",
+  "The average actively traded stock: {v}": "السهم النشط المتوسط: {v}",
 };
