@@ -39,13 +39,6 @@ if curl -s "$URL/api/health" | grep -q egx-trading-agent; then
   exit 0
 fi
 
-# The old Streamlit version of the dashboard may still be running on the same address: stop it first.
-if pgrep -f "streamlit run app/main.py" >/dev/null; then
-  echo "Stopping the old version of the dashboard…"
-  pkill -f "streamlit run app/main.py"
-  sleep 2
-  pkill -9 -f "streamlit run app/main.py" 2>/dev/null
-fi
 if lsof -nP -iTCP:8501 -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Another program is using port 8501. Close it (or restart your Mac) and double-click again."
   pause_and_exit
