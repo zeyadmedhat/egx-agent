@@ -44,8 +44,6 @@ export function PredictPage() {
     <div class="kpis">
       <${Kpi} label="Its top 10% each day: reached the target first" value=${fmt.pct(r.top.hit, 0, false)} valueClass="up"
         sub=${t('the average stock {v}', { v: fmt.pct(r.all.hit, 0, false) })} />
-      <${Kpi} label="Its top 10%: average trade" value=${fmt.pct(r.top.ret, 1)} valueClass=${tone(r.top.ret)}
-        sub=${t('the average stock {v}, after fees', { v: fmt.pct(r.all.ret, 1) })} />
       <${Kpi} label="Years it beat the average stock" value=${`${r.good_years} / ${(r.years || []).length}`}
         sub=${t('tested {a} – {b}', { a: fmt.date(r.from), b: fmt.date(r.to) })} />
     </div>
@@ -76,8 +74,6 @@ function Week({ data, rows, filters }) {
     <div class="kpis">
       <${Kpi} label="Strong picks: reached the target first" value=${fmt.pct(s.hit, 0, false)} valueClass="up"
         sub=${t('the average stock {v}', { v: fmt.pct(a.hit, 0, false) })} />
-      <${Kpi} label="Strong picks: average trade" value=${fmt.pct(s.ret, 1)} valueClass=${tone(s.ret)}
-        sub=${t('the average stock {v}, after fees', { v: fmt.pct(a.ret, 1) })} />
       <${Kpi} label="Years they beat the average stock" value=${`${tst.good_years} / ${years.length}`}
         sub=${years.length ? t('tested {a} – {b}', { a: years[0].year, b: years[years.length - 1].year }) : ''} />
     </div>
@@ -144,9 +140,6 @@ function Intro({ data, onTrain, running }) {
   </div>`;
 }
 
-// What trades it scored like this averaged in its tests, after fees (predict.ret_calibrator): wins, stops and the
-// ones that ran out of time together. Only for the stocks it gives a chance for.
-export const expected = (r, hz) => (r[`top${hz}`] && r[`exp${hz}`] != null ? r[`exp${hz}`] : null);
 
 export function RankMove({ now, before }) {
   if (!now || !before || now === before) return null;
@@ -162,9 +155,6 @@ function ChanceTable({ rows, base }) {
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info} />` },
     { key: 'p10', label: 'Chance in 2 weeks', align: 'r', title: 'Chance it reaches the target before the stop within 10 sessions',
       render: r => html`<${Chance} p=${r.p10} base=${base[10]} top=${r.top10} />` },
-    { key: 'ev', label: 'Average trade', align: 'r', sortValue: r => expected(r, HZ) ?? -1,
-      title: 'What trades it rated like this made on average in its tests, after fees',
-      render: r => { const v = expected(r, HZ); return v == null ? html`<span class="faint">–</span>` : html`<b class=${tone(v)}>${fmt.pct(v, 1)}</b>`; } },
     { key: 'stop_pct', label: 'Stop / target', align: 'r', title: "The chart's stop-loss and target for a buy at this close",
       render: r => html`<span class="down">${fmt.pct(-r.stop_pct, 1)}</span> <span class="faint">/</span> <span class="up">${fmt.pct(r.target_pct, 1)}</span>` },
     { key: 'action', label: 'Agent', sortValue: r => (r.action === 'BUY' ? 0 : r.action ? 1 : r.held ? 2 : 3),

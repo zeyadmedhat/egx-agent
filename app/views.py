@@ -1316,7 +1316,7 @@ def predictions(d: Data) -> dict:
             "SELECT symbol, horizon, why FROM predictions WHERE date=?", (lt["date"].iloc[0],))}
         by = {}
         for sym, r in lt.iterrows():
-            by[sym] = {f"{k}{hz}": r.get(f"{k}{hz}") for hz in predict.HORIZONS for k in ("p", "rank", "exp")}
+            by[sym] = {f"{k}{hz}": r.get(f"{k}{hz}") for hz in predict.HORIZONS for k in ("p", "rank")}
             by[sym]["rating"] = rating(r.get("rank10"), len(lt))
             by[sym].update({f"top{hz}": bool(r.get(f"rank{hz}", cut + 1) <= cut) for hz in predict.HORIZONS})
             # what pushed its score up or down (predict.explain): [{f, up, text}, …]
