@@ -954,7 +954,9 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
                "ath": _r(x["from_ath"], 4), "hi": _r(x["high52"], 2), "lo": _r(x["low52"], 2),
                "off": x["close"] < x["ema50"], "blk": bool(cfg.get("riskoff_block_buys")), "b50": _r(x["above50"], 3),
                "wb": bool(views.market_info(conn).get("weak_breadth")),    # fewer than 40% above: no new BUYs either
-               "md": [round(md["score"]), md["label"]] if (md := views.mood_brief(d)) else None}
+               "md": [round(md["score"]), md["label"]] if (md := views.mood_brief(d)) else None,
+               # the nearest two supports and resistances (levels.nearby), nearest first
+               "sr": [[_r(z["price"], 0) for z in (x.get("levels") or {}).get(k, [])[:2]] for k in ("supports", "resistances")]}
     # final: False while the scan is one taken during the session (the Worker then still asks for the one after it)
     return {"scan": scan_date, "final": scan.scan_is_final(conn), "pred": db.get_meta(conn, "prediction_date"),
             "stocks": stocks, "bands": [[b["from"], b["to"], _r(b["hit"], 4), _r(b["ret"], 4)] for b in preds.get("bands") or []],

@@ -1293,6 +1293,7 @@ def index_view(d: Data) -> dict:
             "drop_1y": float((year["close"] / year["close"].cummax() - 1).min()),
             "periods": periods, "years": years[-10:][::-1], "risk_off": bool(m.get("egx30_off", m.get("risk_off"))) if m else None,
             "above50": b["above50"] if b else None,
+            "levels": levels.nearby(ind),         # its support and resistance, the same tools as a stock's
             "series": {"time": [str(t.date()) for t in ind.index], **{k: column(ind[k]) for k in SERIES_COLS}},
             # weekly points, counted back from the last close so the chart ends on it
             "usd_line": [{"time": str(t.date()), "value": round(float(v), 2)} for t, v in in_usd.dropna().iloc[::-5][::-1].items()]

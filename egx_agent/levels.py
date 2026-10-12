@@ -113,6 +113,13 @@ def _zones(cands: list[tuple[float, float, str]], width: float) -> list[dict]:
     return out
 
 
+def _sides(zones: list[dict], c: float) -> tuple[list[dict], list[dict]]:
+    """The zones under the price (supports) and over it (resistances), nearest first. A zone the price is inside is
+    neither."""
+    return (sorted([z for z in zones if z["high"] < c], key=lambda z: -z["price"]),
+            sorted([z for z in zones if z["low"] > c], key=lambda z: z["price"]))
+
+
 def chart_plan(o: dict, cfg: dict, entry: float | None = None) -> dict | None:
     """Stop, target and the levels behind them for buying at today's close (or at `entry`, another price). o: numpy
     arrays (COLS) and dates, oldest first, ending at the day in question. None: too little history."""
@@ -125,7 +132,7 @@ def chart_plan(o: dict, cfg: dict, entry: float | None = None) -> dict | None:
     lo_pct, hi_pct = max(cfg["stop_min_pct"] / 100, atr / c), cfg["stop_max_pct"] / 100
 
     # Stop: under the nearest solid support that isn't inside a normal day's wiggle nor past stop_max_pct.
-    supports = sorted([z for z in zones if z["high"] < c], key=lambda z: -z["price"])
+    supports, resist = _sides(zones, c)
     stop, stop_zone = None, None
     for need in (SOLID, 0):
         for z in supports:
@@ -144,7 +151,6 @@ def chart_plan(o: dict, cfg: dict, entry: float | None = None) -> dict | None:
     # Target: under the first real resistance that pays at least target_min_r × the risk (capped at target_max_r).
     # A solid level passed on the way is shown as a hurdle.
     min_r, max_r = cfg.get("target_min_r", 1.5), cfg.get("target_max_r", 4.0)
-    resist = sorted([z for z in zones if z["low"] > c], key=lambda z: z["price"])
     target, target_zone, hurdle = None, None, None
     for z in resist:
         t = z["low"] - TARGET_BUFFER * atr
@@ -170,6 +176,20 @@ def chart_plan(o: dict, cfg: dict, entry: float | None = None) -> dict | None:
         "resistances": [_public(z) for z in resist][:8],
         "fib": _fib_leg(o),
     }
+
+
+def nearby(ind: pd.DataFrame, n: int = 6) -> dict | None:
+    """The support and resistance zones around the last close, nearest first, and the zone the price is in (at), if
+    any: for a chart nobody buys from, EGX30 (views.index_view). The same tools and zones as chart_plan."""
+    o = arrays(ind.tail(LOOKBACK))
+    c, atr = float(o["close"][-1]), float(o["atr14"][-1])
+    if len(o["close"]) < 60 or not (np.isfinite(c) and np.isfinite(atr) and atr > 0):
+        return None
+    zones = _zones(_candidates(o), max(atr / 3, c * 0.004))
+    supports, resist = _sides(zones, c)
+    at = next((z for z in zones if z["low"] <= c <= z["high"]), None)
+    return {"close": c, "supports": [_public(z) for z in supports[:n]], "resistances": [_public(z) for z in resist[:n]],
+            "at": _public(at) if at else None, "fib": _fib_leg(o)}
 
 
 def _public(z: dict) -> dict:

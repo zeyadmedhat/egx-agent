@@ -1,7 +1,7 @@
 // EGX30: the index's chart with its averages, where it stands, its returns in pounds and in dollars (and EGX70's),
 // each year's, how jumpy it is, and the agent's rule about it (views.index_view). Context only.
 import { html, useApi, useState, fmt, tone, cls, remember } from '../lib.js';
-import { Kpi, Callout, PageHead, SectionHead, PageLoading, DataTable, Seg, Fold, Change, LiveChart, Empty } from '../ui.js';
+import { Kpi, Callout, PageHead, SectionHead, PageLoading, DataTable, Seg, Fold, Change, LiveChart, Empty, More, Icon, sources } from '../ui.js';
 import { t } from '../i18n.js';
 import { PriceChart, LineChart } from '../charts.js';
 
@@ -10,7 +10,7 @@ const RANGES = [
   { value: 1250, label: '5Y' }, { value: 100000, label: 'All' },
 ];
 const VIEWS = [{ value: 'agent', label: 'Agent chart' }, { value: 'live', label: 'Live (TradingView)' }];
-const PANES = [['ema', 'Averages'], ['volume', 'Volume'], ['rsi', 'RSI'], ['macd', 'MACD']];
+const PANES = [['zones', 'Support & resistance'], ['fib', 'Fibonacci'], ['ema', 'Averages'], ['volume', 'Volume'], ['rsi', 'RSI'], ['macd', 'MACD']];
 const PERIOD = { '1W': '1 week', '1M': '1 month', '3M': '3 months', '6M': '6 months', YTD: 'This year', '1Y': '1 year',
   '3Y': '3 years', '5Y': '5 years' };
 const pct = v => (v == null ? html`<span class="faint">–</span>` : html`<b class=${tone(v)}>${fmt.pct(v, 1)}</b>`);
@@ -19,7 +19,7 @@ export function Egx30Page() {
   const { data, error } = useApi('/egx30');
   const [bars, setBars] = useState(Number(remember('egx30-bars')) || 250);
   const [view, setView] = useState('agent');
-  const [show, setShow] = useState({ ema: true, volume: false, rsi: true, macd: false });
+  const [show, setShow] = useState({ zones: true, fib: false, ema: true, volume: false, rsi: true, macd: false });
   if (!data) return html`<${PageLoading} error=${error} />`;
   if (!data.has_data) {
     return html`<${PageHead} title="EGX30" /><div class="card"><${Empty} icon="bars" title="No price data yet"
@@ -55,8 +55,10 @@ export function Egx30Page() {
           <div class="right">${PANES.map(([k, label]) => html`<button class=${cls('toggle-chip', show[k] && 'on')}
             onClick=${() => setShow(s => ({ ...s, [k]: !s[k] }))}>${t(label)}</button>`)}</div>`}
       </div>
-      ${view === 'agent' ? html`<${PriceChart} series=${d.series} bars=${bars} show=${show} />` : html`<${LiveChart} symbol="EGX30" />`}
+      ${view === 'agent' ? html`<${PriceChart} series=${d.series} bars=${bars} show=${show} chart=${d.levels} />` : html`<${LiveChart} symbol="EGX30" />`}
     </div>
+
+    ${d.levels && html`<${Levels} z=${d.levels} />`}
 
     <section class="section">
       <${SectionHead} title="Returns" hint="In dollars: what a dollar investor made, after the pound's moves. EGX70: smaller companies, all weighted the same." />
@@ -85,3 +87,30 @@ export function Egx30Page() {
         <${Kpi} label="RSI" value=${fmt.num(d.rsi14, 0)} sub=${d.rsi14 >= 70 ? t('stretched up') : d.rsi14 <= 30 ? t('stretched down') : t('neither stretched up nor down')} />
       </div><//>`;
 }
+
+// Support and resistance around the last close (egx_agent/levels.py nearby): the same tools as a stock's levels.
+const dots = z => '●'.repeat(Math.min(5, Math.round(z.strength / 1.5)) || 1);
+function Levels({ z }) {
+  const zone = (x, down) => html`<div class=${cls('zone', down ? 'down' : 'up')}><span class="p">${fmt.int(x.price)}
+      <small><span dir="ltr">${fmt.pct(x.price / z.close - 1, 1)}</span></small></span>
+    <span class="s" title=${t('Strength')}>${dots(x)}</span><span class="w">${sources(x.sources)}</span></div>`;
+  const s1 = z.supports[0], r1 = z.resistances[0];
+  return html`<div class="card" style="margin-top:14px">
+    <div class="card-title"><${Icon} name="target" size=${15} />${t('Support & resistance')}
+      <span class="right faint">${[s1 && t('support {v}', { v: fmt.int(s1.price) }), r1 && t('resistance {v}', { v: fmt.int(r1.price) })]
+        .filter(Boolean).join(' · ')}</span></div>
+    <div class="zone-list">
+      ${z.resistances.slice().reverse().map(x => zone(x, false))}
+      <div class="zone now"><span class="p">${fmt.int(z.close)}</span><span>${t('Last close')}${z.at
+        ? html` · <span class="faint">${t('on a level: {what}', { what: sources(z.at.sources) })}</span>` : ''}</span></div>
+      ${z.supports.map(x => zone(x, true))}</div>
+    <p class="faint" style="font-size:12px;margin-top:8px">${t('More dots: more tools agree on the level.')}</p>
+    <${More} label="How these are worked out"><p>${t(LEVELS_HOW)}</p><//>
+  </div>`;
+}
+
+const LEVELS_HOW = 'Prices where buyers or sellers stepped in before: the index\'s swing lows and highs of the last year, '
+  + 'Fibonacci retracements (23.6–78.6%) and extensions of its latest big rise, its 20- and 50-day averages, monthly '
+  + 'pivot points, the level where the most shares traded in 6 months and the 1-year high, the same tools as each '
+  + 'stock\'s levels. Levels that sit together make one zone; the more tools agree, the stronger it is. They show where '
+  + 'the index has turned before, not where it will turn.';

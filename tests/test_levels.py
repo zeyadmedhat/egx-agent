@@ -95,3 +95,14 @@ def test_entries_on_a_dip_and_a_breakout_have_their_own_plan():
         assert got["breakout"]["price"] == float(ind["high"].tail(20).max()) > c
     assert got, "a V-shaped chart has at least one way in"
     assert levels.entries(ind, CFG, None) == []
+
+
+def test_the_index_gets_the_same_levels_without_a_stop_or_target():
+    ind = add_indicators(frame(V_PATH))
+    z, p = levels.nearby(ind), levels.plan_at(ind, CFG)
+    assert z["close"] == p["close"] and z["resistances"] == p["resistances"][:6]     # the same zones as a stock's
+    assert all(s["high"] < z["close"] for s in z["supports"]) and all(r["low"] > z["close"] for r in z["resistances"])
+    assert [s["price"] for s in z["supports"]] == sorted((s["price"] for s in z["supports"]), reverse=True)
+    assert any("swing low" in w for s in z["supports"] for w in s["sources"])          # the low at 99 that held
+    assert z["supports"][:3] == p["supports"][:3] and "stop" not in z
+    assert levels.nearby(ind.head(40)) is None                                         # too little history

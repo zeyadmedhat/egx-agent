@@ -3,7 +3,7 @@ import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO, 
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, WatchStar,
   Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard, sessionState,
-  Bell, useBells, ownerText,
+  Bell, useBells, ownerText, sources,
 } from '../ui.js';
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
@@ -293,13 +293,6 @@ function SignalPanel({ data }) {
 }
 
 // Where a level comes from: "swing low 2026-03-16" → "Swing low (16 Mar 2026)", each in the chosen language.
-function source(what) {
-  const m = /^(.*?) (\d{4}-\d{2}-\d{2})$/.exec(what);
-  const name = m ? m[1] : what;
-  const label = t(name.charAt(0).toUpperCase() + name.slice(1));
-  return m ? `${label} (${fmt.date(m[2])})` : label;
-}
-const sources = list => (list || []).map(source).join(' · ');
 
 // The chart zone your stop or target sits at. levels.py puts a stop 0.3× the daily range under a support's low and a
 // target 0.1× under a resistance's low; the range has moved since they were set, so the match is a little loose.

@@ -883,3 +883,13 @@ export function ownerText(m) {
   return t(m.after > m.before ? '{who} raised its stake from {a} to {b}' : '{who} cut its stake from {a} to {b}',
     { who: m.holder, a: pct1(m.before), b: pct1(m.after) });
 }
+
+// What makes a support or resistance level (egx_agent/levels.py sources): "swing low 2026-03-02" → "Swing low (2 Mar
+// 2026)". Stock pages and EGX30.
+function source(what) {
+  const m = /^(.*?) (\d{4}-\d{2}-\d{2})$/.exec(what);
+  const name = m ? m[1] : what;
+  const label = t(name.charAt(0).toUpperCase() + name.slice(1));
+  return m ? `${label} (${fmt.date(m[2])})` : label;
+}
+export const sources = list => (list || []).map(source).join(' · ');
