@@ -309,25 +309,42 @@ def _cold_lines(d: views.Data, lang: str = "en") -> list[str]:
                 "Consider smaller positions until they recover."]
 
 
+def _market_head(d: views.Data, m: dict, scan_date: str, blocked, lang: str = "en", back: bool = False) -> list[str]:
+    """The top of both evening messages (yours and the friends'): the close, EGX30 and whether buys are on, breadth
+    and its switch, what turns new BUYs back on (back, the friends' message; yours says it under the orders) and the
+    market mood."""
+    ar = lang == "ar"
+    if ar:
+        mood = ("🔴 تجنب المخاطر" + (": لا مشتريات جديدة" if blocked else "")) if m.get("risk_off") else "🟢 السوق جيد"
+        lines = [f"📊 <b>EGX Agent · إغلاق {_date(scan_date, lang, True)}</b>"]
+    else:
+        mood = ("🔴 Risk-off" + (": no new buys" if blocked else "")) if m.get("risk_off") else "🟢 Market OK"
+        lines = [f"📊 <b>EGX Agent · {views.nice_date(scan_date, True)} close</b>"]
+    lines.append(f"EGX30 {m['egx30_close']:,.0f}  {'▼' if m['egx30_change'] < 0 else '▲'} {m['egx30_change']:+.1%} · {mood}")
+    b = views.breadth_data(d)
+    if b:
+        v = breadth.verdict(b, m.get("egx30_off", m.get("risk_off")))
+        if v["change_week"] is None:
+            week = ""
+        else:
+            week = f" ({v['change_week'] * 100:+.0f} {'نقطة في أسبوع' if ar else 'pts in a week'})"
+        lines.append(f"الاتساع: {b['above50']:.0%} من الأسهم فوق متوسط 50 يومًا{week}" if ar else
+                     f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
+        lines.append(_switch_line(v, lang))
+    if back and blocked and (line := _back_line(m, b, lang)):
+        lines.append(line)
+    if line := _mood_line(d, lang):
+        lines.append(line)
+    return lines
+
+
 def build_message(d: views.Data) -> tuple[str, bool]:
     """The scan summary as Telegram HTML, and whether it asks you to do anything."""
     m = views.market_info(d.conn)
     o = views.orders(d)
     if not m or not o:
         return "<b>EGX Agent</b>\nNo scan yet. Open the dashboard and press Run scan.", False
-    head = [f"📊 <b>EGX Agent · {views.nice_date(o['scan_date'], True)} close</b>"]
-    mood = "🔴 Risk-off" if m.get("risk_off") else "🟢 Market OK"
-    if o["blocked"]:
-        mood += ": no new buys"
-    head.append(f"EGX30 {m['egx30_close']:,.0f}  {'▼' if m['egx30_change'] < 0 else '▲'} {m['egx30_change']:+.1%} · {mood}")
-    b = views.breadth_data(d)
-    if b:
-        v = breadth.verdict(b, m.get("egx30_off", m.get("risk_off")))
-        week = f" ({v['change_week'] * 100:+.0f} pts in a week)" if v["change_week"] is not None else ""
-        head.append(f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
-        head.append(_switch_line(v))
-    if line := _mood_line(d):
-        head.append(line)
+    head = _market_head(d, m, o["scan_date"], o["blocked"])
 
     preds = views.predictions(d)
     warn = views.cautions_map(d)
@@ -390,27 +407,7 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
     buys = [r for r in rows if r["action"] == "BUY"]
     session = views.sessions_after(scan_date, 1)
     blocked = m.get("risk_off") and d.cfg.get("riskoff_block_buys")
-    if ar:
-        mood = ("🔴 تجنب المخاطر" + (": لا مشتريات جديدة" if blocked else "")) if m.get("risk_off") else "🟢 السوق جيد"
-        lines = [f"📊 <b>EGX Agent · إغلاق {_date(scan_date, lang, True)}</b>"]
-    else:
-        mood = ("🔴 Risk-off" + (": no new buys" if blocked else "")) if m.get("risk_off") else "🟢 Market OK"
-        lines = [f"📊 <b>EGX Agent · {views.nice_date(scan_date, True)} close</b>"]
-    lines.append(f"EGX30 {m['egx30_close']:,.0f}  {'▼' if m['egx30_change'] < 0 else '▲'} {m['egx30_change']:+.1%} · {mood}")
-    b = views.breadth_data(d)
-    if b:
-        v = breadth.verdict(b, m.get("egx30_off", m.get("risk_off")))
-        if v["change_week"] is None:
-            week = ""
-        else:
-            week = f" ({v['change_week'] * 100:+.0f} {'نقطة في أسبوع' if ar else 'pts in a week'})"
-        lines.append(f"الاتساع: {b['above50']:.0%} من الأسهم فوق متوسط 50 يومًا{week}" if ar else
-                     f"Breadth: {b['above50']:.0%} of stocks above their 50-day average{week}")
-        lines.append(_switch_line(v, lang))
-    if blocked and (line := _back_line(m, b, lang)):
-        lines.append(line)
-    if line := _mood_line(d, lang):
-        lines.append(line)
+    lines = _market_head(d, m, scan_date, blocked, lang, back=True)
     preds = views.predictions(d)
     warn = views.cautions_map(d)
     if ar:
