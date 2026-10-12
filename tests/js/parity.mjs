@@ -5,6 +5,7 @@ import * as E from '../../app/static/js/local/engine.js';
 import { readBackup } from '../../app/static/js/local/site.js';
 import { planTrade } from '../../app/static/js/sizing.js';
 import * as I from '../../app/static/js/insights.js';
+import { orders } from '../../app/static/js/local/api.js';
 
 const input = JSON.parse(await new Promise(resolve => {
   let s = '';
@@ -69,6 +70,13 @@ const OPS = {
   expected: ({ times, holidays }) => { E.setHolidays(holidays); return times.map(t => E.expectedSessionDate(new Date(t))); },
   stopFrom: ({ times }) => times.map(t => E.stopFrom(new Date(t))),
   px: ({ values }) => values.map(v => E.px(v)),
+  // the orders for the next session (local/api.js orders) from the same signals and positions as views.orders
+  orders: ({ scan_date: day, rows, positions, market, coming, cfg, holidays }) => {
+    E.setHolidays(holidays);
+    const c = { signals: [day, rows], core: { market, dividends_coming: coming, kashif_url: '' }, cfg,
+      book: { checklist: {} }, stocks: new Map() };
+    return orders(c, positions);
+  },
 };
 
 const results = input.cases.map(c => {

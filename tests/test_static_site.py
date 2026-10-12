@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 from cryptography.exceptions import InvalidTag
 
-from app import static_site
+from app import static_site, views
 from egx_agent import config, corporate, db, holidays, levels, portfolio, risk, scan, strategy
 from egx_agent.data import prices as prices_mod
 from egx_agent.indicators import add_indicators
@@ -942,3 +942,34 @@ def test_wallet_counts_top_ups_withdrawals_fees_and_sales_still_settling():
     assert e["unsettled"] == [500, 0] and e["summary"]["cash"] == pytest.approx(s["cash"] - 5)   # Settle now: 700 for 5
     assert c["value"] == [1000, 2000, 1500] and c["max_drawdown"] == 0 and c["ret"] == 0
     assert c["index_ret"] == pytest.approx((20 - 500 / 110) * 110 / 1500 - 1)  # what you put in bought EGX30 too
+
+
+@needs_node
+def test_the_orders_list_is_the_same_on_the_site_as_on_the_mac_and_in_telegram(tmp_path, monkeypatch):
+    """views.orders (the Mac and a linked friend's Telegram) and local/api.js orders (the site) are written twice:
+    every kind of order, from the same signals and positions, must come out word for word the same."""
+    day, session = "2026-09-02", "2026-09-03"
+    pos = lambda sym, status, **kw: {"id": len(sym), "symbol": sym, "status": status, "shares": 1250, "stop": 9.87,  # noqa: E731
+                                     "target": 12.5, "day": 4, "reason": f"{sym} reason", **kw}
+    positions = [pos("AAA", "HOLD"), pos("BBB", "EXIT"), pos("CCC", "BOUNCE", bounce_level=8.123),
+                 pos("DDD", "TIGHTEN STOP", prev_stop=9.1), pos("EEE", "REVIEW", day=12),
+                 pos("FFF", "ADJUST", adjust={"describe": "1 free share for every 4 you hold", "ex_date": "2026-08-30"}),
+                 pos("GGG", "HOLD", stop=4.321)]
+    rows = [{"symbol": "HHH", "action": "BUY", "shares": 3400, "entry_high": 15.234, "stop": 13.9, "target": 18.05,
+             "amount": 51795.6, "risk_egp": 4535.6, "source": "model", "score": 80},
+            {"symbol": "III", "action": "BUY", "shares": 0, "size_note": "not enough cash", "score": 70},
+            {"symbol": "JJJ", "action": "WATCH", "shares": 0, "size_note": "watch only", "score": 60}]
+    market = {"risk_off": True}
+    coming = {"GGG": {"ex_date": session, "amount": 0.35}, "AAA": {"ex_date": "2026-09-20", "amount": 1.0}}
+    cfg = {**config.DEFAULTS, "riskoff_block_buys": True}
+    conn = db.connect(tmp_path / "t.db")
+    d = views.Data(conn, cfg, views.Cache())
+    monkeypatch.setattr(views, "signals", lambda _d: (day, rows))
+    monkeypatch.setattr(views, "market_info", lambda _c: market)
+    monkeypatch.setattr(views.dividends, "coming", lambda _c, _day: coming)
+    py = views.orders(d, positions)
+    js, = run_js({"op": "orders", "args": {"scan_date": day, "rows": rows, "positions": positions, "market": market,
+                                           "coming": coming, "cfg": cfg, "holidays": dict(holidays.HOLIDAYS)}})
+    strip = lambda o: {**o, "items": [{k: v for k, v in it.items() if k != "info"} for it in o["items"]]}  # noqa: E731
+    assert len(py["items"]) == 7 and py["session"] == session and py["blocked"]
+    assert strip(js) == strip(py)

@@ -169,7 +169,7 @@ function status(c, positions) {
   };
 }
 
-function orders(c, positions) {
+export function orders(c, positions) {     // also tests/js/parity.mjs: the same list as views.orders
   const [scanDate, rows] = signals(c);
   if (!scanDate) return null;
   const m = c.core.market || {};
