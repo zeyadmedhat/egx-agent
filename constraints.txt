@@ -1,7 +1,6 @@
 # The exact versions the website's daily run installs (.github/workflows/site.yml: pip install -r requirements.txt -c constraints.txt),
 # so a new release of a package can't break the live run by itself. Tested together on this Mac (Python 3.13).
 # To update: upgrade on the Mac, run the tests, then: .venv/bin/pip freeze | grep -v '@' > constraints.txt (and put these lines back)
-altair==6.3.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
@@ -20,7 +19,6 @@ httptools==0.9.0
 httpx==0.28.1
 idna==3.20
 iniconfig==2.3.1
-itsdangerous==2.2.0
 Jinja2==3.1.6
 joblib==1.6.0
 jsonschema==4.26.0
@@ -32,19 +30,13 @@ numpy==2.5.4
 opentelemetry-api==1.45.1
 packaging==26.3
 pandas==3.0.6
-pillow==12.3.0
-plotly==7.1.0
 pluggy==1.6.0
-protobuf==7.36.2
-pyarrow==25.0.1
 pycparser==3.11
 pydantic==2.14.1
 pydantic_core==2.50.1
-pydeck==0.9.3
 Pygments==2.21.0
 pytest==9.1.1
 python-dateutil==2.9.0.post0
-python-multipart==0.0.32
 PyYAML==6.0.3
 referencing==0.37.0
 requests==2.34.2
@@ -56,10 +48,8 @@ six==1.17.0
 soupsieve==2.10
 starlette==1.7.0
 threadpoolctl==3.7.0
-toml==0.10.2
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 urllib3==2.8.0
 uvicorn==0.54.0
 websocket-client==1.9.2
-websockets==16.1.1
