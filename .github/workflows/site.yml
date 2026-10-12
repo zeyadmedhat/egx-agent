@@ -23,7 +23,7 @@ on:
         default: true
   push:
     branches: [main]
-    paths: ["app/**", "egx_agent/**", "site/**", "requirements*.txt", ".github/workflows/site.yml"]
+    paths: ["app/**", "egx_agent/**", "site/**", "requirements*.txt", "constraints.txt", ".github/workflows/site.yml"]
 
 permissions:
   contents: write     # the keep-alive commit
@@ -58,7 +58,7 @@ jobs:
           restore-keys: state-
 
       - name: Install
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -c constraints.txt
 
       - name: If the data is gone, bring back the latest backup
         if: steps.restore.outputs.cache-matched-key == ''
