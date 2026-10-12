@@ -48,7 +48,6 @@ export function PredictPage() {
         sub=${t('tested {a} – {b}', { a: fmt.date(r.from), b: fmt.date(r.to) })} />
     </div>
     ${data.health && ['weak', 'bad'].includes(data.health.status) && html`<div style="margin-top:12px"><${Health} h=${data.health} /></div>`}
-    <${YearBars} years=${r.years} pick="top" label="Its top 10%" />
 
     <section class="section">
       <${SectionHead} title="Today's ranking" count=${data.rows.length}
@@ -62,6 +61,7 @@ export function PredictPage() {
       ${data.combo && data.combo.rules && html`<div class="card flush"><${ComboTable} c=${data.combo} /></div>`}
       <${About} m=${m} data=${data} r=${r} onTrain=${train} running=${running} />
     <//>
+    <${YearBars} years=${r.years} pick="top" label="Its top 10%" />
     <p class="faint note" style="margin-top:14px">${t('Even its best picks reach the target first only about {pct} of the time, so always use the stop. A second opinion, not advice.', { pct: fmt.pct(r.top.hit, 0, false) })}</p>`}`;
 }
 
@@ -78,7 +78,6 @@ function Week({ data, rows, filters }) {
       <${Kpi} label="Years they beat the average stock" value=${`${tst.good_years} / ${years.length}`}
         sub=${years.length ? t('tested {a} – {b}', { a: years[0].year, b: years[years.length - 1].year }) : ''} />
     </div>
-    <${YearBars} years=${years} pick="strong" label="Strong picks" />
 
     <section class="section">
       <${SectionHead} title="Next week's ranking" count=${data.rows.length}
@@ -86,6 +85,7 @@ function Week({ data, rows, filters }) {
         ${filters}<//>
       <div class="card flush"><${WeekTable} rows=${rows} base=${a.hit} top=${data.top_n} /></div>
     </section>
+    <${YearBars} years=${years} pick="strong" label="Strong picks" />
 
     <p class="faint note" style="margin-top:14px">${t('Even its strong picks reach the target first only about {pct} of the time, so always use the stop. A second opinion, not advice.', { pct: fmt.pct(s.hit, 0, false) })}</p>`;
 }
