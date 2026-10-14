@@ -43,7 +43,7 @@ STATIC = Path(__file__).with_name("static")
 APP_ID = "egx-trading-agent"
 COOKIE = "egx_session"
 KEEP_ON_RESET = ("capital", "paper_capital", "broker", "fee_pct_per_side",  # your own numbers and connections, not rules
-                 "telegram_token", "telegram_chat_id", "telegram_only_action")
+                 "telegram_token", "telegram_chat_id", "telegram_only_action", "telegram_worker_url")
 PUBLIC_API = {"/api/health", "/api/auth/login", "/api/auth/invite", "/api/auth/join", "/api/auth/reset"}
 BEFORE_TERMS = {"/api/me", "/api/auth/accept-terms", "/api/auth/logout"}
 
@@ -663,7 +663,8 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
         conn.commit()
         if person.is_admin:
             current = config.load_config()
-            config.save_config({**config.DEFAULTS, "telegram_token": current.get("telegram_token", "")})
+            config.save_config({**config.DEFAULTS, "telegram_token": current.get("telegram_token", ""),
+                                "telegram_worker_url": current.get("telegram_worker_url", "")})
         cache.clear()
         return JSON({"message": ("Default rules restored for everyone" if person.is_admin else "Your settings are back "
                                  "to the defaults") + " (your capital and fees were kept)."})

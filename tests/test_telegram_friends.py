@@ -177,3 +177,26 @@ def test_the_mac_connects_through_the_worker_once_telegram_hands_it_the_messages
     monkeypatch.setattr(alerts.requests, "post", lambda url, json, timeout: asked.append((url, json)) or Answer())
     got = alerts.find_chat_by_code(db.connect(tmp_path / "egx.db"), "123:abc", "macCode12345")
     assert got["id"] == "42" and asked == [("https://w.example/started", {"code": "macCode12345"})]
+
+
+def test_the_macs_orders_come_from_the_portfolio_kept_on_the_site(tmp_path, monkeypatch):
+    """The Mac's evening Orders listed FCMD after it was sold on the site (Oct 2026): with the bot's address set they
+    come from the site's record; without it, or when the bot doesn't answer, from the Mac's own."""
+    conn = db.connect(_site_db(tmp_path / "egx.db"))
+    cfg = {**config.DEFAULTS, "telegram_token": "123:abc", "telegram_chat_id": "7", "telegram_worker_url": "https://w"}
+    d = views.Data(conn, cfg, views.Cache())
+    trade = {"id": 4, "account": "real", "status": "open", "symbol": "AAA", "entry_date": "2020-01-01",
+             "entry_price": 12.0, "shares": 80, "initial_stop": 11.0, "target": 15.0}
+    asked = []
+    monkeypatch.setattr(alerts, "worker_call", lambda url, key, path, body=None: asked.append(path) or {"book": {"trades": [trade]}})
+    assert [p["symbol"] for p in alerts.bot_positions(d, cfg)] == ["AAA"] and asked == ["/mine?chat=7"]
+    assert alerts.bot_positions(d, {**cfg, "telegram_worker_url": ""}) is None
+    monkeypatch.setattr(alerts, "worker_call", lambda *a, **k: {"book": None})          # not linked
+    assert alerts.bot_positions(d, cfg) is None
+
+    def down(*a, **k):
+        raise alerts.TelegramError("no")
+    monkeypatch.setattr(alerts, "worker_call", down)
+    assert alerts.bot_positions(d, cfg) is None
+    text, _ = alerts.build_message(d, [])        # sold everything on the site: no orders for old positions
+    assert "Sell all" not in text

@@ -338,10 +338,25 @@ def _market_head(d: views.Data, m: dict, scan_date: str, blocked, lang: str = "e
     return lines
 
 
-def build_message(d: views.Data) -> tuple[str, bool]:
-    """The scan summary as Telegram HTML, and whether it asks you to do anything."""
+def bot_positions(d: views.Data, cfg: dict) -> list[dict] | None:
+    """Your open positions from the portfolio you keep on the site (synced through the bot), so the Mac's orders match
+    it; None when the bot's address isn't set here, it doesn't answer, or your portfolio isn't linked (then the Mac's
+    own record)."""
+    url, token, chat = (str(cfg.get(k) or "").strip() for k in ("telegram_worker_url", "telegram_token", "telegram_chat_id"))
+    if not (url and token and chat):
+        return None
+    try:
+        book = worker_call(url, token, f"/mine?chat={chat}").get("book")
+    except (TelegramError, AttributeError):
+        return None
+    return views.book_positions(d, book) if isinstance(book, dict) else None
+
+
+def build_message(d: views.Data, positions: list[dict] | None = None) -> tuple[str, bool]:
+    """The scan summary as Telegram HTML, and whether it asks you to do anything. `positions`: your own from the site
+    (bot_positions) instead of the Mac's record."""
     m = views.market_info(d.conn)
-    o = views.orders(d)
+    o = views.orders(d, positions)
     if not m or not o:
         return "<b>EGX Agent</b>\nNo scan yet. Open the dashboard and press Run scan.", False
     head = _market_head(d, m, o["scan_date"], o["blocked"])
@@ -376,7 +391,7 @@ def build_message(d: views.Data) -> tuple[str, bool]:
         tail.append("Holding: " + ", ".join(f"{h['symbol']} (stop {views.px(h['stop'])})" for h in o["holds"]))
     if o["skipped"]:
         tail.append("Not bought: " + ", ".join(f"{s['symbol']} ({_e(s['note'])})" for s in o["skipped"]))
-    held = sorted({p["symbol"] for p in views.open_positions(d)})
+    held = sorted({p["symbol"] for p in (views.open_positions(d) if positions is None else positions)})
     held_warn = [ln for sym in held for ln in _caution_lines(warn.get(sym), f"<b>{_e(sym)}</b> ")
                  if "Ex-dividend" in ln or "re-based" in ln or "Rights" in ln]
     held_news = changes_lines(d, held)
@@ -1160,7 +1175,8 @@ def after_scan(conn: sqlite3.Connection, cfg: dict, force: bool = False) -> str:
         return "already sent"
     if not force and not scan.scan_is_final(conn):
         return "waiting for the close"   # a scan during the session: the one after the close is sent
-    text, action = build_message(views.Data(conn, cfg, views.Cache()))
+    d = views.Data(conn, cfg, views.Cache())
+    text, action = build_message(d, bot_positions(d, cfg))
     if not force and cfg.get("telegram_only_action") and not action:
         db.set_user_meta(conn, "telegram_sent_for", data_date)
         return "nothing to do, so not sent"

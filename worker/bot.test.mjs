@@ -243,6 +243,10 @@ assert.equal((await post2("/book", { token: nonce, book, full, changed: "2026-09
 assert.equal((await (await post2("/restore", { token: nonce })).json()).book.trades[0].symbol, "COMI")
 assert.equal((await post2("/books", {})).status, 403)
 assert.deepEqual(Object.keys((await (await post2("/books", {}, auth)).json()).books), ["11"])
+const mine = (chat, key) => bot2.fetch(new Request(`${W}/mine?chat=${chat}`, { headers: { Authorization: `Bearer ${key}` } }))
+assert.notEqual((await mine(11, "wrong")).status, 200)                          // the bot token only
+assert.equal((await (await mine(11, env2.BOT_TOKEN)).json()).book.trades[0].symbol, "COMI")
+assert.equal((await (await mine(99, env2.BOT_TOKEN)).json()).book, null)        // not linked
 // a second browser of the same person: already connected, so only the link
 await tg2(`/start ${code24}${"f".repeat(32)}`)
 assert.match(sent2.at(-1).text, /This browser's portfolio is linked/)

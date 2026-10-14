@@ -121,6 +121,8 @@ DEFAULTS: dict = {
     "telegram_token": "",
     "telegram_chat_id": "",
     "telegram_only_action": False,   # True: skip the message on days with nothing to do
+    # The Telegram bot's address (worker/): the Mac's orders then come from the portfolio you keep on the site
+    "telegram_worker_url": "",
 }
 
 

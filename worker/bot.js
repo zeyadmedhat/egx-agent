@@ -1023,6 +1023,10 @@ export class Bot {
       if (cid) await this.forget(cid)
       return json({ ok: true })
     }
+    // Your Mac's evening "Orders" (app/alerts.py, bot_positions) from the portfolio you keep on the site: the Mac has
+    // the bot's own token, so it may read a chat's record (its own)
+    if (url.pathname === "/mine" && env.BOT_TOKEN && req.headers.get("Authorization") === `Bearer ${env.BOT_TOKEN}`)
+      return json({ book: ((await store.get("full:" + (url.searchParams.get("chat") || ""))) || {}).book || null })
     if (req.headers.get("Authorization") !== `Bearer ${env.SYNC_KEY}`) return new Response("", { status: 403 })
     if (url.pathname === "/updates") return json({ updates: (await store.get("log")) || [], web: (await store.get("web")) || [] })
     if (url.pathname === "/books") return this.books()
