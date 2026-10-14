@@ -3,7 +3,7 @@ linked to the bot), in their language, /quiet, the one-tap Connect link, and you
 import json
 
 from app import alerts, jobs, site_daily, static_site, views
-from egx_agent import config, db, scan
+from egx_agent import config, db, portfolio, scan
 from tests.test_static_site import PASSWORD, FakeBot, _site_db
 
 
@@ -143,6 +143,21 @@ def test_positions_waiting_for_bonus_shares_ask_for_the_new_count(tmp_path):
     [p] = views.book_positions(d, {"trades": [trade], "adjustments": [{"event_id": "AAA:2099-01-01", "trade_id": 3}]})
     assert p["status"] != "ADJUST"
     assert views.book_positions(d, {"trades": [{**trade, "entry_price": None}]}) == []   # an incomplete record
+
+
+def test_a_friends_big_loss_tells_them_to_sell_on_the_bounce(tmp_path, monkeypatch):
+    """A friend's 30%+ loser (sell on the first bounce) stopped every evening message and the site's run:
+    book_positions left out the bounce level the orders list reads (KeyError: 'bounce_level', Oct 2026)."""
+    conn = db.connect(_site_db(tmp_path / "egx.db"))
+    d = views.Data(conn, dict(config.DEFAULTS), views.Cache())
+    monkeypatch.setattr(portfolio, "real_status", lambda row, ind, cfg: {
+        "status": "BOUNCE", "reason": "Big loss", "stop": None, "days_held": 3, "last_close": 5.0,
+        "bounce_level": 6.5, "bounce_by": "2099-01-30"})
+    trade = {"id": 4, "account": "real", "status": "open", "symbol": "AAA", "entry_date": "2020-01-01",
+             "entry_price": 12.0, "shares": 80, "initial_stop": 11.0, "target": 15.0}
+    [p] = views.book_positions(d, {"trades": [trade]})
+    assert p["bounce_level"] == 6.5 and p["bounce_by"] == "2099-01-30"
+    assert any(i["key"] == "bounce:AAA" and i["level"] == 6.5 for i in views.orders(d, [p])["items"])
 
 
 def test_the_mac_connects_through_the_worker_once_telegram_hands_it_the_messages(tmp_path, monkeypatch):

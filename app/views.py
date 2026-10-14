@@ -332,6 +332,7 @@ def book_positions(d: Data, book: dict) -> list[dict]:
             last = stt.get("last_close") or entry
         out.append({"id": t.get("id"), "symbol": sym, "status": stt["status"], "reason": stt["reason"], "shares": shares,
                     "avg_price": entry, "last": last, "stop": stt["stop"], "prev_stop": stt.get("prev_stop"),
+                    "bounce_level": stt.get("bounce_level"), "bounce_by": stt.get("bounce_by"),
                     "target": float(row["target"]), "day": int(stt["days_held"]), "adjust": ev})
     out.sort(key=lambda p: (STATUS_ORDER.get(p["status"], 9), p["symbol"]))
     return clean(out)
