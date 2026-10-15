@@ -940,6 +940,9 @@ async function pullBook(link, force = false) {
   if (!got.book || !validBook(got.book)) return false;
   const local = loadBook();
   if (!force && hasAnything(local) && changedOf(local) >= (got.changed || '')) return false;
+  if (hasAnything(local) && JSON.stringify(local.trades) !== JSON.stringify(got.book.trades || [])) {
+    try { localStorage.setItem(PREV, JSON.stringify({ at: new Date().toISOString(), book: local })); } catch { /* full */ }
+  }
   saveBook({ ...emptyBook(), ...got.book, meta: { ...(got.book.meta || {}), changed: got.changed || '' } }, true);
   window.dispatchEvent(new CustomEvent('egx-book'));        // the page shows the new portfolio (main.js)
   return true;
@@ -991,6 +994,39 @@ export async function unlinkBot() {
   const link = botLink();
   setLink(null);
   if (link) await botPost(link.url, '/unpair', { token: link.token }).catch(() => null);
+}
+
+// The portfolio this browser had before a copy from the bot replaced it (pullBook), so a wrong copy can be undone:
+// {at, open} or null.
+const PREV = 'egx-book-before-sync';
+function prevBook() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREV) || 'null');
+    return p && validBook(p.book) ? p : null;
+  } catch { return null; }
+}
+export function previousBook() {
+  const p = prevBook();
+  return p && { at: p.at, open: p.book.trades.filter(t => t.status === 'open').length };
+}
+
+// "Send this browser's portfolio to Telegram" (or put back the one from before the last sync, first): stamped as the
+// newest change, so the bot keeps it and your other linked devices take it when they next open.
+export async function sendThisBook(previous = false) {
+  const link = botLink();
+  if (!link || link.pending) throw new Error('Link this browser to the bot first.');
+  const p = previous && prevBook();
+  if (previous && !p) throw new Error('There is no earlier portfolio to put back.');
+  saveBook(p ? { ...emptyBook(), ...p.book } : loadBook());
+  const c = await context();
+  const have = await botPost(link.url, '/restore', { token: link.token });
+  if ((have.changed || '') >= changedOf(c.book)) {   // another device's clock runs ahead: stamp this one just after it
+    c.book.meta = { ...c.book.meta, changed: new Date(Date.parse(have.changed) + 1000).toISOString() };
+    saveBook(c.book, true);
+  }
+  setLink({ ...link, synced: true });
+  await sendBook(c);
+  try { localStorage.removeItem(PREV); } catch { /* blocked */ }
 }
 
 // "Bring my portfolio from Telegram": replaces this browser's with the bot's copy. False if the bot has none.

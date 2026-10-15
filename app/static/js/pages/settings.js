@@ -262,7 +262,9 @@ function BotPortfolio({ bot }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
-  const read = () => import('../local/api.js').then(m => setStatus(m.botStatus()));
+  const [sending, setSending] = useState(null);     // 'this' or 'previous': the confirm before sending
+  const [prev, setPrev] = useState(null);           // the portfolio from before a copy from the bot replaced it
+  const read = () => import('../local/api.js').then(m => { setStatus(m.botStatus()); setPrev(m.previousBook()); });
   useEffect(() => { read(); }, []);
   useEffect(() => {        // waiting for Start in Telegram: check every few seconds, for a few minutes
     if (status !== 'waiting') return undefined;
@@ -289,6 +291,13 @@ function BotPortfolio({ bot }) {
   const unlink = () => run(async m => { await m.unlinkBot(); await read(); toast(t('Unlinked.')); });
   const bring = () => run(async m => {
     toast(t(await m.restoreFromBot() ? 'Brought your portfolio from Telegram.' : "The bot has no copy of your portfolio yet."));
+    await read();
+  });
+  const send = () => run(async m => {
+    await m.sendThisBook(sending === 'previous');
+    await read();
+    refreshAll();
+    toast(t('Sent. Your other linked devices get this portfolio when they next open the site.'));
   });
   return html`<div class="sub-block"><h3>${t('Your portfolio in Telegram')}</h3>
     <div class="muted" style="font-size:12.5px">${t('The bot keeps a copy of your portfolio for your Telegram chat only. '
@@ -299,8 +308,15 @@ function BotPortfolio({ bot }) {
       <div class="device-actions">
         <button class="btn" disabled=${busy} onClick=${() => setAsking(true)}><${Icon} name="download" />
           ${t('Bring my portfolio from Telegram')}</button>
+        <button class="btn" disabled=${busy} onClick=${() => setSending('this')}><${Icon} name="send" />
+          ${t("Send this browser's portfolio to Telegram")}</button>
         <button class="btn ghost" disabled=${busy} onClick=${unlink}>${t('Unlink')}</button>
-      </div>`
+      </div>
+      ${prev && html`<p class="muted" style="font-size:12.5px;margin-top:10px">${t(
+        'On {date} a copy from Telegram replaced the portfolio this browser had ({n} open positions). If that copy was wrong:',
+        { date: fmt.datetime(prev.at), n: prev.open })}</p>
+        <div class="device-actions"><button class="btn" disabled=${busy} onClick=${() => setSending('previous')}>
+          <${Icon} name="refresh" />${t('Put back the earlier portfolio')}</button></div>`}`
     : status === 'waiting' ? html`
       <p style="font-size:13px;margin-top:10px"><span class="spinner" style="width:12px;height:12px"></span>
         ${t('Waiting for you to press Start in Telegram…')}</p>
@@ -313,6 +329,12 @@ function BotPortfolio({ bot }) {
           value=${code} onInput=${e => setCode(e.target.value.trim())} />
         <button class="btn primary" disabled=${busy || code.length !== 8} onClick=${link}>${t('Link')}</button>
       </div>`}
+    ${sending && html`<${Confirm} title=${t(sending === 'previous' ? 'Put back the earlier portfolio?' : "Send this browser's portfolio?")}
+      confirmLabel=${t(sending === 'previous' ? 'Put it back' : 'Send it')} danger
+      text=${t(sending === 'previous'
+        ? "This browser's portfolio goes back to the earlier one, and it replaces the bot's copy and your other linked devices' copy too."
+        : "The bot's copy, and your other linked devices' copy when they next open the site, are replaced by this browser's portfolio. Use it on the device whose portfolio is right.")}
+      onConfirm=${send} onClose=${() => setSending(null)} />`}
     ${asking && html`<${Confirm} title=${t('Bring your portfolio from Telegram?')} confirmLabel=${t('Bring it here')} danger
       text=${t("This browser's portfolio is replaced by the copy the bot has (the newest from any of your devices).")}
       onConfirm=${bring} onClose=${() => setAsking(false)} />`}
