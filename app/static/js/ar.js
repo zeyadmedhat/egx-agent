@@ -1,5 +1,15 @@
 // The Arabic words for t() (i18n.js), keyed by the English text. Loaded only when Arabic is chosen.
 export const AR = {
+  'Still have them': 'ما زالت معي',
+  'Subscribed': 'اكتتبت',
+  'Sold them': 'بعتها',
+  "Nothing to record yet: your rights stay beside your shares, as at your broker, until you subscribe or sell them. Come back here when you do. Until then this position's stop can't be checked.": "لا شيء لتسجيله الآن: تبقى حقوقك بجانب أسهمك كما عند شركة الوساطة حتى تكتتب أو تبيعها. ارجع هنا عندما تفعل. حتى ذلك الحين لا يمكن فحص وقف هذا المركز.",
+  'What you got for them in all (EGP, after fees; 0 if they lapsed)': 'ما حصلت عليه مقابلها إجمالًا (جنيه، بعد الرسوم؛ 0 إذا سقطت)',
+  'Enter your shares now (more than before) and what each new share cost.': 'أدخل عدد أسهمك الآن (أكثر من قبل) وتكلفة كل سهم جديد.',
+  'Enter what you got for your rights.': 'أدخل ما حصلت عليه مقابل حقوقك.',
+  'Take back': 'تراجع',
+  'Take this update back?': 'التراجع عن هذا التحديث؟',
+  "The position goes back to how it was before it: its shares, average price, stop and target. Use it when what you recorded wasn't right.": "يعود المركز كما كان قبله: الأسهم ومتوسط السعر والوقف والهدف. استخدمه عندما يكون ما سجلته غير صحيح.",
   '{n} rights · subscription price {price}': '{n} حق اكتتاب · سعر الاكتتاب {price}',
   'Rights': 'حقوق اكتتاب',
   'before the rights trade': 'قبل تداول الحقوق',

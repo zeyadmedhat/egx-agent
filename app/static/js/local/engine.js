@@ -359,15 +359,15 @@ export function rightsHolding(ev, shares) {
 }
 
 // The average price on the new prices (corporate.new_average). Bonus shares or a split: the same cost over more
-// shares. A rights issue: the new shares add what they cost (paid each); kept the old count (sold the rights): the
-// shares are worth ÷ factor and the rest came back as the rights' price, so the cost goes ÷ factor too.
-export function newAverage(avg, old, n, factor, rights, paid = 0) {
-  if (rights && n === old) return avg / factor;
+// shares. A rights issue: the new shares add what they cost (paid each); kept the old count (sold the rights): what
+// you got for them comes off the cost (got; without it, as old records did, the cost ÷ factor).
+export function newAverage(avg, old, n, factor, rights, paid = 0, got = null) {
+  if (rights && n === old) return got != null ? (avg * old - got) / old : avg / factor;
   return (avg * old + Math.max(n - old, 0) * paid) / n;
 }
 
 // Update a position to its new share count; its levels (your own stop too) move with the prices (÷ the event's factor).
-export function applyEvent(book, tradeId, event, newShares, today, paid = 0) {
+export function applyEvent(book, tradeId, event, newShares, today, paid = 0, got = null) {
   const t = book.trades.find(x => x.id === tradeId && ['open', 'pending'].includes(x.status));
   if (!t || !event || event.symbol !== t.symbol) throw new Error('This position or event no longer exists. Refresh the page.');
   newShares = Math.trunc(newShares);
@@ -376,7 +376,8 @@ export function applyEvent(book, tradeId, event, newShares, today, paid = 0) {
   const ratio = newShares / old;
   const f = +event.factor, rights = !!event.rights;
   if (!rights) paid = 0;
-  const avg = t.entry_price ? newAverage(t.entry_price, old, newShares, f, rights, paid) : null;
+  if (!rights || newShares > old) got = null;
+  const avg = t.entry_price ? newAverage(t.entry_price, old, newShares, f, rights, paid, got) : null;
   t.shares = newShares;
   t.entry_price = avg;
   for (const k of ['initial_stop', 'stop', 'target', 'highest_close', 'entry_limit', 'my_stop']) {
@@ -385,12 +386,33 @@ export function applyEvent(book, tradeId, event, newShares, today, paid = 0) {
   if (t.account === 'real') {
     const note = !rights ? `${describe(f)}: ${int(old)} → ${int(newShares)} shares`
       : newShares > old ? `Rights issue: ${int(newShares - old)} new shares at ${g(paid)}, ${int(old)} → ${int(newShares)} shares`
+        : got != null ? `Rights issue: sold the rights for ${int(got)} EGP, kept ${int(old)} shares`
         : `Rights issue: kept ${int(old)} shares, prices ÷ ${g(+f.toPrecision(4))}`;
     addFill(book, t.id, t.symbol, event.ex_date, 'bonus', newShares - old, paid, 0, note);
-    if (rights) book.fills.at(-1).factor = f;          // so rebuildTrade can follow it
+    if (rights) Object.assign(book.fills.at(-1), { factor: f }, got != null ? { got } : {});   // for rebuildTrade
   }
   setAdjustment(book, event.id, t.id, 'applied', ratio, today);
   return { symbol: t.symbol, old, new: newShares, ratio, avg };
+}
+
+// Takes an update back (a wrong share count, or rights recorded as sold that you still hold): the position as it was
+// before applyEvent, waiting for its update again. Only the position's last transaction can be taken back.
+export function undoEvent(book, fillId) {
+  const f = book.fills.find(x => x.id === fillId && x.side === 'bonus');
+  const t = f && book.trades.find(x => x.id === f.trade_id && x.status === 'open');
+  if (!t || fillsOf(book, t.id).at(-1) !== f) throw new Error('Only the last transaction of an open position can be taken back.');
+  const n = Math.trunc(t.shares), old = n - f.shares, r = f.factor || n / old;
+  if (t.entry_price) {
+    t.entry_price = f.factor && !f.shares ? (f.got != null ? t.entry_price + f.got / old : t.entry_price * r)
+      : (t.entry_price * n - f.shares * (f.price || 0)) / old;
+  }
+  t.shares = old;
+  for (const k of ['initial_stop', 'stop', 'target', 'highest_close', 'entry_limit', 'my_stop']) {
+    if (t[k] !== null && t[k] !== undefined) t[k] *= r;
+  }
+  book.fills = book.fills.filter(x => x !== f);
+  book.adjustments = book.adjustments.filter(a => !(a.trade_id === t.id && a.event_id === `${t.symbol}:${f.date}`));
+  return { symbol: t.symbol, shares: old, avg: t.entry_price };
 }
 
 export function ignoreEvent(book, tradeId, eventId, today) {
@@ -535,7 +557,7 @@ export function rebuildTrade(book, cfg, tradeId, at) {
     } else if (f.side === 'bonus' && shares) {
       // bonus shares or a split: prices ÷ the share ratio; a rights issue carries its own factor (applyEvent)
       const r = f.factor || (shares + f.shares) / shares;
-      avg = newAverage(avg, shares, shares + f.shares, r, !!f.factor, f.price || 0);
+      avg = newAverage(avg, shares, shares + f.shares, r, !!f.factor, f.price || 0, f.got ?? null);
       shares += f.shares; scale *= r;
     } else if (f.side === 'sell') {
       if (f.shares > shares) {

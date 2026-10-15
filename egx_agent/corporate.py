@@ -114,13 +114,14 @@ def pending(conn: sqlite3.Connection, account: str = "real") -> dict[int, dict]:
     return out
 
 
-def new_average(avg: float, old: int, new: int, factor: float, rights: bool, paid: float = 0.0) -> float:
+def new_average(avg: float, old: int, new: int, factor: float, rights: bool, paid: float = 0.0,
+                got: float | None = None) -> float:
     """The average price on the new prices. Bonus shares or a split: the same cost over more shares. A rights issue:
-    the new shares add what they cost (paid each); kept the old count (sold the rights): the shares are worth
-    ÷ factor and the rest came back as the rights' price, so the cost goes ÷ factor too."""
+    the new shares add what they cost (paid each); kept the old count (sold the rights): what you got for them comes
+    off the cost (got; without it, as old records did, the cost ÷ factor)."""
     # ponytail: subscribing to only part of your rights counts the sold rights' cost in, so the average is a bit high
     if rights and new == old:
-        return avg / factor
+        return (avg * old - got) / old if got is not None else avg / factor
     return (avg * old + max(new - old, 0) * paid) / new
 
 
@@ -139,7 +140,8 @@ def adjust_problem(shares_now: int, ev: dict, new: int, paid: float = 0.0) -> st
     return None
 
 
-def apply(conn: sqlite3.Connection, trade_id: int, event_id: int, new_shares: int, paid: float = 0.0) -> dict:
+def apply(conn: sqlite3.Connection, trade_id: int, event_id: int, new_shares: int, paid: float = 0.0,
+          got: float | None = None) -> dict:
     """Update a position to its new share count; its levels move with the prices (÷ the event's factor)."""
     t = conn.execute("SELECT * FROM trades WHERE id=? AND status IN ('open', 'pending')", (trade_id,)).fetchone()
     e = conn.execute(f"SELECT e.*, {RIGHTS_SQL} AS rights FROM price_events e WHERE id=?", (event_id,)).fetchone()
@@ -150,7 +152,9 @@ def apply(conn: sqlite3.Connection, trade_id: int, event_id: int, new_shares: in
         raise ValueError("Enter how many shares you hold now.")
     old, f, rights = int(t["shares"]), float(e["factor"]), bool(e["rights"])
     ratio = new_shares / old
-    avg = new_average(float(t["entry_price"]), old, new_shares, f, rights, paid) if t["entry_price"] else None
+    if not rights or new_shares > old:
+        got = None
+    avg = new_average(float(t["entry_price"]), old, new_shares, f, rights, paid, got) if t["entry_price"] else None
     conn.execute(
         """UPDATE trades SET shares=?, entry_price=?, initial_stop=initial_stop/?, stop=stop/?,
                target=target/?, highest_close=highest_close/?, entry_limit=entry_limit/? WHERE id=?""",
@@ -160,7 +164,8 @@ def apply(conn: sqlite3.Connection, trade_id: int, event_id: int, new_shares: in
     if t["account"] == "real":
         note = (f"{describe(f)}: {old:,} → {new_shares:,} shares" if not rights
                 else f"Rights issue: {new_shares - old:,} new shares at {paid:g}, {old:,} → {new_shares:,} shares"
-                if new_shares > old else f"Rights issue: kept {old:,} shares, prices ÷ {f:.4g}")
+                if new_shares > old else f"Rights issue: sold the rights for {got:,.0f} EGP, kept {old:,} shares"
+                if got is not None else f"Rights issue: kept {old:,} shares, prices ÷ {f:.4g}")
         conn.execute(
             "INSERT INTO fills(trade_id, symbol, date, side, shares, price, fees, note) VALUES (?,?,?,?,?,?,?,?)",
             (trade_id, t["symbol"], e["ex_date"], "bonus", new_shares - old, paid if rights else 0.0, 0.0, note),

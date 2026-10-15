@@ -91,6 +91,7 @@ class AdjustIn(BaseModel):
     event_id: int
     shares: int | None = Field(default=None, ge=1)
     paid: float = Field(default=0.0, ge=0)        # a rights issue: what each new share cost
+    got: float | None = Field(default=None, ge=0)  # or what you got for the rights you sold
     ignore: bool = False
 
 
@@ -596,7 +597,7 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
             fail(400, "Enter how many shares you hold now.")
         if problem := corporate.adjust_problem(pos["shares"], ev, body.shares, body.paid):
             fail(400, problem)
-        res = corporate.apply(conn, trade_id, body.event_id, body.shares, body.paid)
+        res = corporate.apply(conn, trade_id, body.event_id, body.shares, body.paid, body.got)
         return JSON({"message": f"Updated {res['symbol']}: {res['old']:,} → {res['new']:,} shares at an average of "
                                f"{res['avg']:.3f}. The stop and target moved with the prices."})
 

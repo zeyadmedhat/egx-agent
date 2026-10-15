@@ -280,6 +280,7 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
                 report["telegram"] = f"failed: {exc}"
 
         # 4. the site, then this close's signals to each connected friend
+        prices.fix_double_rebase(conn)          # also when this run had no new prices
         res = static_site.build(conn, cfg, out, password, site_id, telegram, static_site.scan_page(site_id))
         report["site"] = f"{res['files']} files, {res['bytes'] / 1e6:.1f} MB"
         report["publish"] = always_publish or live_stamp(site_url) != res["stamp"]

@@ -271,6 +271,28 @@ def test_rights_before_you_decide_count_like_your_broker(tmp_path, cfg):
     assert js["out"][1]["1"]["terms"] == pend[t1]["terms"]
     assert_same(summary, js["summary"], ("cash", "equity", "unrealized"))
 
+    # Sold the rights for 31,000: that comes off the cost, nothing else (not the old ÷ 1.8333 guess, 44k). Recorded by
+    # mistake (they're still held, 15 Oct): taken back, the position is as before, waiting again.
+    before = dict(conn.execute("SELECT * FROM trades WHERE id=?", (t1,)).fetchone())
+    res = corporate.apply(conn, t1, pend[t1]["event_id"], 15170, got=31000)
+    assert res["avg"] == pytest.approx(before["entry_price"] - 31000 / 15170)
+    steps += [{"op": "trades"}, {"op": "apply", "trade_id": 1, "event_id": "KORA:2026-10-14", "shares": 15170, "got": 31000,
+                                 "today": "2026-10-15"}, {"op": "undo"}, {"op": "pending", "closes": closes}]
+    (js,) = run_js({"op": "real", "args": {"cfg": cfg, "steps": steps, "events": events}})
+    was, applied, undone = js["out"][2][0], js["out"][3], js["out"][4]
+    assert_same(res, applied, ("old", "new", "avg"))
+    assert undone["shares"] == 15170 and undone["avg"] == pytest.approx(was["entry_price"])
+    for k in ("entry_price", "stop", "initial_stop", "target"):
+        assert js["trades"][0][k] == pytest.approx(was[k]), k
+    assert js["out"][5]["1"]["terms"]["ref"] == 2.32 and not [f for f in js["fills"] if f["side"] == "bonus"]
+    # what the site recorded on 15 Oct: the count it fills in confirmed as is (avg ÷ 1.8333 → 3.494), then taken back
+    steps += [{"op": "apply", "trade_id": 1, "event_id": "KORA:2026-10-14", "shares": 15170, "today": "2026-10-15"},
+              {"op": "undo"}, {"op": "trades"}]
+    (js,) = run_js({"op": "real", "args": {"cfg": cfg, "steps": steps, "events": events}})
+    assert js["out"][6]["avg"] == pytest.approx(was["entry_price"] / 1.833333)
+    for k in ("entry_price", "stop", "initial_stop", "target"):
+        assert js["out"][8][0][k] == pytest.approx(was[k]), k
+
 
 @needs_node
 def test_mac_portfolio_backup_restores_on_the_site(tmp_path, cfg):

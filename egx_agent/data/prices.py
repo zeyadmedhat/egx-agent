@@ -143,13 +143,13 @@ def rebase_info(conn: sqlite3.Connection, symbol: str, fresh: pd.DataFrame) -> d
     return {"factor": snap_factor(factor), "ex_date": later.min() if len(later) else None}
 
 
-def fix_double_rebase(conn: sqlite3.Connection, symbols) -> list[str]:
+def fix_double_rebase(conn: sqlite3.Connection, symbols=None) -> list[str]:
     """TradingView sometimes divides a stock's last sessions before an ex-date twice (KORA's rights issue, ex 14 Oct
     2026: 11–13 Oct ÷ 1.8333², 7 Oct and before ÷ 1.8333), so the chart drops by the event's own factor between two
     sessions, a fall EGX's daily limit (±20%) never allows. Those sessions are multiplied back. Returns the fixed."""
     fixed = []
     for sym, ex_date, f in conn.execute("SELECT symbol, ex_date, factor FROM price_events WHERE factor > 1.3").fetchall():
-        if sym not in symbols:
+        if symbols is not None and sym not in symbols:
             continue
         rows = conn.execute("SELECT date, open, close FROM prices WHERE symbol=? AND date < ? ORDER BY date DESC LIMIT 30",
                             (sym, ex_date)).fetchall()[::-1]

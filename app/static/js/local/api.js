@@ -131,8 +131,9 @@ async function openPositions(c, symbol = null) {
     }
     const fees = r.fees || 0;
     const div = divs[r.id] || 0;
-    const fills = E.fillsOf(book, r.id).map(f => ({ id: f.id, date: f.date, side: f.side, shares: f.shares,
-      price: f.price, fees: f.fees, note: f.note, fees_in: !!f.fees_in }));
+    const own = E.fillsOf(book, r.id);
+    const fills = own.map(f => ({ id: f.id, date: f.date, side: f.side, shares: f.shares,
+      price: f.price, fees: f.fees, note: f.note, fees_in: !!f.fees_in, undo: f.side === 'bonus' && f === own.at(-1) }));
     for (const x of book.dividends.filter(d => d.trade_id === r.id).sort((a, b2) => (a.date < b2.date ? -1 : 1))) {
       fills.push({ id: null, dividend_id: x.id, date: x.date, side: 'dividend', shares: x.shares,
         price: x.shares ? x.amount / x.shares : null, fees: 0, amount: x.amount, note: x.note || '' });
@@ -571,7 +572,9 @@ function adjust(c, id, body) {
     return { message: `Kept your ${pos.symbol} position as it is (${E.int(pos.shares)} shares).` };
   }
   const shares = Number(body.shares), paid = Number(body.paid) || 0;
+  const got = body.got === null || body.got === undefined || body.got === '' ? null : Number(body.got);
   if (!shares) fail(400, 'Enter how many shares you hold now.');
+  if (got !== null && !(got >= 0)) fail(400, 'Enter what you got for your rights (0 if they lapsed).');
   // corporate.adjust_problem
   if (ev.rights) {
     if (shares < pos.shares) {
@@ -583,10 +586,17 @@ function adjust(c, id, body) {
     fail(400, `${E.int(shares)} shares is far from the expected ${E.int(ev.shares_expected)}. Check the number at your `
       + "broker. If your shares didn't change, choose 'My shares didn't change'.");
   }
-  const res = E.applyEvent(c.book, id, c.core.events.find(e => e.id === ev.event_id), shares, localToday(), paid);
+  const res = E.applyEvent(c.book, id, c.core.events.find(e => e.id === ev.event_id), shares, localToday(), paid, got);
   saveBook(c.book);
   return { message: `Updated ${res.symbol}: ${E.int(res.old)} → ${E.int(res.new)} shares at an average of `
     + `${res.avg.toFixed(3)}. The stop and target moved with the prices.` };
+}
+
+function undoAdjust(c, fid) {
+  let res;
+  try { res = E.undoEvent(c.book, fid); } catch (e) { fail(400, e.message); }
+  saveBook(c.book);
+  return { message: `Took the update back: ${E.int(res.shares)} ${res.symbol} at an average of ${res.avg.toFixed(3)}, as before.` };
 }
 
 // A stop you choose for an open position (e.g. right on a support), counted from the next session (today's before
@@ -1092,6 +1102,7 @@ async function route(path, { method = 'GET', body } = {}) {
   if (method === 'PUT' && a === 'portfolio' && b === 'fills') return editFill(c, Number(x), body || {});
   if (method === 'DELETE' && a === 'portfolio' && b === 'fills') return deleteFill(c, Number(x));
   if (method === 'DELETE' && a === 'portfolio' && b === 'closed') return deleteClosed(c, Number(x));
+  if (method === 'DELETE' && a === 'portfolio' && b === 'undo') return undoAdjust(c, Number(x));
   if (method === 'POST' && a === 'portfolio' && b === 'plan') return savePlan(c, body || {});
   if (method === 'DELETE' && a === 'portfolio' && b === 'plan') return deletePlan(c);
   if (method === 'DELETE' && a === 'portfolio' && b && !x) return deletePosition(c, id);

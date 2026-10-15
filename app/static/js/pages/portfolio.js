@@ -697,6 +697,16 @@ function Fills({ fills, tradeId, data, onRemoveDividend }) {
       toast(err.message, 'error', 9000);
     }
   };
+  const [undoing, setUndoing] = useState(null);
+  const undo = async f => {
+    try {
+      toast((await api(`/portfolio/undo/${f.id}`, { method: 'DELETE' })).message);
+      setUndoing(null);
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
   const editable = f => STATIC && (f.side === 'buy' || f.side === 'sell');
   return html`<table class="mini-table"><thead><tr><th>${t('Date')}</th><th>${t('Side')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Price')}</th>
       <th class="r">${t('Fees')}</th><th>${t('Note')}</th>${STATIC && html`<th></th>`}</tr></thead>
@@ -706,7 +716,7 @@ function Fills({ fills, tradeId, data, onRemoveDividend }) {
         <td class="r">${f.side === 'buy' || f.side === 'sell' ? fmt.num(f.fees, 2) : '–'}</td>
         <td class="muted">${f.side === 'dividend' ? html`<b class="up">+${fmt.egp(f.amount, 2)}</b> ${tn(f.note)}
           ${onRemoveDividend && html`<button class="x-btn" title=${t('Remove this dividend')} onClick=${() => onRemoveDividend(f.dividend_id)}><${Icon} name="x" size=${13} /></button>`}`
-          : tn(f.note) || ''}</td>
+          : tn(f.note) || ''}${STATIC && f.undo && html` <button class="linkish" onClick=${() => setUndoing(f)}>${t('Take back')}</button>`}</td>
         ${STATIC && html`<td class="fill-actions">${editable(f) && html`
           <button class="x-btn edit" title=${t('Edit')} aria-label=${t('Edit')} onClick=${() => setEditing(f)}><${Icon} name="pencil" size=${14} /></button>
           <button class="x-btn" title=${t('Delete')} aria-label=${t('Delete')} onClick=${() => setDeleting(f)}><${Icon} name="trash" size=${14} /></button>`}</td>`}</tr>`)}</tbody></table>
@@ -719,7 +729,10 @@ function Fills({ fills, tradeId, data, onRemoveDividend }) {
       title=${t('Delete this {side}?', { side: t(deleting.side === 'buy' ? 'buy' : 'sale') })}
       text=${t('{n} shares at {price} on {date}. Everything after it is worked out again. Deleting the last buy deletes the whole trade.',
         { n: fmt.int(deleting.shares), price: fmt.price(deleting.price), date: fmt.date(deleting.date) })}
-      onConfirm=${() => remove(deleting)} onClose=${() => setDeleting(null)} />`}`;
+      onConfirm=${() => remove(deleting)} onClose=${() => setDeleting(null)} />`}
+    ${undoing && html`<${Confirm} confirmLabel="Take back" title=${t('Take this update back?')}
+      text=${t("The position goes back to how it was before it: its shares, average price, stop and target. Use it when what you recorded wasn't right.")}
+      onConfirm=${() => undo(undoing)} onClose=${() => setUndoing(null)} />`}`;
 }
 
 const SIDES = [{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }];
@@ -881,20 +894,27 @@ function AdjustPanel({ p, onDone }) {
   </div>`;
 }
 
-// A rights issue: past prices were divided by the right's value, and you either subscribed to new shares (at the
-// issue price) or sold your rights. Your share count and what each new share cost (local/engine.js newAverage).
+// A rights issue: past prices were divided by the right's value. Until you subscribe or sell your rights there's
+// nothing to record (they show beside the shares, as at your broker). Subscribed: your share count and what each new
+// share cost; sold (or let lapse): what you got for them (local/engine.js newAverage).
+const RIGHTS_CHOICES = [{ value: 'hold', label: 'Still have them' }, { value: 'sub', label: 'Subscribed' },
+  { value: 'sold', label: 'Sold them' }];
 function RightsPanel({ p, onDone }) {
-  const a = p.adjust;
-  const [shares, setShares] = useState(String(p.shares));
-  const [paid, setPaid] = useState('');
+  const a = p.adjust, r = p.rights;
+  const [kind, setKind] = useState('hold');
+  const [shares, setShares] = useState(String(p.shares + (r ? r.units : 0)));
+  const [paid, setPaid] = useState(r ? String(r.sub_price) : '');
+  const [got, setGot] = useState('');
   const [busy, setBusy] = useState(false);
-  const n = parseInt(shares, 10) || 0, cost = parseFloat(paid) || 0;
-  const more = n > p.shares;
-  const ok = n >= p.shares && (!more || cost > 0);
+  const n = parseInt(shares, 10) || 0, cost = parseFloat(paid) || 0, money = got.trim() === '' ? NaN : parseFloat(got);
+  const ok = kind === 'sub' ? n > p.shares && cost > 0 : kind === 'sold' && money >= 0;
+  const avg = !ok ? null : kind === 'sub' ? newAverage(p.avg_price, p.shares, n, a.factor, true, cost)
+    : newAverage(p.avg_price, p.shares, p.shares, a.factor, true, 0, money);
   const send = async () => {
     setBusy(true);
     try {
-      toast((await api(`/portfolio/${p.id}/adjust`, { method: 'POST', body: { event_id: a.event_id, shares: n, paid: cost } })).message);
+      const body = kind === 'sub' ? { event_id: a.event_id, shares: n, paid: cost } : { event_id: a.event_id, shares: p.shares, got: money };
+      toast((await api(`/portfolio/${p.id}/adjust`, { method: 'POST', body })).message);
       onDone();
       refreshAll();
     } catch (err) {
@@ -905,21 +925,22 @@ function RightsPanel({ p, onDone }) {
   };
   return html`<div class="adjust-panel">
     <h4><${Icon} name="split" size=${15} /> ${t('{sym}: rights issue from {date}', { sym: p.symbol, date: fmt.date(a.ex_date) })}</h4>
-    <div class="muted" style="font-size:13px">${tp("TradingView divided all past {sym} prices by {factor} for the rights issue. Subscribed? Enter the shares you hold now (your {old} plus the new ones) and what each new share cost. Sold your rights instead? Keep {old}. Until you confirm, this position's stop can't be checked.",
-      { sym: p.symbol, factor: fmt.num(a.factor, 4), old: html`<b>${fmt.int(p.shares)}</b>` })}</div>
-    <div class="row" style="align-items:flex-end">
-      <${Field} label="Shares you hold now (check your broker)">
-        <input class="input" type="number" min=${p.shares} step="1" value=${shares} onInput=${e => setShares(e.target.value)} /><//>
-      ${more && html`<${Field} label="What each new share cost (EGP)">
-        <input class="input" type="number" min="0" step="0.001" value=${paid} onInput=${e => setPaid(e.target.value)} /><//>`}
+    <${Seg} options=${RIGHTS_CHOICES} value=${kind} onChange=${setKind} />
+    ${kind === 'hold' ? html`<div class="muted" style="font-size:13px">${t("Nothing to record yet: your rights stay beside your shares, as at your broker, until you subscribe or sell them. Come back here when you do. Until then this position's stop can't be checked.")}</div>`
+      : html`<div class="row" style="align-items:flex-end">
+      ${kind === 'sub' ? html`<${Field} label="Shares you hold now (check your broker)">
+          <input class="input" type="number" min=${p.shares + 1} step="1" value=${shares} onInput=${e => setShares(e.target.value)} /><//>
+        <${Field} label="What each new share cost (EGP)">
+          <input class="input" type="number" min="0" step="0.001" value=${paid} onInput=${e => setPaid(e.target.value)} /><//>`
+        : html`<${Field} label="What you got for them in all (EGP, after fees; 0 if they lapsed)">
+          <input class="input" type="number" min="0" step="0.01" value=${got} onInput=${e => setGot(e.target.value)} /><//>`}
       <span class="preview" style="font-size:12.5px;color:var(--text-2);flex:1;min-width:220px">${ok
-        ? tp('Average price {old} → {new}. Stop and target move with the prices.',
-            { old: fmt.price(p.avg_price), new: html`<b>${fmt.price(newAverage(p.avg_price, p.shares, n, a.factor, true, cost))}</b>` })
-        : t(n < p.shares ? 'Enter at least the shares you held before.' : 'Enter what each new share cost.')}</span>
+        ? tp('Average price {old} → {new}. Stop and target move with the prices.', { old: fmt.price(p.avg_price), new: html`<b>${fmt.price(avg)}</b>` })
+        : t(kind === 'sub' ? 'Enter your shares now (more than before) and what each new share cost.' : 'Enter what you got for your rights.')}</span>
     </div>
     <div class="row">
       <button class="btn primary" disabled=${busy || !ok} onClick=${send}><${Icon} name="check" />${t('Update position')}</button>
-    </div>
+    </div>`}
   </div>`;
 }
 
