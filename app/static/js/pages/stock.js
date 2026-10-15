@@ -126,6 +126,7 @@ export function StockPage({ route }) {
           ${(data.fundamentals || data.free_float) && html`<${CompanyPanel} f=${data.fundamentals || { values: {} }} ff=${data.free_float} />`}
           ${data.analysts && html`<${AnalystPanel} a=${data.analysts} close=${st.close} />`}
           ${data.owner_moves && data.owner_moves.length > 0 && html`<${OwnerMoves} list=${data.owner_moves} />`}
+          ${data.big_deals && data.big_deals.length > 0 && html`<${BigDeals} list=${data.big_deals} />`}
           ${data.corporate && html`<${CorporatePanel} c=${data.corporate} />`}
           <${ShariahPanel} info=${info} />
         </aside>
@@ -501,6 +502,32 @@ function OwnerMoves({ list }) {
       <span class="k">${fmt.date(m.seen.slice(0, 10), false)}</span><span class="v" style="font-weight:500" dir="auto">${ownerText(m)}</span>`)}</div>
     <${More} label="About these"><p>${t(OWNERS_HOW)}</p><//><//>`;
 }
+
+// Big deals: a block of the stock's shares traded in one go, from its own headlines (data/news.py big_deals), the
+// last 12 months. Who's behind it, when the headline says.
+const DEAL_SIDE = { buy: 'Bought', sell: 'Sold' };
+const DEAL_WHO = {
+  insider: 'a company official', fund: 'a fund', company: 'a company or institution',
+  shareholder: 'a shareholder', staff: "the staff's reward plan",
+};
+function BigDeals({ list }) {
+  const shown = list.slice(0, 10);
+  return html`<${Fold} title="Big deals" hint=${t('{n} in a year', { n: list.length })}>
+    <div class="stat-list">${shown.map(d => html`
+      <span class="k">${fmt.date(d.published.slice(0, 10), false)}</span>
+      <span class="v" style="font-weight:500">
+        <bdi class=${d.side === 'buy' ? 'up' : d.side === 'sell' ? 'down' : ''}>${t(DEAL_SIDE[d.side] || 'Changed hands')}</bdi>${
+          d.value != null && html` · <bdi>${fmt.short(d.value)} ${t('EGP')}</bdi>`}${d.who && html` · <bdi>${t(DEAL_WHO[d.who])}</bdi>`}
+        <a class="faint" style="display:block;font-weight:400;font-size:12px" href=${d.url} target="_blank" rel="noopener noreferrer" dir="auto">${d.title}</a>
+      </span>`)}</div>
+    <${More} label="About these"><p>${t(DEALS_HOW)}</p><//><//>`;
+}
+
+const DEALS_HOW = 'A big deal is a large block of the stock\'s shares traded in one go, picked out of the stock\'s own '
+  + 'headlines (Mubasher, Reuters, Zawya). Funds, companies, big owners and the company\'s own officials make these, '
+  + 'rarely small investors, so they show when a big player bought or sold. A headline usually names one side only: '
+  + '"Changed hands" means it didn\'t say who bought. Only deals in the news are here, so some are missing, and the '
+  + 'agent reads each stock\'s news only every few days. The agent\'s signals don\'t use these.';
 
 const OWNERS_HOW = 'Each company\'s list of big owners (Arab Finance\'s, from the latest disclosure, or Mubasher\'s) is read '
   + 'again about once a month and compared with the last one. A stake that moved half a point or more, a new owner and '

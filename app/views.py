@@ -634,6 +634,7 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     out["analysts"] = dividends.analyst_targets(d.conn, sym)
     out["owner_moves"] = ownership.recent_moves(d.conn, (date.today() - timedelta(days=365)).isoformat(), sym)
     out["news"] = news.stock_news(d.conn, sym)
+    out["big_deals"] = news.big_deals(d.conn, sym, (date.today() - timedelta(days=365)).isoformat())
     out["cautions"] = cautions_map(d).get(sym, [])
     out["ai"] = ai_view(d, sym, ind["close"])
     out["range"] = range_view(d, sym)

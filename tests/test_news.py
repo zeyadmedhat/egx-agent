@@ -267,3 +267,35 @@ def test_pages_messages_and_the_site_show_the_news(tmp_path, cfg):
     assert files["core"]["cautions"]["MHOT"][0]["kind"] == "ex_dividend"
     assert files["news"]["items"] and "held" not in files["news"]
     assert sorted(a["kind"] for a in files["dividends"]["coming"]) == ["bonus", "dividend"]
+
+
+@pytest.mark.parametrize("title, deal", [
+    ('الرئيس التنفيذي لـ"قرة" يواصل خفض حصته بصفقة بيع جديدة بـ548.67 مليون جنيه', ("sell", 548.67e6, "insider")),
+    ('مساهم بـ"كوبّر للاستثمار" يرفع حصته إلى 15.2% بصفقة قيمتها 6.89 مليون جنيه', ("buy", 6.89e6, "shareholder")),
+    ('بقيمة 937.6 مليون جنيه.. صندوق يبيع أسهماً من رأسمال "فوري" ويخفض حصته لـ4.4%', ("sell", 937.6e6, "fund")),
+    ('"Black Sparrow" تخفض حصتها في "فوري" بصفقة تجاوزت 72.6 مليون جنيه', ("sell", 72.6e6, "company")),
+    ("تنفيذ صفقة على أسهم البنك التجاري الدولي بقيمة 2.45 مليار جنيه", (None, 2.45e9, None)),
+    ("CIB Egypt's 18.5 Mln Shares Block Traded For EGP 2.46 Bln - EGX", (None, 2.46e9, None)),
+    ('بـ 172.4 مليون جنيه.. تنفيذ صفقة "إثابة وتحفيز" على أسهم "إي فاينانس"', (None, 172.4e6, "staff")),
+    ('إعمار مصر تختار "BDO كيز" لتحديد القيمة العادلة بصفقة الاستحواذ على "سكاي تاور"', None),   # a business deal
+    ('البورصة المصرية تنظم فعالية "قرع الجرس" احتفالاً بصفقة "إيجيترانس نوسكو"', None),
+    ("EGYTRANS Says Nafith Egypt Signs Deal With SCZONE To Develop, Operate Truck Yard At Sokhna Port", None),
+])
+def test_big_deals_are_read_from_headlines(title, deal):
+    d = news.deal_of(title)
+    assert (d and (d["side"], pytest.approx(d["value"]) if d["value"] else None, d["who"])) == (
+        deal and (deal[0], pytest.approx(deal[1]), deal[2]))
+
+
+def test_big_deals_keep_one_per_deal(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    news.save_news(conn, [
+        {"id": "r1", "source": "reuters", "lang": "en", "published": "2026-08-17T10:09",
+         "title": "CIB Egypt's 18.5 Mln Shares Block Traded For EGP 2.46 Bln - EGX", "url": "u1"},
+        {"id": "m1", "source": "mubasher", "lang": "ar", "published": "2026-08-18T10:41",
+         "title": "صندوق يرفع حصته في التجاري الدولي بصفقة قيمتها 2.45 مليار جنيه", "url": "u2"},
+        {"id": "m2", "source": "mubasher", "lang": "ar", "published": "2026-08-17T11:00",
+         "title": "أرباح التجاري الدولي ترتفع 20%", "url": "u3"},
+    ], "COMI")
+    got = news.big_deals(conn, "COMI", "2026-01-01")
+    assert [(d["side"], d["who"], d["url"]) for d in got] == [("buy", "fund", "u2")]

@@ -515,6 +515,62 @@ def stock_news(conn: sqlite3.Connection, symbol: str, limit: int = 50) -> list[d
         "ORDER BY published DESC LIMIT ?", (symbol, limit)))
 
 
+# ------------------------------------------------------------------ big deals (a block of the stock's own shares)
+# A headline about one trade of a block of shares: "تنفيذ صفقة على أسهم …", "مساهم يرفع حصته … بصفقة قيمتها …",
+# "… Block Traded For EGP …". Not a company's business deal (an acquisition, a contract): those are left out.
+_DEAL_RE = (re.compile(r"block[- ]trad", re.I),
+            re.compile(r"تنفيذ\s+صفق|بصفق|عبر\s+صفق|صفقات\s+بيع\s+وشراء|(ير|تر)فع\s+(حصت|ملكيت)|(يخ|تخ)فض\s+(حصت|ملكيت)"))
+_NOT_DEAL = re.compile(r"استحواذ|العدول|تقييم|القيمة\s+العادلة|احتفال|acqui", re.I)
+_SELLS = re.compile(r"خفض|يبيع|تبيع|بيع|\bsells?\b|\bsold\b|cuts?\s+stake", re.I)
+_BUYS = re.compile(r"يرفع|ترفع|يشتري|تشتري|شراء|\bbuys?\b|\bbought\b|raises?\s+stake", re.I)
+_VALUE_RE = (re.compile(r"([\d.,]+)\s*(مليون|ملايين|مليار)\s*جنيه"),
+             re.compile(r"EGP\s*([\d.,]+)\s*(mln|bln|mn|bn|million|billion)\b", re.I))
+_WHO = (("staff", re.compile(r"إثابة|تحفيز|incentive", re.I)),
+        ("insider", re.compile(r"الرئيس\s+التنفيذي|رئيس\s+مجلس|عضو\s+مجلس|العضو\s+المنتدب|\bCEO\b|chairman", re.I)),
+        ("fund", re.compile(r"صندوق|\bfund\b", re.I)),
+        ("company", re.compile(r"(^|\s)(تبيع|تخفض|ترفع|تشتري)\s|^\S*\s*شركة|company\s+(sells|buys)", re.I)),
+        ("shareholder", re.compile(r"مساهم|shareholder", re.I)))
+DEAL_SAME = 0.05              # two headlines a day or less apart within 5% of each other's value are the same deal
+
+
+def deal_of(title: str) -> dict | None:
+    """What a headline says about a block of the stock's shares changing hands: {side: buy | sell | None (just
+    "changed hands"), value: EGP or None, who: insider | fund | company | shareholder | None}. None when it isn't one."""
+    t = title.replace("ّ", "")
+    if not any(r.search(t) for r in _DEAL_RE) or _NOT_DEAL.search(t):
+        return None
+    sell, buy = bool(_SELLS.search(t)), bool(_BUYS.search(t))
+    value = None
+    for r in _VALUE_RE:
+        if m := r.search(t):
+            value = float(m.group(1).replace(",", "")) * (1e9 if m.group(2).lower() in ("مليار", "bln", "bn", "billion") else 1e6)
+            break
+    side = "sell" if sell and not buy else "buy" if buy and not sell else None
+    who = next((w for w, r in _WHO if r.search(t)), None)
+    if who is None and side and not re.match(r"\W*(تنفيذ|ال?بورصة|بورصة)", t):
+        who = "company"       # a named buyer or seller ("جهاز مستقبل مصر يرفع حصته…", "Quantum Investment BV raises…")
+    return {"side": side, "value": value, "who": who}
+
+
+def big_deals(conn: sqlite3.Connection, symbol: str, since: str) -> list[dict]:
+    """A stock's block deals from its own headlines since `since`, newest first, one per deal (Mubasher and Reuters
+    often both report the same one: the one that says more is kept)."""
+    out: list[dict] = []
+    for n in _rows(conn.execute("SELECT published, title, url, source FROM news WHERE symbol = ? AND published >= ? "
+                                "ORDER BY published DESC", (symbol, since))):
+        if not (d := deal_of(n["title"])):
+            continue
+        d = {**n, **d}
+        day = datetime.fromisoformat(d["published"][:10])
+        same = next((o for o in out if abs((datetime.fromisoformat(o["published"][:10]) - day).days) <= 1 and (
+            o["title"] == d["title"] or (o["value"] and d["value"] and abs(o["value"] - d["value"]) <= DEAL_SAME * o["value"]))), None)
+        if same is None:
+            out.append(d)
+        elif sum(v is not None for v in (d["side"], d["who"])) > sum(v is not None for v in (same["side"], same["who"])):
+            out[out.index(same)] = d
+    return out
+
+
 def recent_news(conn: sqlite3.Connection, days: int = 30, limit: int = 1500) -> list[dict]:
     """Every headline of the last `days` days (market news has symbol "")."""
     return _rows(conn.execute(
