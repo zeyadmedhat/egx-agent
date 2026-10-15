@@ -241,8 +241,11 @@ def signal_order(r: dict) -> tuple:
     return -(p if p is not None else -1.0), -(r.get("score") or 0)
 
 
-def adjust_reason(ev: dict) -> str:
+def adjust_reason(ev: dict, rights: dict | None = None) -> str:
     """Why a position waits for its new share count (local/api.js says the same)."""
+    if rights:
+        return (f"Rights issue from {nice_date(ev['ex_date'])}: you also hold {rights['units']:,} rights "
+                f"({rights['symbol']}). Once you've subscribed or sold them, record it here so the stop and P&L stay right.")
     if ev.get("rights"):
         return (f"Rights issue from {nice_date(ev['ex_date'])}: past prices ÷ {ev['factor']:.4g}. Once you've "
                 "subscribed or sold your rights, enter the shares you hold now so the stop and P&L stay right.")
@@ -263,13 +266,15 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
         ind = d.indicators(r.symbol)
         ev = pending.get(int(r.id))
         factor = 1.0
+        rights = corporate.rights_holding(ev, int(r.shares))
         if ev:
             # Past prices were re-based after this buy, so the exit rules can't be checked until the share
-            # count is updated. Value the old share count at the new price × the ratio meanwhile.
-            factor = ev["factor"]
-            last = float(ind["close"].iloc[-1]) if len(ind) else float(r.entry_price) / factor
+            # count is updated. Value the old share count at the new price × the ratio meanwhile, or after a rights
+            # issue, the shares at the new price and the rights beside them, as your broker does.
+            factor = 1.0 if rights else ev["factor"]
+            last = float(ind["close"].iloc[-1]) if len(ind) else float(r.entry_price) / ev["factor"]
             stt = {"status": "ADJUST", "stop": None, "days_held": int((ind.index >= pd.Timestamp(r.entry_date)).sum()),
-                   "reason": adjust_reason(ev)}
+                   "reason": adjust_reason(ev, rights)}
         else:
             stt = portfolio.real_status(r, ind, d.cfg)
             last = stt.get("last_close") or float(r.entry_price)
@@ -296,7 +301,7 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
             "from_high": last / float(ind["close"].tail(60).max()) - 1 if len(ind) else None,
             "target": float(r.target), "day": int(stt["days_held"]), "stops_mine": d.cfg.get("stop_moves") == "mine",
             "sell_by": sessions_after(r.entry_date, d.cfg["max_hold_days"] - 1),
-            "fees": fees, "dividends": div, "notes": r.notes or "", "fills": fills, "adjust": ev,
+            "fees": fees, "dividends": div, "notes": r.notes or "", "fills": fills, "adjust": ev, "rights": rights,
             "n_buys": sum(1 for f in fills if f["side"] == "buy") or 1,
         })
     out.sort(key=lambda p: (STATUS_ORDER.get(p["status"], 9), p["symbol"]))
@@ -322,18 +327,20 @@ def book_positions(d: Data, book: dict) -> list[dict]:
         since = str(t.get("entry_date") or t.get("signal_date") or "")
         ev = next((e for e in events if e["symbol"] == sym and since < e["ex_date"] and (e["id"], t.get("id")) not in done),
                   None)
+        rights = None
         if ev:
             ev = {**ev, "describe": corporate.what(ev["factor"], ev["rights"])}
+            rights = corporate.rights_holding(ev, shares)
             last = float(ind["close"].iloc[-1]) if len(ind) else entry / ev["factor"]
             stt = {"status": "ADJUST", "stop": None, "days_held": int((ind.index >= pd.Timestamp(since)).sum()),
-                   "reason": adjust_reason(ev)}
+                   "reason": adjust_reason(ev, rights)}
         else:
             stt = portfolio.real_status(row, ind, d.cfg)
             last = stt.get("last_close") or entry
         out.append({"id": t.get("id"), "symbol": sym, "status": stt["status"], "reason": stt["reason"], "shares": shares,
                     "avg_price": entry, "last": last, "stop": stt["stop"], "prev_stop": stt.get("prev_stop"),
                     "bounce_level": stt.get("bounce_level"), "bounce_by": stt.get("bounce_by"),
-                    "target": float(row["target"]), "day": int(stt["days_held"]), "adjust": ev})
+                    "target": float(row["target"]), "day": int(stt["days_held"]), "adjust": ev, "rights": rights})
     out.sort(key=lambda p: (STATUS_ORDER.get(p["status"], 9), p["symbol"]))
     return clean(out)
 
@@ -1081,9 +1088,16 @@ def orders(d: Data, positions: list[dict] | None = None) -> dict | None:
     for p in positions:
         sym, st = p["symbol"], p["status"]
         base = {"symbol": sym, "trade_id": p["id"], "shares": p["shares"]}
-        if st == "ADJUST":
+        if st == "ADJUST" and p.get("rights"):
+            r = p["rights"]
+            items.append({**base, "key": f"adjust:{sym}", "kind": "adjust", "rights": r["units"],
+                          "title": f"Record what you do with your {sym} rights",
+                          "detail": f"You hold {r['units']:,} rights ({r['symbol']}) from {nice_date(p['adjust']['ex_date'])}: "
+                                    f"{r['note']} Once you subscribe or sell them, record it on My Portfolio. "
+                                    "Its stop can't be checked until then."})
+        elif st == "ADJUST":
             items.append({**base, "key": f"adjust:{sym}", "kind": "adjust",
-                          "title": f"Update {sym} for its bonus shares",
+                          "title": f"Update {sym} for its {'rights issue' if p['adjust'].get('rights') else 'bonus shares'}",
                           "detail": f"{p['adjust']['describe'].capitalize()}, from {nice_date(p['adjust']['ex_date'])}. "
                                     "On My Portfolio, enter the shares you hold now. Its stop can't be checked until then."})
         elif st == "EXIT":

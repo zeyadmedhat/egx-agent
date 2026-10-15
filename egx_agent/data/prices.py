@@ -143,6 +143,25 @@ def rebase_info(conn: sqlite3.Connection, symbol: str, fresh: pd.DataFrame) -> d
     return {"factor": snap_factor(factor), "ex_date": later.min() if len(later) else None}
 
 
+def fix_double_rebase(conn: sqlite3.Connection, symbols) -> list[str]:
+    """TradingView sometimes divides a stock's last sessions before an ex-date twice (KORA's rights issue, ex 14 Oct
+    2026: 11–13 Oct ÷ 1.8333², 7 Oct and before ÷ 1.8333), so the chart drops by the event's own factor between two
+    sessions, a fall EGX's daily limit (±20%) never allows. Those sessions are multiplied back. Returns the fixed."""
+    fixed = []
+    for sym, ex_date, f in conn.execute("SELECT symbol, ex_date, factor FROM price_events WHERE factor > 1.3").fetchall():
+        if sym not in symbols:
+            continue
+        rows = conn.execute("SELECT date, open, close FROM prices WHERE symbol=? AND date < ? ORDER BY date DESC LIMIT 30",
+                            (sym, ex_date)).fetchall()[::-1]
+        start = next((b[0] for a, b in zip(rows, rows[1:]) if b[1] > 0 and abs(a[2] / b[1] / f - 1) < 0.03), None)
+        if start:
+            conn.execute("UPDATE prices SET open=open*?, high=high*?, low=low*?, close=close*? "
+                         "WHERE symbol=? AND date>=? AND date<?", (f, f, f, f, sym, start, ex_date))
+            fixed.append(sym)
+    conn.commit()
+    return fixed
+
+
 def update_prices(
     conn: sqlite3.Connection,
     symbols: list[str],
@@ -197,6 +216,7 @@ def update_prices(
             events.append({"symbol": sym, "ex_date": ex_date, "factor": info["factor"]})
         else:
             failed.append(sym)
+    fix_double_rebase(conn, set(updated))
 
     notes = {s: KNOWN_STATUS.get(s, NOTE_NOT_FOUND) for s in failed if plan[s] is None}
     notes.update({s: NOTE_NEVER_TRADED for s in not_traded})
@@ -314,6 +334,7 @@ def extend_history(
                 db.upsert_prices(conn, sym, df)   # also fixes any stored bar TradingView has since corrected
             if progress:
                 progress(done, len(todo), sym)
+    fix_double_rebase(conn, set(todo) - set(failed))
     if len(failed) < max(1, len(todo) // 2):
         db.set_meta(conn, "history_years_loaded", str(years))
     return {"symbols": len(todo), "bars_added": added, "failed": sorted(failed), "events": events}

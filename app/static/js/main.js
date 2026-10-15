@@ -265,7 +265,12 @@ function Root() {
   useEffect(() => {
     const start = STATIC
       ? loadMe().then(() => import('./local/site.js'))
-        .then(async site => (await site.resume()) || (TELEGRAM ? site.telegramUnlock(TELEGRAM.initData) : false))
+        .then(async site => {
+          if (!(await site.resume())) return TELEGRAM ? site.telegramUnlock(TELEGRAM.initData) : false;
+          // opened before (the key is remembered) but not linked, or unlinked since: the bot links it again
+          if (TELEGRAM && !site.botLinked()) await site.telegramUnlock(TELEGRAM.initData);
+          return true;
+        })
         .then(ok => setStore({ auth: ok ? null : 'unlock' }))
         .catch(e => { setBootError(e.message); setStore({ auth: 'unlock' }); })
       : loadMe().catch(() => setStore({ offline: true }));

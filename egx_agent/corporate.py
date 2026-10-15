@@ -12,6 +12,7 @@ each new share cost.
 from __future__ import annotations
 
 import math
+import re
 import sqlite3
 from datetime import date
 from fractions import Fraction
@@ -49,10 +50,41 @@ def what(factor: float, rights: bool) -> str:
     return f"a rights issue, past prices divided by {factor:.4g}" if rights else describe(factor)
 
 
+RIGHTS_RE = re.compile(r"([\d.]+) new shares? for each share held, at ([\d.]+) EGP")
+
+
+def rights_terms(conn: sqlite3.Connection, symbol: str, ex_date: str) -> dict | None:
+    """A rights issue's terms from its corporate action (data/news.py), and the rights' price as the exchange sets it
+    before they trade: the ex-date's opening price less the subscription price, in whole piastres (KORA, 14 Oct 2026:
+    2.53 − 0.205 → 2.32, Thndr's KORA_r1). None when the note doesn't say."""
+    a = conn.execute("SELECT note FROM corp_actions WHERE symbol=? AND kind='rights' "
+                     "AND ABS(julianday(effective) - julianday(?)) <= 7 ORDER BY effective DESC", (symbol, ex_date)).fetchone()
+    m = a and RIGHTS_RE.search(a["note"] or "")
+    op = conn.execute("SELECT open FROM prices WHERE symbol=? AND date>=? ORDER BY date LIMIT 1", (symbol, ex_date)).fetchone()
+    if not m or not op:
+        return None
+    # ponytail: the price before the rights trade; once they do (KORA: 18–27 Oct) your broker shows theirs
+    price = float(m[2])
+    return {"ratio": float(m[1]), "price": price, "ref": max(0.0, math.floor((op[0] - price) * 100 + 1e-6) / 100),
+            "note": a["note"]}
+
+
+def rights_holding(ev: dict | None, shares: int) -> dict | None:
+    """The rights a position bought before its rights issue holds until you subscribe or sell them, as your broker
+    lists them (Thndr: KORA_r1, cost 0). None for anything else (local/engine.js rightsHolding)."""
+    t = ev and ev.get("terms")
+    if not t:
+        return None
+    units = math.floor(shares * t["ratio"] + 1e-6)
+    return {"symbol": f"{ev['symbol']}_r1", "units": units, "price": t["ref"], "value": units * t["ref"],
+            "sub_price": t["price"], "note": t["note"]}
+
+
 def events(conn: sqlite3.Connection) -> list[dict]:
     """Every re-base of past prices, oldest first, as the website's browser reads them (local/engine.js pending)."""
     return [{"id": f"{r['symbol']}:{r['ex_date']}", "symbol": r["symbol"], "ex_date": r["ex_date"],
-             "factor": r["factor"], "rights": bool(r["rights"])}
+             "factor": r["factor"], "rights": bool(r["rights"]),
+             "terms": rights_terms(conn, r["symbol"], r["ex_date"]) if r["rights"] else None}
             for r in conn.execute(f"SELECT e.symbol, e.ex_date, e.factor, {RIGHTS_SQL} AS rights "
                                   "FROM price_events e ORDER BY e.ex_date, e.id")]
 
@@ -77,6 +109,7 @@ def pending(conn: sqlite3.Connection, account: str = "real") -> dict[int, dict]:
                 "rights": rights, "describe": what(r["factor"], rights), "shares_now": r["shares"],
                 # how many new shares you subscribed to is yours to say
                 "shares_expected": r["shares"] if rights else expected_shares(r["shares"], r["factor"]),
+                "terms": rights_terms(conn, r["symbol"], r["ex_date"]) if rights else None,
             }
     return out
 

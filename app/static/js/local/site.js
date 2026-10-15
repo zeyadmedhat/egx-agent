@@ -134,10 +134,16 @@ export async function telegramUnlock(initData) {
   files.clear();
   try {
     localStorage.setItem(KEY, JSON.stringify({ salt: s.salt, iter: s.iter, key: out.key.key }));
-    if (out.token) localStorage.setItem('egx-bot-link', JSON.stringify({ url: s.worker, token: out.token }));
+    if (out.token) localStorage.setItem('egx-bot-link', JSON.stringify({ url: s.worker, token: out.token, mini: true }));
     localStorage.setItem('egx-accepted', new Date().toISOString());
   } catch { /* storage blocked: open until the app closes */ }
   return true;
+}
+
+// Is this browser linked to the bot (local/api.js botLink)? Inside Telegram a remembered key isn't enough: the
+// portfolio follows the website only through the link.
+export function botLinked() {
+  try { return !!localStorage.getItem('egx-bot-link'); } catch { return false; }
 }
 
 export function lock() {

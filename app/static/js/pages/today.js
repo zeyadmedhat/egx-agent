@@ -3,7 +3,7 @@
 import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, todayISO, copyText, STATIC } from '../lib.js';
 import {
   Icon, Badges, Empty, Callout, PageHead, SectionHead, PageLoading, JobControl, SessionBadge, useQuotes, livePosition,
-  PositionCard, ownerText,
+  PositionCard, RightsCard, ownerText,
 } from '../ui.js';
 import { t, isAr, tn } from '../i18n.js';
 
@@ -112,14 +112,14 @@ function Brief({ data, blocked, alerts }) {
 function Positions({ positions, cfg, alerts }) {
   const q = useQuotes(positions.map(p => p.symbol));
   const list = positions.map(p => livePosition(p, q));
-  const total = list.reduce((s, p) => s + p.pnl, 0);
+  const total = list.reduce((s, p) => s + p.pnl + (p.rights ? p.rights.value : 0), 0);
   return html`<section class="section">
     <${SectionHead} title="Your open positions" count=${positions.length}
       hint=${html`${t(alerts ? (alerts === 1 ? '{n} needs your attention' : '{n} need your attention') : 'Nothing to do: all on hold', { n: alerts })}
 ${' '}· ${t('Total')} <b class=${tone(total)}>${fmt.signed(total)} ${t('EGP')}</b>`}>
       <a class="btn sm" href="#/portfolio">${t('Manage')} <${Icon} name="chevron" size=${14} /></a><//>
     <div class="pos-grid">${list.map(p => html`<${PositionCard} p=${p} key=${p.id}
-      hold=${{ max: cfg.max_hold_days, review: cfg.review_day }} />`)}</div></section>`;
+      hold=${{ max: cfg.max_hold_days, review: cfg.review_day }} />${p.rights && html`<${RightsCard} p=${p} key=${`r${p.id}`} />`}`)}</div></section>`;
 }
 
 // ------------------------------------------------------------------ orders for the next session

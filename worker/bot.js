@@ -154,7 +154,7 @@ const EN = {
   cash: (c, n) => `Cash ${c} EGP · ${n} open position${n === 1 ? "" : "s"}`,
   closed: (n, w, t) => `Closed trades: ${n} · ${w} won · ${t} EGP`,
   atStop: " ⚠️ at or under your stop", atTarget: " 🎯 at your target",
-  stopW: "Stop", targetW: "target", egpW: "EGP",
+  stopW: "Stop", targetW: "target", egpW: "EGP", rightsW: "rights", rightsIssue: "Rights issue",
   status: s => ({ EXIT: "Sell", BOUNCE: "Sell on a bounce", REVIEW: "Consider selling", "TIGHTEN STOP": "Raise your stop",
                   HOLD: "Hold", ADJUST: "Update your shares", "NO DATA": "No price yet" })[s] || s,
   note: s => s,
@@ -318,7 +318,7 @@ const AR = {
   cash: (c, n) => `النقدية ${c} جنيه · ${n} مركز مفتوح`,
   closed: (n, w, t) => `صفقات مغلقة: ${n} · الرابحة ${w} · ${t} جنيه`,
   atStop: " ⚠️ عند وقف الخسارة أو تحته", atTarget: " 🎯 عند الهدف",
-  stopW: "الوقف", targetW: "الهدف", egpW: "جنيه",
+  stopW: "الوقف", targetW: "الهدف", egpW: "جنيه", rightsW: "حقوق اكتتاب", rightsIssue: "حق اكتتاب",
   status: s => ({ EXIT: "بيع", BOUNCE: "بع عند الارتداد", REVIEW: "مراجعة", "TIGHTEN STOP": "ارفع الوقف", HOLD: "احتفظ", ADJUST: "حدّث عدد الأسهم",
                   "NO DATA": "لا توجد بيانات" })[s] || s,
   note: s => arNote(s),
@@ -749,18 +749,24 @@ export function portfolioText(book, info, lang = "en", fresh = null) {
   const T = L(lang), stocks = (info && info.stocks) || {}
   const newer = fresh && fresh.date > (book.date || "") ? Object.fromEntries(fresh.positions.map(p => [p.symbol, p])) : null
   let worth = book.cash
-  const lines = book.positions.map(p0 => {
+  const lines = book.positions.flatMap(p0 => {
     const p = newer && newer[p0.symbol] ? { ...p0, ...newer[p0.symbol] } : p0
     const now = stocks[p.symbol], last = now && now.d >= (newer ? fresh.date : book.date || "") ? now.c : p.last
     worth += last * p.shares
     // like your broker's (and the website's): against what you paid with the buy fees; selling fees once you sell
     const cost = p.avg * p.shares + (p.fees || 0), pnl = last * p.shares - cost
     const flag = p.stop != null && last <= p.stop ? T.atStop : p.target != null && last >= p.target ? T.atTarget : ""
-    return block(`<b>${esc(p.symbol)}</b> · ${esc(T.status(p.status || ""))}${flag}`,
+    const r = p.rights, out = [block(`<b>${esc(p.symbol)}</b> · ${r ? T.rightsIssue : esc(T.status(p.status || ""))}${flag}`,
       `${p.shares.toLocaleString("en-US")} × ${px(p.avg)} → ${px(last)} · <b>${pct(pnl / cost, true)}</b> ` +
       `(${pnl >= 0 ? "+" : "-"}${egp(Math.abs(pnl))} ${T.egpW})`,
       [p.stop != null ? `${T.stopW} ${px(p.stop)}` : "", p.target != null ? `${T.targetW} ${px(p.target)}` : ""].filter(Boolean).join(" · "),
-      p.status && p.status !== "HOLD" && p.reason ? `<i>${esc(T.note(p.reason))}</i>` : null)
+      p.status && p.status !== "HOLD" && p.reason ? `<i>${esc(T.note(p.reason))}</i>` : null)]
+    if (r) {          // a rights issue's rights, beside the shares as your broker lists them (KORA_r1, cost 0)
+      worth += r.units * r.price
+      out.push(block(`<b>${esc(r.symbol)}</b> · ${T.rightsW}`,
+        `${r.units.toLocaleString("en-US")} × ${px(r.price)} = <b>+${egp(r.units * r.price)} ${T.egpW}</b>`))
+    }
+    return out
   })
   const head = [T.worth(egp(worth), book.start ? pct(worth / book.start - 1, true) : null),
     T.cash(egp(book.cash), book.positions.length)]
@@ -776,7 +782,8 @@ export function portfolioText(book, info, lang = "en", fresh = null) {
 export function shotText(holdings, book, info, lang = "en") {
   const T = L(lang), known = { stocks: (info && info.stocks) || {} }
   if (!holdings.length) return T.shotNone
-  const mine = Object.fromEntries((book.positions || []).map(p => [p.symbol, p]))
+  const mine = Object.fromEntries((book.positions || []).flatMap(p => [[p.symbol, p], ...(p.rights
+    ? [[p.rights.symbol.toUpperCase(), { symbol: p.rights.symbol, shares: p.rights.units, avg: 0, fees: 0 }]] : [])]))
   const signed = v => `${v >= 0 ? "+" : "−"}${egp(Math.abs(v))}`
   const seen = new Set(), lines = [T.shotHead]
   let missing = 0
@@ -848,7 +855,7 @@ export function parseHoldings(text) {
   }
   const num = v => (signed(v) > 0 ? signed(v) : null)
   return (Array.isArray(got && got.holdings) ? got.holdings : []).slice(0, 40).map(h => ({
-    symbol: typeof h.symbol === "string" && /^[A-Za-z0-9]{2,12}$/.test(h.symbol.trim()) ? h.symbol.trim().toUpperCase() : null,
+    symbol: typeof h.symbol === "string" && /^[A-Za-z0-9_]{2,12}$/.test(h.symbol.trim()) ? h.symbol.trim().toUpperCase() : null,
     name: typeof h.name === "string" ? h.name.trim().slice(0, 80) : null,
     shares: num(h.shares), avg_price: num(h.avg_price), last: num(h.last), value: num(h.value), pnl: signed(h.pnl),
   })).filter(h => (h.shares || h.value) && (h.symbol || h.name))
@@ -1020,7 +1027,7 @@ export class Bot {
       if (url.pathname === "/started") return this.started(body)
       if (url.pathname === "/bell" || url.pathname === "/bells") return this.bell(body, url.pathname === "/bell")
       const cid = await this.owner(body.token)
-      if (cid) await this.forget(cid)
+      if (cid) await this.unpair(cid, body.token)
       return json({ ok: true })
     }
     // Your Mac's evening "Orders" (app/alerts.py, bot_positions) from the portfolio you keep on the site: the Mac has
@@ -1125,6 +1132,16 @@ export class Bot {
     const store = this.ctx.storage, toks = (await store.get("links:" + cid)) || [], mini = await store.get("mini:" + cid)
     await store.delete(["book:" + cid, "full:" + cid, "links:" + cid, "mini:" + cid, "reads:" + cid,
                         ...toks.map(t => "tok:" + t), ...(mini ? ["tok:" + mini] : [])])
+  }
+
+  // A browser's Unlink (Settings): that browser only, so your other devices and the copy here stay. The copy goes
+  // with the last one (and with /unlink or /stop in Telegram).
+  async unpair(cid, token) {
+    const store = this.ctx.storage, hash = await sha(token), mini = await store.get("mini:" + cid)
+    const toks = ((await store.get("links:" + cid)) || []).filter(t => t !== hash)
+    if (!toks.length && (!mini || mini === hash)) return this.forget(cid)
+    await store.delete(["tok:" + hash, ...(mini === hash ? ["mini:" + cid] : [])])
+    await store.put("links:" + cid, toks)
   }
 
   async pair(body) {

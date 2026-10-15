@@ -342,10 +342,20 @@ export function pending(book, events, account = 'real') {
       // a rights issue (corporate.pending): how many new shares you subscribed to is yours to say
       out[t.id] = { event_id: e.id, symbol: e.symbol, ex_date: e.ex_date, factor: e.factor, rights: !!e.rights,
         describe: e.rights ? `a rights issue, past prices divided by ${g(+e.factor.toPrecision(4))}` : describe(e.factor),
-        shares_now: t.shares, shares_expected: e.rights ? t.shares : expectedShares(t.shares, e.factor) };
+        shares_now: t.shares, shares_expected: e.rights ? t.shares : expectedShares(t.shares, e.factor),
+        terms: (e.rights && e.terms) || null };
     }
   }
   return out;
+}
+
+// The rights a position bought before its rights issue holds until you subscribe or sell them, as your broker lists
+// them (Thndr: KORA_r1, cost 0). null for anything else (corporate.rights_holding).
+export function rightsHolding(ev, shares) {
+  const t = ev && ev.terms;
+  if (!t) return null;
+  const units = Math.floor(shares * t.ratio + 1e-6);
+  return { symbol: `${ev.symbol}_r1`, units, price: t.ref, value: units * t.ref, sub_price: t.price, note: t.note };
 }
 
 // The average price on the new prices (corporate.new_average). Bonus shares or a split: the same cost over more
@@ -645,9 +655,14 @@ export function accountSummary(book, account, cfg, lastClose, events = []) {
   const realized = sum(closed.map(t => (t.exit_price - t.entry_price) * t.shares - (t.fees || 0))) + dividends;
   const cost = sum(open.map(t => t.entry_price * t.shares + (t.fees || 0)));
   const cash = capital + sum(moves.map(walletEffect)) + realized - cost;
-  // A position still waiting for its bonus-share update holds the old share count at old prices.
-  const factor = Object.fromEntries(Object.entries(pending(book, events, account)).map(([id, e]) => [id, e.factor]));
-  const market = sum(open.map(t => (lastClose[t.symbol] ?? t.entry_price) * t.shares * (factor[t.id] ?? 1)));
+  // A position still waiting for its bonus-share update holds the old share count at old prices; one waiting after
+  // a rights issue holds its shares at the new price and the rights beside them (rightsHolding).
+  const pend = pending(book, events, account);
+  const worth = t => {
+    const e = pend[t.id], last = lastClose[t.symbol] ?? t.entry_price, r = rightsHolding(e, t.shares);
+    return r ? last * t.shares + r.value : last * t.shares * (e ? e.factor : 1);
+  };
+  const market = sum(open.map(worth));
   const equity = cash + market;
   return {
     start, capital, added, cash, equity, realized, dividends, unrealized: market - cost, open_count: open.length,

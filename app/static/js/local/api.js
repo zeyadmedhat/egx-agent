@@ -108,14 +108,19 @@ async function openPositions(c, symbol = null) {
   const out = open.map(r => {
     const b = bars[r.symbol] || [];
     const ev = pend[r.id];
+    const rights = E.rightsHolding(ev, r.shares);
     let factor = 1, stt, last;
     if (ev) {
       // Past prices were re-based after this buy, so the exit rules can't be checked until the share count is
-      // updated. Value the old share count at the new price × the ratio meanwhile.
-      factor = ev.factor;
-      last = b.length ? b[b.length - 1].close : r.entry_price / factor;
+      // updated. Value the old share count at the new price × the ratio meanwhile, or after a rights issue, the
+      // shares at the new price and the rights beside them, as your broker does.
+      factor = rights ? 1 : ev.factor;
+      last = b.length ? b[b.length - 1].close : r.entry_price / ev.factor;
       stt = { status: 'ADJUST', stop: null, days_held: b.filter(x => x.date >= r.entry_date).length,
-        reason: ev.rights   // views.adjust_reason
+        reason: rights   // views.adjust_reason
+          ? `Rights issue from ${E.niceDate(ev.ex_date)}: you also hold ${E.int(rights.units)} rights (${rights.symbol}). `
+            + "Once you've subscribed or sold them, record it here so the stop and P&L stay right."
+          : ev.rights
           ? `Rights issue from ${E.niceDate(ev.ex_date)}: past prices ÷ ${E.g(+ev.factor.toPrecision(4))}. Once you've `
             + 'subscribed or sold your rights, enter the shares you hold now so the stop and P&L stay right.'
           : `Bonus shares or split from ${E.niceDate(ev.ex_date)}: ${ev.describe}. `
@@ -147,7 +152,7 @@ async function openPositions(c, symbol = null) {
       // how far under its 3-month high: after a 50%+ fall even the model's top ratings did worse (2026-10)
       from_high: b.length ? last / Math.max(...b.slice(-60).map(x => x.close)) - 1 : null,
       stop_src: r.stop_src || null, target_src: r.target_src || null, day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
-      notes: r.notes || '', fills, adjust: ev || null, n_buys: fills.filter(f => f.side === 'buy').length || 1,
+      notes: r.notes || '', fills, adjust: ev || null, rights, n_buys: fills.filter(f => f.side === 'buy').length || 1,
     };
   });
   out.sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || (a.symbol < b.symbol ? -1 : 1));
@@ -178,9 +183,15 @@ export function orders(c, positions) {     // also tests/js/parity.mjs: the same
   for (const p of positions) {
     const sym = p.symbol, st = p.status;
     const base = { symbol: sym, trade_id: p.id, shares: p.shares };
-    if (st === 'ADJUST') {
+    if (st === 'ADJUST' && p.rights) {
+      const r = p.rights;
+      items.push({ ...base, key: `adjust:${sym}`, kind: 'adjust', rights: r.units, title: `Record what you do with your ${sym} rights`,
+        detail: `You hold ${E.int(r.units)} rights (${r.symbol}) from ${E.niceDate(p.adjust.ex_date)}: ${r.note} `
+          + "Once you subscribe or sell them, record it on My Portfolio. Its stop can't be checked until then." });
+    } else if (st === 'ADJUST') {
       const d = p.adjust.describe;
-      items.push({ ...base, key: `adjust:${sym}`, kind: 'adjust', title: `Update ${sym} for its bonus shares`,
+      items.push({ ...base, key: `adjust:${sym}`, kind: 'adjust',
+        title: `Update ${sym} for its ${p.adjust.rights ? 'rights issue' : 'bonus shares'}`,
         detail: `${d.charAt(0).toUpperCase()}${d.slice(1)}, from ${E.niceDate(p.adjust.ex_date)}. `
           + "On My Portfolio, enter the shares you hold now. Its stop can't be checked until then." });
     } else if (st === 'EXIT') {
@@ -928,14 +939,15 @@ async function sendBook(c) {
   const link = botLink();
   if (!link) return;
   try {
-    if (!link.synced) {                       // newly linked: a portfolio on another device comes here first
-      if (await pullBook(link)) c = await context();
+    if (!link.synced) {                       // newly linked: a portfolio on another device comes here first,
+      if (await pullBook(link, !!link.mini)) c = await context();   // and always to the Telegram app (the website's)
     }
     const pv = await portfolioView(c);
     const book = { date: c.core.scan_date, start: Math.max(0, pv.summary.start), cash: pv.summary.cash, closed: pv.closed_stats,
       watchlist: c.book.watchlist || [],
       positions: pv.positions.map(p => ({ symbol: p.symbol, shares: p.shares, avg: p.avg_price, fees: p.fees, last: p.last,
-        stop: p.stop, target: p.target, status: p.status, reason: p.reason || '' })) };
+        stop: p.stop, target: p.target, status: p.status, reason: p.reason || '',
+        rights: p.rights && { symbol: p.rights.symbol, units: p.rights.units, price: p.rights.price } })) };
     await botPost(link.url, '/book', { token: link.token, book, full: c.book, changed: changedOf(c.book) });
     setLink({ url: link.url, token: link.token, synced: true, sent: c.core.scan_date });
   } catch (err) {

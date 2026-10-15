@@ -81,6 +81,13 @@ assert.match(portfolioText({ ...book, positions: [{ ...book.positions[1], status
   reason: "Big loss (-35.0%): sell at the first close above its 20-day average (59.77 now), by 2026-10-29 at the latest" }],
   sent: "2026-09-29" }, st.info), /· Sell on a bounce[\s\S]*Stop 51.00[\s\S]*Big loss \(-35.0%\)/)
 assert.match(pt, /Closed trades: 2 · 50.0% won · \+1,500 EGP/)
+// a rights issue: the shares at their own price and the rights beside them, like Thndr (KORA + KORA_r1)
+const kora = { symbol: "KORA", shares: 15170, avg: 6.40688, last: 2.77, stop: null, target: 9, status: "ADJUST",
+  reason: "Rights issue", rights: { symbol: "KORA_r1", units: 13653, price: 2.32 } }
+const pr = portfolioText({ ...book, cash: 1219, positions: [kora], sent: "2026-10-15" }, { ...st.info, stocks: {} })
+assert.match(pr, /<b>74,915 EGP<\/b>/)                                             // Thndr's net worth
+assert.match(pr, /<b>KORA<\/b> · Rights issue\n15,170 × 6.407 → 2.770 · <b>-56.8%<\/b> \(-55,171 EGP\)/)
+assert.match(pr, /<b>KORA_r1<\/b> · rights\n13,653 × 2.320 = <b>\+31,675 EGP<\/b>/)
 assert.match(watchlistText(book, st.info), /COMI<\/b> 128.01  ▼ -0.4% · 13.4% chance in 10 days\n<b>ZZZZ<\/b>/)
 assert.match(watchlistText(book, st.info, "en", ["COMI"]), /<b>COMI<\/b> 🔔 128.01/)              // its BUY bell is on
 console.log("portfolio ok")
@@ -272,6 +279,13 @@ const mini = await (await post2("/miniapp", { initData: signed })).json()
 assert.equal(mini.key.iter, 600000)
 assert.equal((await post2("/restore", { token: mini.token })).status, 200)
 assert.equal((await post2("/miniapp", { initData: signed.replace("Sam", "Tom") })).status, 403)
+// one browser's Unlink: that browser only, the copy and the other devices stay; the last one takes the copy along
+assert.equal((await post2("/unpair", { token: "f".repeat(32) })).status, 200)
+assert.equal((await post2("/restore", { token: "f".repeat(32) })).status, 401)
+await post2("/unpair", { token: nonce })
+assert.equal((await (await post2("/restore", { token: mini.token })).json()).book.trades[0].symbol, "COMI")
+await post2("/unpair", { token: mini.token })
+assert.equal((await (await mine(11, env2.BOT_TOKEN)).json()).book, null)
 // /unlink forgets every link, the mini app's too
 await tg2("/unlink")
 assert.equal((await post2("/restore", { token: mini.token })).status, 401)
@@ -319,6 +333,10 @@ assert.deepEqual(parseHoldings("I can't read that."), [])
   assert.match(shotText([{ symbol: "KORA", shares: 12299, avg_price: 6.43 }], site(6.433), st.info), /✅ <b>KORA<\/b> matches/)
   assert.match(shotText([screen], site(6.433), st.info, "ar"), /✅ <b>KORA<\/b> متطابق: دفعت 79,119 جنيه/)
   assert.match(shotText([], site(6.433), st.info), /found no holdings/)
+  const rights = { positions: [{ symbol: "KORA", shares: 15170, avg: 6.40688, fees: 0,
+    rights: { symbol: "KORA_r1", units: 13653, price: 2.32 } }] }
+  assert.match(shotText(parseHoldings('{"holdings": [{"symbol": "KORA_r1", "shares": 13653, "value": 31674.96, "pnl": 31674.96}]}'),
+    rights, st.info), /✅ <b>KORA_R1<\/b>: the same 13,653 shares/)
 }
 // Thndr's list of stocks: only each one's market value and profit/loss (a loss with a minus, or as a number)
 assert.deepEqual(parseHoldings('{"holdings": [{"symbol": "FCMD", "shares": null, "value": 23130, "pnl": 1202}, ' +

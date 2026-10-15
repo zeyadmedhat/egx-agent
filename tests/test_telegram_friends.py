@@ -2,8 +2,11 @@
 linked to the bot), in their language, /quiet, the one-tap Connect link, and your Mac's Connect through the Worker."""
 import json
 
+import pytest
+
 from app import alerts, jobs, site_daily, static_site, views
 from egx_agent import config, db, portfolio, scan
+from egx_agent.data import news
 from tests.test_static_site import PASSWORD, FakeBot, _site_db
 
 
@@ -143,6 +146,31 @@ def test_positions_waiting_for_bonus_shares_ask_for_the_new_count(tmp_path):
     [p] = views.book_positions(d, {"trades": [trade], "adjustments": [{"event_id": "AAA:2099-01-01", "trade_id": 3}]})
     assert p["status"] != "ADJUST"
     assert views.book_positions(d, {"trades": [{**trade, "entry_price": None}]}) == []   # an incomplete record
+
+
+def test_a_rights_issue_shows_the_rights_beside_the_shares_like_thndr(tmp_path):
+    """KORA after its rights issue (ex 14 Oct 2026) as Thndr lists it: 15,170 shares at their own price, and 13,653
+    rights (KORA_r1) at 2.53 − 0.205 → 2.32, worth 31,674.96. The orders ask what you did with them, in Arabic too."""
+    conn = db.connect(_site_db(tmp_path / "egx.db"))
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) VALUES "
+                 "('AAA', 'rights', 'Capital Increase - Rights Issue', '2099-01-01', '2099-01-02', ?, 'x')",
+                 (news.KNOWN_ACTIONS[0]["note"],))
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('AAA', '2099-01-02', 1.833333, 'x')")
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) "
+                 "VALUES ('AAA', '2099-01-02', 2.53, 2.99, 2.53, 2.77, 1e6)")
+    d = views.Data(conn, dict(config.DEFAULTS), views.Cache())
+    trade = {"id": 3, "account": "real", "status": "open", "symbol": "AAA", "entry_date": "2020-01-01",
+             "entry_price": 6.40688, "shares": 15170, "initial_stop": 5.0, "target": 9.0}
+    [p] = views.book_positions(d, {"trades": [trade]})
+    assert p["status"] == "ADJUST" and p["last"] == 2.77
+    assert {k: p["rights"][k] for k in ("symbol", "units", "price", "sub_price")} == {
+        "symbol": "AAA_r1", "units": 13653, "price": 2.32, "sub_price": 0.205}
+    assert p["rights"]["value"] == pytest.approx(31674.96)
+    assert "you also hold 13,653 rights (AAA_r1)" in p["reason"]
+    [item] = [i for i in views.orders(d, [p])["items"] if i["kind"] == "adjust"]
+    assert item["title"] == "Record what you do with your AAA rights" and "Subscription 18 Oct" in item["detail"]
+    [(_, title, detail)] = alerts._order_items(views.orders(d, [p]), [p], "ar")
+    assert "حقوق اكتتاب AAA" in title and "13,653" in detail
 
 
 def test_a_friends_big_loss_tells_them_to_sell_on_the_bounce(tmp_path, monkeypatch):

@@ -6,7 +6,7 @@ import {
 } from '../lib.js';
 import {
   Icon, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, Field,
-  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard, More, DateInput, lastSession,
+  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard, RightsCard, More, DateInput, lastSession,
 } from '../ui.js';
 import { t, tn, tp } from '../i18n.js';
 import { LineChart } from '../charts.js';
@@ -33,7 +33,7 @@ export function PortfolioPage({ route }) {
   const openClosed = data.closed.find(r => r.id === closedId) || null;
   const list = data.positions.map(p => livePosition(p, q));
   const live = list.some(p => p.live);
-  const openPnl = list.reduce((a, p) => a + p.pnl, 0);
+  const openPnl = list.reduce((a, p) => a + p.pnl + (p.rights ? p.rights.value : 0), 0);
   const equity = s.equity + list.reduce((a, p) => a + (p.price - p.last) * p.shares, 0);
   const startAdd = mode => { setAdd(mode); setTimeout(() => scrollTo('buy-form'), 0); };
   const closeCard = id => { setOpenId(null); setTimeout(() => scrollTo(`pos-${id}`, 'nearest'), 0); };
@@ -96,7 +96,7 @@ export function PortfolioPage({ route }) {
           hold=${{ max: data.max_hold_days, review: data.review_day }} open=${openId === p.id}
           onOpen=${() => (openId === p.id ? closeCard(p.id) : setOpenId(p.id))}>
           ${openId === p.id && html`<${PositionDetail} p=${p} data=${data} onDone=${() => setOpenId(null)}
-            onClose=${() => closeCard(p.id)} />`}<//>`)}</div>`
+            onClose=${() => closeCard(p.id)} />`}<//>${p.rights && html`<${RightsCard} p=${p} key=${`r${p.id}`} />`}`)}</div>`
         : html`<div class="card"><${Empty} icon="briefcase" title="No open positions"
           text="After you buy at your broker, press Log a buy above." /></div>`}
     </section>

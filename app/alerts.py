@@ -550,6 +550,10 @@ def _order_items(o: dict, positions: list[dict], lang: str) -> list[tuple[str, s
         sym = _e(it["symbol"])
         if not ar:
             title, detail = it["title"], it["detail"]
+        elif it["kind"] == "adjust" and it.get("rights"):
+            title = f"سجّل ما تفعله بحقوق اكتتاب {sym}"
+            detail = (f"لديك {it['rights']:,} حق اكتتاب. بعد أن تكتتب أو تبيعها، سجّل ذلك في صفحة محفظتي. "
+                      "لا يمكن فحص الوقف حتى تفعل.")
         elif it["kind"] == "adjust":
             title = f"حدّث {sym} لأسهم المنحة أو التجزئة"
             detail = "على صفحة محفظتي أدخل عدد الأسهم التي تملكها الآن. لا يمكن فحص الوقف حتى تفعل."

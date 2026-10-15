@@ -272,9 +272,16 @@ def account_summary(conn: sqlite3.Connection, account: str, cfg: dict, last_clos
     realized += dividends
     cost = float((open_.entry_price * open_.shares + open_.fees).sum()) if len(open_) else 0.0
     cash = start + realized - cost
-    # A position still waiting for its bonus-share update holds the old share count at old prices.
-    factor = {t: e["factor"] for t, e in corporate.pending(conn, account).items()}
-    market = sum(last_close.get(r.symbol, r.entry_price) * r.shares * factor.get(r.id, 1.0) for r in open_.itertuples())
+    # A position still waiting for its bonus-share update holds the old share count at old prices; one waiting after
+    # a rights issue holds its shares at the new price and the rights beside them (corporate.rights_holding).
+    pend = corporate.pending(conn, account)
+
+    def worth(r) -> float:
+        e, last = pend.get(r.id), last_close.get(r.symbol, r.entry_price)
+        rights = corporate.rights_holding(e, r.shares)
+        return last * r.shares + rights["value"] if rights else last * r.shares * (e["factor"] if e else 1.0)
+
+    market = sum(worth(r) for r in open_.itertuples())
     equity = cash + market
     return {
         "start": start, "cash": cash, "equity": equity, "realized": realized, "dividends": dividends,

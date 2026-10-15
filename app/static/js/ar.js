@@ -1,5 +1,9 @@
 // The Arabic words for t() (i18n.js), keyed by the English text. Loaded only when Arabic is chosen.
 export const AR = {
+  '{n} rights · subscription price {price}': '{n} حق اكتتاب · سعر الاكتتاب {price}',
+  'Rights': 'حقوق اكتتاب',
+  'before the rights trade': 'قبل تداول الحقوق',
+  'Market value': 'القيمة السوقية',
   'Stop-loss & target': 'وقف الخسارة والهدف',
   'from the chart': 'من الرسم البياني',
   'Next target': 'الهدف التالي',

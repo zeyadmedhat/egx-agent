@@ -247,6 +247,32 @@ def test_a_rights_issue_subscribed_or_not_matches(tmp_path, cfg):
 
 
 @needs_node
+def test_rights_before_you_decide_count_like_your_broker(tmp_path, cfg):
+    """Thndr's KORA after the ex-date: the shares at their own price, and the rights (KORA_r1) at 2.53 − 0.205 → 2.32,
+    cost 0, in the account's worth. Python and the browser agree."""
+    from egx_agent.data import news
+    conn = db.connect(tmp_path / "real.db")
+    t1 = portfolio.add_real_buy(conn, cfg, "KORA", "2026-09-23", 6.40688, 15170, 0.3, "Energy")
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) "
+                 "VALUES ('KORA', 'rights', 'Capital Increase - Rights Issue', '2026-10-04', '2026-10-14', ?, 'x')",
+                 (news.KNOWN_ACTIONS[0]["note"],))
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('KORA', '2026-10-14', 1.833333, 'x')")
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) "
+                 "VALUES ('KORA', '2026-10-14', 2.53, 2.99, 2.53, 2.92, 1e6)")
+    conn.commit()
+    events, pend = corporate.events(conn), corporate.pending(conn, "real")
+    assert {k: pend[t1]["terms"][k] for k in ("ratio", "price", "ref")} == {"ratio": 0.9, "price": 0.205, "ref": 2.32}
+    closes = {"KORA": 2.77}
+    summary = portfolio.account_summary(conn, "real", cfg, closes)
+    assert summary["equity"] - summary["cash"] == pytest.approx(15170 * 2.77 + 13653 * 2.32)
+    steps = [{"op": "buy", "symbol": "KORA", "sector": "Energy", "stop": None, "notes": "", "date": "2026-09-23",
+              "price": 6.40688, "shares": 15170, "atr": 0.3}, {"op": "pending", "closes": closes}]
+    (js,) = run_js({"op": "real", "args": {"cfg": cfg, "steps": steps, "events": events}})
+    assert js["out"][1]["1"]["terms"] == pend[t1]["terms"]
+    assert_same(summary, js["summary"], ("cash", "equity", "unrealized"))
+
+
+@needs_node
 def test_mac_portfolio_backup_restores_on_the_site(tmp_path, cfg):
     """Your Mac portfolio, saved as a site backup: the site shows the same positions, cash and pending bonus shares."""
     conn = db.connect(tmp_path / "mac.db")

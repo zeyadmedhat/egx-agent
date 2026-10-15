@@ -193,7 +193,7 @@ export function useQuotes(symbols) {
 // last close. p: views.open_positions / local/api.js openPositions.
 export function livePosition(p, q) {
   const quote = q && q[p.symbol];
-  if (!quote || p.adjust) return { ...p, price: p.last, live: false, day_change: null };
+  if (!quote || (p.adjust && !p.rights)) return { ...p, price: p.last, live: false, day_change: null };
   const price = quote.price;
   const pnl = p.pnl + (price - p.last) * p.shares;          // like the broker's: selling fees count once you sell
   const cost = p.avg_price * p.shares + (p.fees || 0);
@@ -229,7 +229,7 @@ export function PositionCard({ p, hold, children, onOpen, open }) {
       <${StockAvatar} symbol=${p.symbol} size=${36} />
       <div class="pos-who"><a class="sym-big" href=${stockHref(p.symbol)}>${p.symbol}</a>
         <div class="faint pos-sub">${t('{n} shares · bought at {price}', { n: fmt.int(p.shares), price: fmt.price(p.avg_price) })}</div></div>
-      <span class=${`chip ${STATUS[p.status] || 'nodata'}`}><span class="dot"></span>${t(DO[p.status] || p.status)}</span>
+      <span class=${`chip ${STATUS[p.status] || 'nodata'}`}><span class="dot"></span>${t(p.rights ? 'Rights issue' : DO[p.status] || p.status)}</span>
     </div>
     <div class="pos-nums">
       <div><div class="k">${t('Price')}${p.live ? html` <span class="live-dot" title=${t('Live, about 15 minutes late')}></span>` : ''}</div>
@@ -247,6 +247,27 @@ export function PositionCard({ p, hold, children, onOpen, open }) {
       ${onOpen && (open ? html`<button class="btn sm" onClick=${onOpen} aria-expanded="true"><${Icon} name="x" size=${14} />${t('Close')}</button>`
         : html`<button class="btn sm ghost" onClick=${onOpen} aria-expanded="false">${t('Sell or edit')}<${Icon} name="chevron" size=${14} /></button>`)}</div>
     ${children}
+  </article>`;
+}
+
+// A rights issue's rights beside the shares they came with, as your broker lists them (Thndr: KORA_r1, cost 0): at
+// their price before they trade (corporate.rights_terms), all of it profit until you subscribe or sell them.
+export function RightsCard({ p }) {
+  const r = p.rights;
+  return html`<article class="card pos-card" id=${`pos-${p.id}-rights`}>
+    <div class="pos-head">
+      <${StockAvatar} symbol=${p.symbol} size=${36} />
+      <div class="pos-who"><span class="sym-big">${r.symbol}</span>
+        <div class="faint pos-sub">${t('{n} rights · subscription price {price}', { n: fmt.int(r.units), price: fmt.price(r.sub_price) })}</div></div>
+      <span class="chip nodata"><span class="dot"></span>${t('Rights')}</span>
+    </div>
+    <div class="pos-nums">
+      <div><div class="k">${t('Price')}</div><div class="v">${fmt.price(r.price)}</div>
+        <div class="faint s">${t('before the rights trade')}</div></div>
+      <div class="r"><div class="k">${t('Market value')}</div><div class="v">${fmt.int(r.value)}</div>
+        <div class="s up">${fmt.signed(r.value)} ${t('EGP')}</div></div>
+    </div>
+    <p class="pos-reason" dir="auto">${tn(r.note)}</p>
   </article>`;
 }
 
