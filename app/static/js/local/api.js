@@ -1066,18 +1066,20 @@ export async function readScreenshot(image) {
   return botPost(link.url, '/read', { token: link.token, image });
 }
 
-let syncing = null, again = false, checked = false;
+let syncing = null, again = false, checkedAt = 0;
+const CHECK_MS = 30000;      // a newer copy from another device is looked for at most this often
 
-// In the background, so the page doesn't wait: after a change (force), when the site has a newer close, and once
-// each time the site opens (a newer copy from another device comes here).
+// In the background, so the page doesn't wait: after a change (force), when the site has a newer close, and when the
+// site opens or comes back on screen (a newer copy from another device comes here). Telegram keeps its app running
+// when it's closed, and a tab can stay open for days, so "opens" alone isn't enough.
 function syncBot(force) {
   const link = botLink();
   if (!link) return;
   if (syncing) { again = again || force; return; }
-  const first = !checked && link.synced;
-  checked = true;
+  const check = link.synced && Date.now() - checkedAt > CHECK_MS;
+  if (check) checkedAt = Date.now();
   syncing = context().then(async c => {
-    if (first && await pullBook(link)) return;
+    if (check && await pullBook(link)) return;
     if (force || link.pending || c.core.scan_date !== link.sent) await sendBook(c);
   }).catch(() => null).finally(() => { syncing = null; if (again) { again = false; syncBot(true); } });
 }
@@ -1090,6 +1092,12 @@ async function quotes(c, path) {
   if (!url || !s) return {};
   const res = await fetch(`${url.replace(/\/$/, '')}/quotes?s=${encodeURIComponent(s)}`).catch(() => null);
   return res && res.ok ? res.json().catch(() => ({})) : {};
+}
+
+if (typeof document !== 'undefined') {       // not in the tests (tests/js/parity.mjs runs this in Node)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { checkedAt = 0; syncBot(false); }
+  });
 }
 
 export async function localApi(path, opts = {}) {
