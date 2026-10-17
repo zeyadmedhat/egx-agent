@@ -316,7 +316,7 @@ KNOWN_ACTIONS = [
     {"symbol": "KORA", "type": "Capital Increase - Rights Issue", "kind": "rights", "announced": "2026-10-04",
      "effective": "2026-10-14",
      "note": "0.9 new share for each share held, at 0.205 EGP each (0.20 + 0.005 fees). Subscription 18 Oct to "
-             "10 Nov 2026 (first round to 29 Oct); the rights trade on their own 18 to 27 Oct, between Egyptians only.",
+             "10 Nov 2026 (first round to 1 Nov at QNB, 29 Oct on Thndr); the rights trade on their own 18 to 27 Oct, between Egyptians only.",
      # the rights page's milestones (Thndr's, Amwal Al Ghad / Al Mal News 12–13 Oct 2026): [day, Cairo time, what,
      # what the shares did then, their close (raw, before TradingView's re-base)]
      "schedule": [["2026-10-04", "", "Announced", "KORA closed at 6.87", 6.87],
@@ -325,7 +325,8 @@ KNOWN_ACTIONS = [
                    "KORA opened at 2.53 and closed at 2.92. The rights were priced at 2.32", 2.92],
                   ["2026-10-18", "10:00", "Rights trading starts"],
                   ["2026-10-27", "14:30", "Rights trading ends"],
-                  ["2026-10-29", "14:30", "Round 1 ends"],
+                  ["2026-10-29", "14:30", "Last day to subscribe on Thndr"],
+                  ["2026-11-01", "", "Round 1 ends"],
                   ["2026-11-10", "", "Subscription closes"]]},
 ]
 

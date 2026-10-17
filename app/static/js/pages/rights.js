@@ -114,10 +114,10 @@ function Choices({ is, pos, price, at }) {
         [t('You get cash.'), t('Until {date}', { date: fmt.date(at('Rights trading ends'), false) })])}
       ${card('plus', 'info', 'Subscribe', `−${money(n * is.price)}`,
         [pos ? t('You get {n} new shares: {total} in all, average {avg}.', { n: fmt.int(n), total: fmt.int(pos.shares + n), avg: fmt.price(after) })
-          : t('You get 1 new share.'), t('Thndr: until {date}', { date: fmt.date(at('Round 1 ends'), false) })])}
+          : t('You get 1 new share.'), t('Thndr: until {date}', { date: fmt.date(at('Last day to subscribe on Thndr'), false) })])}
       ${card('xCircle', 'down', 'Do nothing', `−${money(n * price)}`, [t('The rights expire and that value is lost.')])}
     </div>
-    <p class="faint s" style="margin:10px 0 0">${t('You can mix: sell some rights and subscribe with the rest. Thndr charges 60 EGP to subscribe (free on Thndr Trader).')}</p>
+    <p class="faint s" style="margin:10px 0 0">${t('You can mix: sell some rights and subscribe with the rest. Thndr charges 60 EGP to subscribe (free on Thndr Trader), and your national ID must stay valid until 45 days after the subscription ends.')}</p>
   </article>`;
 }
 
