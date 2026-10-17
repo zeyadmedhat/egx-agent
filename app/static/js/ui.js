@@ -268,6 +268,7 @@ export function RightsCard({ p }) {
         <div class="s up">${fmt.signed(r.value)} ${t('EGP')}</div></div>
     </div>
     <p class="pos-reason" dir="auto">${tn(r.note)}</p>
+    <div class="pos-foot"><a class="btn sm ghost" href=${`#/rights/${encodeURIComponent(p.symbol)}`}>${t('Dates, choices and what happens next')}<${Icon} name="chevron" size=${14} /></a></div>
   </article>`;
 }
 

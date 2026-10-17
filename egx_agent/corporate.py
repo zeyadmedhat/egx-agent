@@ -65,8 +65,11 @@ def rights_terms(conn: sqlite3.Connection, symbol: str, ex_date: str) -> dict | 
         return None
     # ponytail: the price before the rights trade; once they do (KORA: 18–27 Oct) your broker shows theirs
     price = float(m[2])
+    from .data.news import KNOWN_ACTIONS
+    sched = next((k["schedule"] for k in KNOWN_ACTIONS if k["symbol"] == symbol and k.get("schedule")
+                  and abs((date.fromisoformat(k["effective"]) - date.fromisoformat(ex_date)).days) <= 7), [])
     return {"ratio": float(m[1]), "price": price, "ref": max(0.0, math.floor((op[0] - price) * 100 + 1e-6) / 100),
-            "note": a["note"]}
+            "note": a["note"], "schedule": sched}
 
 
 def rights_holding(ev: dict | None, shares: int) -> dict | None:
@@ -77,7 +80,8 @@ def rights_holding(ev: dict | None, shares: int) -> dict | None:
         return None
     units = math.floor(shares * t["ratio"] + 1e-6)
     return {"symbol": f"{ev['symbol']}_r1", "units": units, "price": t["ref"], "value": units * t["ref"],
-            "sub_price": t["price"], "note": t["note"]}
+            "sub_price": t["price"], "note": t["note"], "ratio": t["ratio"],
+            "schedule": t.get("schedule", [])}
 
 
 def events(conn: sqlite3.Connection) -> list[dict]:
@@ -234,6 +238,7 @@ def dividends_df(conn: sqlite3.Connection, trade_id: int) -> pd.DataFrame:
 
 
 WEEK, QUARTER = 5, 60          # sessions after the ex-date
+TRADING = 15                   # ~ the rights trade and the subscription closes (KORA: ex 14 Oct, first round ends 29 Oct)
 
 
 def rights_history(conn: sqlite3.Connection, today: str | None = None) -> dict | None:
@@ -269,9 +274,15 @@ def rights_history(conn: sqlite3.Connection, today: str | None = None) -> dict |
         ret = lambda a, b: c.iloc[b] / c.iloc[a] - 1                                      # noqa: E731
         beat = lambda a, b: ret(a, b) - (idx.iloc[b] / idx.iloc[a] - 1)                  # noqa: E731
         a = int(c.index.searchsorted(pd.Timestamp(e.announced))) if e.announced else -1
+        ann = 0 <= a < i - 1 and pd.notna(c.iloc[a])
         rows.append({"year": c.index[i].year, "ex_day": ret(i - 1, i), "week": ret(i - 1, i + WEEK),
                      "quarter": ret(i - 1, i + QUARTER), "beat": beat(i - 1, i + QUARTER), "after": ret(i, i + WEEK),
-                     "ann_beat": beat(a, i + QUARTER) if 0 <= a < i and pd.notna(c.iloc[a]) else None})
+                     "ann_beat": beat(a, i + QUARTER) if 0 <= a < i and pd.notna(c.iloc[a]) else None,
+                     # the stages of a rights issue (rights page): announcement → last day with the rights, the
+                     # rights' trading weeks, and after the subscription, while the new shares wait to be listed
+                     "run_up": ret(a, i - 1) if ann else None, "run_beat": beat(a, i - 1) if ann else None,
+                     "trading": ret(i, i + TRADING), "after_sub": ret(i + TRADING, i + QUARTER),
+                     "sub_beat": beat(i + TRADING, i + QUARTER)})
     if len(rows) < 10:
         return None
     df = pd.DataFrame(rows)
@@ -285,4 +296,8 @@ def rights_history(conn: sqlite3.Connection, today: str | None = None) -> dict |
                     "p10": float(q.quantile(0.1)), "p90": float(q.quantile(0.9))},
         "after": {"median": float(df["after"].median()), "up": up(df["after"])},
         "announced": {"beat": up(df["ann_beat"].astype(float))},
+        "run_up": {"median": float(df["run_up"].astype(float).median()), "up": up(df["run_up"].astype(float)),
+                   "beat": up(df["run_beat"].astype(float)), "n": int(df["run_up"].notna().sum())},
+        "trading": {"median": float(df["trading"].median()), "up": up(df["trading"])},
+        "after_sub": {"median": float(df["after_sub"].median()), "up": up(df["after_sub"]), "beat": up(df["sub_beat"])},
     }

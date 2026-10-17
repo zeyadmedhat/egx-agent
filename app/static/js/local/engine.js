@@ -355,7 +355,8 @@ export function rightsHolding(ev, shares) {
   const t = ev && ev.terms;
   if (!t) return null;
   const units = Math.floor(shares * t.ratio + 1e-6);
-  return { symbol: `${ev.symbol}_r1`, units, price: t.ref, value: units * t.ref, sub_price: t.price, note: t.note };
+  return { symbol: `${ev.symbol}_r1`, units, price: t.ref, value: units * t.ref, sub_price: t.price, note: t.note,
+    ratio: t.ratio, schedule: t.schedule || [] };
 }
 
 // The average price on the new prices (corporate.new_average). Bonus shares or a split: the same cost over more
