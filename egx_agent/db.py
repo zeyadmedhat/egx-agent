@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS prices (
     open REAL, high REAL, low REAL, close REAL, volume REAL,
     PRIMARY KEY (symbol, date)
 );
+CREATE TABLE IF NOT EXISTS rights_prices (    -- a rights issue's rights while they trade (KORA_r1: TradingView's
+    symbol TEXT NOT NULL,                      -- KORAR1), kept: TradingView drops them once the issue is over
+    date   TEXT NOT NULL,
+    open REAL, high REAL, low REAL, close REAL, volume REAL,
+    PRIMARY KEY (symbol, date)
+);
 CREATE TABLE IF NOT EXISTS fundamentals (
     symbol TEXT PRIMARY KEY,        -- the company's numbers from TradingView (data/dividends.py FUNDAMENTALS)
     data TEXT NOT NULL,             -- JSON: market_cap, pe, pb, eps_growth, revenue_growth, net_margin, roe, debt_equity

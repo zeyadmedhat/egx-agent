@@ -180,6 +180,10 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         except Exception as exc:  # only the hourly charts need them: they show what was downloaded before
             warnings.append(f"Hourly prices not updated ({type(exc).__name__})")
             failed.append(checked[-1])
+        try:
+            prices.update_rights(conn)        # KORA_r1 and the like, while they trade: kept for their chart
+        except Exception as exc:
+            warnings.append(f"Rights prices not updated ({type(exc).__name__})")
         say(0.81, "Downloading the dollar rate, interest rates and inflation…")
         try:
             missed = macro.update(conn)

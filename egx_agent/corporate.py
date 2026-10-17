@@ -372,7 +372,11 @@ def rights_study(conn: sqlite3.Connection, today: str | None = None) -> dict | N
                     "ann_entry": float(s.iloc[i + QUARTER] / s.iloc[a] - idx.iloc[i + QUARTER] / idx.iloc[a])
                     if 0 <= a < last and i + QUARTER < len(s) else None,
                     "ex_entry": float(s.iloc[i + QUARTER] / s.iloc[i] - idx.iloc[i + QUARTER] / idx.iloc[i])
-                    if i + QUARTER < len(s) else None})
+                    if i + QUARTER < len(s) else None,
+                    # the rights' own prices while they traded, kept since Oct 2026 (prices.update_rights)
+                    "rights": [{"date": d, "close": c} for d, c in conn.execute(
+                        "SELECT date, close FROM rights_prices WHERE symbol=? AND date>=? ORDER BY date",
+                        (f"{e.symbol}_r1", e.effective))]})
         past.append(row)
     done = [p for p in past if p["quarter"] is not None]
     if len(done) < 20:

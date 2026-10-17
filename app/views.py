@@ -215,8 +215,18 @@ def rights_list(d: Data, today: str | None = None) -> list[dict]:
         if not t or not t.get("schedule") or not e["ex_date"] <= today <= \
                 (date.fromisoformat(t["schedule"][-1][0]) + timedelta(days=92)).isoformat():
             continue
+        at = {x[2]: x[0] for x in t["schedule"]}
+        start, end = at.get("Rights trading starts"), at.get("Rights trading ends")
+        trading = {}
+        if start and end:     # the rights' chart (pages/rights.js): their whole trading period, laid out ahead
+            q = "SELECT date, open, high, low, close FROM {} WHERE symbol=? AND date BETWEEN ? AND ? ORDER BY date"
+            trading = {"days": [x.date().isoformat() for x in pd.date_range(start, end, freq=holidays.session_day())],
+                       "bars": [dict(r) for r in d.conn.execute(q.format("rights_prices"), (f"{e['symbol']}_r1", start, end))],
+                       "share": [{"date": r["date"], "close": r["close"]}
+                                 for r in d.conn.execute(q.format("prices"), (e["symbol"], start, end))]}
         out.append({"symbol": f"{e['symbol']}_r1", "base": e["symbol"], "ex_date": e["ex_date"],
-                    "name_ar": d.info(e["symbol"]).get("name_ar"), "close": t["ref"], "change": None, **t})
+                    "name_ar": d.info(e["symbol"]).get("name_ar"), "close": t["ref"], "change": None, **t,
+                    "trading": trading})
     return out
 
 

@@ -65,3 +65,20 @@ def test_sessions_divided_twice_before_an_ex_date_are_put_back(tmp_path):
     close = dict(conn.execute("SELECT date, close FROM prices WHERE symbol='KORA'").fetchall())
     assert round(close["2026-10-13"], 3) == 2.537 and close["2026-10-14"] == 2.92 and close["2026-10-07"] == 3.5577
     assert prices.fix_double_rebase(conn, {"KORA"}) == []             # once only
+
+
+def test_rights_prices_are_kept_for_their_trading_period(tmp_path):
+    """KORA_r1 (TradingView's KORAR1) is saved day by day while it trades, only its trading days, since TradingView
+    drops it once the issue is over."""
+    class Rights:
+        def fetch(self, symbol, n_bars):
+            assert symbol == "KORAR1"
+            return pd.DataFrame({"date": ["2026-10-15", "2026-10-18", "2026-10-19"], "open": [2.3, 2.4, 2.5],
+                                 "high": [2.3, 2.5, 2.6], "low": [2.3, 2.3, 2.4], "close": [2.3, 2.45, 2.55],
+                                 "volume": [0.0, 1e6, 2e6]})
+    conn = db.connect(tmp_path / "r.db")
+    assert prices.update_rights(conn, Rights(), today="2026-10-17") == 0            # before the rights trade
+    assert prices.update_rights(conn, Rights(), today="2026-10-19") == 2
+    assert [tuple(r) for r in conn.execute("SELECT date, close FROM rights_prices WHERE symbol='KORA_r1' ORDER BY date")] == [
+        ("2026-10-18", 2.45), ("2026-10-19", 2.55)]
+    assert prices.update_rights(conn, Rights(), today="2026-11-20") == 0            # long over

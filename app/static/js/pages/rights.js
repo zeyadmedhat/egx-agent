@@ -3,7 +3,7 @@
 // share was worth before and after, your three choices, what comes after the subscription, and what past rights
 // issues did. Facts only, never which choice to make. The issue: views.rights_list; your rights: /portfolio.
 import { html, useApi, useStore, useState, fmt, cls, go, stockHref } from '../lib.js';
-import { PageLoading, PageHead, Callout, More, StockAvatar, useQuotes, sessionState, Empty, Icon, LiveChart, DataTable, Seg } from '../ui.js';
+import { PageLoading, PageHead, Callout, More, StockAvatar, useQuotes, sessionState, Empty, Icon, DataTable, Seg } from '../ui.js';
 import { t } from '../i18n.js';
 import { LineChart } from '../charts.js';
 
@@ -66,9 +66,7 @@ function CurrentRights({ base }) {
 
     <${Timeline} sched=${sched} day=${day} />
 
-    <article class="card"><div class="card-title">${t('{r} chart', { r: is.symbol })}</div>
-      ${day < at('Rights trading starts') && html`<p class="faint s" style="margin:0 0 8px">${t('Empty until the rights start trading on {date}.', { date: fmt.date(at('Rights trading starts'), false) })}</p>`}
-      <${LiveChart} symbol=${`${base}R1`} height=${360} /></article>
+    <${TradingChart} is=${is} day=${day} live=${live} share=${q[base]} />
 
     <${ShareValue} is=${is} day=${day} sharePrice=${sharePrice} price=${price} base=${base} />
     ${study && html`<${CheckCard} study=${study} row=${study.past.find(p => p.symbol === base && p.ex === is.ex_date)} />`}
@@ -79,6 +77,32 @@ function CurrentRights({ base }) {
 }
 
 const month = d => fmt.date(d, false).replace(/^\d+\s*/, '');   // "Oct" / "أكتوبر"
+
+// The rights' own chart over their whole trading period, laid out ahead (days still to come stay blank): each day's
+// last trade (rights_prices, today's live price while trading) against what a right is worth if you subscribe with it,
+// the share's price less the subscription price.
+function TradingChart({ is, day, live, share }) {
+  const tr = is.trading || {};
+  if (!tr.days || !tr.days.length) return null;
+  const byDay = (rows, f) => Object.fromEntries(rows.map(r => [r.date, f(r)]));
+  const rights = byDay(tr.bars, r => r.close), worth = byDay(tr.share, r => r.close - is.price);
+  if (tr.days.includes(day) && sessionState().state !== 'pre') {      // today, before its close is saved
+    if (live && rights[day] == null) rights[day] = live.price;
+    if (share && worth[day] == null) worth[day] = share.price - is.price;
+  }
+  const line = m => tr.days.map(d => (m[d] == null ? { time: d } : { time: d, value: +m[d].toFixed(3) }));
+  const any = Object.keys(rights).length > 0;
+  const lines = [{ data: line(rights), color: '--accent', title: is.symbol },
+    { data: line(worth), color: '--warn', title: t('Worth if you subscribe'), dashed: true, width: 1.5 },
+    { data: tr.days.map(d => ({ time: d, value: is.ref })), hidden: true }];    // the whole period on the axis
+  return html`<article class="card"><div class="card-title">${t('{r} over its trading period', { r: is.symbol })}
+      <span class="faint right s">${fmt.date(tr.days[0], false)} – ${fmt.date(tr.days.at(-1), false)}</span></div>
+    ${any ? html`<${LineChart} lines=${lines} height=${280} format="price" key=${Object.keys(rights).length} />`
+      : html`<div class="rt-days">${tr.days.map(d => html`<div><b>${+d.slice(8)}</b><span>${month(d)}</span></div>`)}</div>
+        <p class="faint s" style="margin:8px 0 0">${t('Fills in day by day from {date}, when the rights start trading.', { date: fmt.date(tr.days[0], false) })}</p>`}
+    <p class="faint s" style="margin:8px 0 0">${t('When the blue line is under the dashed one, the rights sell for less than they are worth if you subscribe (the share price less {p}).', { p: fmt.price(is.price) })}</p>
+  </article>`;
+}
 
 // The milestones as a line of dots: done ones filled, the next one ringed, then the full list with what happened.
 function Timeline({ sched, day }) {
@@ -280,8 +304,10 @@ function PastRights({ base, ex }) {
     </article>
     <article class="card"><div class="card-title">${t('Timeline')}</div>
       <ol class="steps">${steps.map(([day, what]) => html`<li class="done"><div><b>${t(what)}</b> <span class="faint">${fmt.date(day)}</span></div></li>`)}</ol></article>
+    ${p.rights && p.rights.length > 0 && html`<article class="card"><div class="card-title">${t('{r} over its trading period', { r: `${base}_r1` })}</div>
+      <${LineChart} lines=${[{ data: p.rights.map(r => ({ time: r.date, value: r.close })), color: '--accent', title: `${base}_r1` }]} height=${240} format="price" /></article>`}
     <article class="card"><div class="card-title">${t('{sym} and EGX30, 100 = the last day with the rights', { sym: base })}</div>
       <${LineChart} lines=${lines} height=${300} format="num" />
-      <p class="faint s" style="margin:8px 0 0">${t('Counting the rights at their worth (a holder who subscribed). The terms of past issues aren’t in the data.')}</p></article>
+      <p class="faint s" style="margin:8px 0 0">${t(p.rights && p.rights.length ? 'Counting the rights at their worth (a holder who subscribed).' : 'Counting the rights at their worth (a holder who subscribed). The rights’ own prices from back then are gone: TradingView drops them when an issue ends. Since October 2026 the site keeps them.')}</p></article>
     <${Callout}>${t("Facts, not advice. Check the dates and price in your broker's app before you act.")}<//>`;
 }

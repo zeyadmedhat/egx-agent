@@ -162,6 +162,28 @@ def fix_double_rebase(conn: sqlite3.Connection, symbols=None) -> list[str]:
     return fixed
 
 
+def update_rights(conn: sqlite3.Connection, provider: PriceProvider | None = None, today: str | None = None) -> int:
+    """The daily prices of the rights issues trading now (their dates: news.KNOWN_ACTIONS schedule), kept as
+    rights_prices "KORA_r1" for their chart: TradingView (EGX:KORAR1) drops them once the issue is over."""
+    from .news import KNOWN_ACTIONS
+    today = today or date.today().isoformat()
+    n = 0
+    for k in KNOWN_ACTIONS:
+        at = {s[2]: s[0] for s in k.get("schedule", [])}
+        start, end = at.get("Rights trading starts"), at.get("Rights trading ends")
+        if not start or not start <= today <= (date.fromisoformat(end) + timedelta(days=7)).isoformat():
+            continue
+        df = (provider or TvProvider()).fetch(f"{k['symbol']}R1", 40)
+        if df is None:
+            continue
+        df = df[(df["date"] >= start) & (df["date"] <= end)]
+        conn.executemany("INSERT OR REPLACE INTO rights_prices VALUES (?,?,?,?,?,?,?)",
+                         [(f"{k['symbol']}_r1", *r) for r in df[["date", "open", "high", "low", "close", "volume"]].itertuples(index=False)])
+        n += len(df)
+    conn.commit()
+    return n
+
+
 def update_prices(
     conn: sqlite3.Connection,
     symbols: list[str],

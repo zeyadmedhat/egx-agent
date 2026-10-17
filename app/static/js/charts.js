@@ -209,14 +209,15 @@ export function LineChart({ lines, height = 320, format = 'egp' }) {
   useEffect(() => {
     const t = palette();
     const f = format === 'pct' ? v => fmt.pct(v, 1) : format === 'grams' ? v => `${fmt.num(v, v < 100 ? 2 : 0)} g`
-      : format === 'usd' ? v => `$${fmt.short(v)}` : v => fmt.short(v);
+      : format === 'usd' ? v => `$${fmt.short(v)}` : format === 'price' ? v => fmt.price(v) : v => fmt.short(v);
     const chart = LWC.createChart(box.current, baseOptions(t, {
       localization: { locale: 'en-US', priceFormatter: f },
       timeScale: { borderColor: t.border, fixLeftEdge: true, fixRightEdge: true },
     }));
     const made = lines.map(l => {
       const color = cssVar(l.color || '--accent');
-      const opts = { lineWidth: l.width || 2, color, priceLineVisible: false, lastValueVisible: true,
+      // hidden: a line that only spreads the time axis (days still to come), not drawn or listed
+      const opts = { lineWidth: l.width || 2, color, priceLineVisible: false, lastValueVisible: !l.hidden, visible: !l.hidden,
         lineStyle: l.dashed ? LWC.LineStyle.Dashed : LWC.LineStyle.Solid };
       const s = l.area
         ? chart.addSeries(LWC.AreaSeries, { ...opts, lineColor: color, topColor: alpha(color, 0.05), bottomColor: alpha(color, 0.35),
@@ -227,9 +228,9 @@ export function LineChart({ lines, height = 320, format = 'egp' }) {
     });
     const writeLegend = param => {
       if (!legend.current) return;
-      legend.current.innerHTML = made.map(({ s, l, color }) => {
+      legend.current.innerHTML = made.filter(m => !m.l.hidden).map(({ s, l, color }) => {
         const d = param && param.seriesData ? param.seriesData.get(s) : null;
-        const v = d ? d.value : l.data.length ? l.data[l.data.length - 1].value : null;
+        const v = d ? d.value : (l.data.findLast(x => x.value != null) || {}).value;   // days still to come: no value
         return `<span><span class="legend-dot" style="background:${color}"></span>${l.title} <b>${v == null ? '–' : f(v)}</b></span>`;
       }).join('');
     };

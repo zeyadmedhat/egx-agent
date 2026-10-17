@@ -309,6 +309,8 @@ def test_the_rights_have_their_own_symbol_until_the_new_shares_list(tmp_path, cf
     assert (r["symbol"], r["base"], r["close"], r["price"], r["ratio"]) == ("KORA_r1", "KORA", 2.32, 0.205, 0.9)
     assert [s[2] for s in r["schedule"]][3:] == ["Rights trading starts", "Rights trading ends",
                                                  "Last day to subscribe on Thndr", "Round 1 ends", "Subscription closes"]       # pages/rights.js stage() reads these
+    assert r["trading"]["days"] == ["2026-10-18", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22",
+                                    "2026-10-25", "2026-10-26", "2026-10-27"] and r["trading"]["bars"] == []
     assert views.rights_list(d, "2026-10-13") == [] and views.rights_list(d, "2027-03-01") == []
 
 
