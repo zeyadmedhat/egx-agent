@@ -230,6 +230,15 @@ def rights_list(d: Data, today: str | None = None) -> list[dict]:
     return out
 
 
+def rights_past(d: Data) -> list[dict]:
+    """Every past rights issue for the top search (pages/rights.js PastRights opens #/stock/SVCE_r1?ex=...)."""
+    def build():
+        study = corporate.rights_study(d.conn) or {"past": []}
+        return [{"symbol": f"{p['symbol']}_r1", "base": p["symbol"], "ex": p["ex"],
+                 "name_ar": d.info(p["symbol"]).get("name_ar")} for p in study["past"]]
+    return d.cache.get(d.version, ("rights_past",), build)
+
+
 def signals(d: Data) -> tuple[str | None, list[dict]]:
     """The latest scan's signals for this person: their Shariah filter applied and BUYs sized for their account.
 

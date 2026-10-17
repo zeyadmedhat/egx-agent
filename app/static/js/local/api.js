@@ -1117,7 +1117,7 @@ async function route(path, { method = 'GET', body } = {}) {
     switch (a) {
       case 'status': return status(c, await openPositions(c));
       case 'stocks': return c.core.stocks;
-      case 'rights': return b === 'history' ? load('rights').catch(() => null) : c.core.rights || [];
+      case 'rights': return b === 'history' ? load('rights').catch(() => null) : b === 'past' ? c.core.rights_past || [] : c.core.rights || [];
       case 'today': return today(c);
       case 'stock': return x === 'intraday' ? load(`intraday/${decodeURIComponent(b || '').toUpperCase()}`).catch(() => ({}))
         : stockDetail(c, decodeURIComponent(b || ''));
