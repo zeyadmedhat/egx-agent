@@ -209,6 +209,7 @@ export async function startJob(path, body) {
 
 export async function loadStocks() {
   try { setStore({ stocks: await api('/stocks') }); } catch { /* retried on next version change */ }
+  try { setStore({ rights: await api('/rights') }); } catch { /* a site built before the rights list */ }
   try { setStore({ watchlist: (await api('/watchlist')).symbols }); } catch { /* the same */ }
 }
 

@@ -1,5 +1,5 @@
 // Stock: TradingView-style chart with your levels, why it does or doesn't qualify, your position, Shariah details.
-import { html, useApi, useState, useEffect, fmt, tone, cls, remember, todayISO, api, toast, refreshAll, STATIC } from '../lib.js';
+import { html, useApi, useState, useEffect, useStore, fmt, tone, cls, remember, todayISO, api, toast, refreshAll, stockHref, STATIC } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, WatchStar,
   Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard, sessionState,
@@ -9,6 +9,7 @@ import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
 import { AiForecast } from './ai.js';
 import { PriceRange, ReachLine } from './range.js';
+import { RightsPage } from './rights.js';
 
 const RANGES = [
   { value: 60, label: '3M' }, { value: 120, label: '6M' }, { value: 250, label: '1Y' }, { value: 500, label: '2Y' },
@@ -25,7 +26,13 @@ const PANES = [['zones', 'Support & resistance'], ['fib', 'Fibonacci'], ['ema', 
   ['rsi', 'RSI'], ['macd', 'MACD']];
 const PANES_ON = { zones: true, fib: false, ema: true, volume: true, rsi: true, macd: true };
 
+// A rights issue's rights (KORA_r1) open their own view (rights.js); every other symbol the stock's page.
 export function StockPage({ route }) {
+  const sym = (route.arg || remember('symbol') || 'COMI').toUpperCase();
+  return /_R1$/.test(sym) ? html`<${RightsPage} base=${sym.slice(0, -3)} key=${sym} />` : html`<${StockMain} route=${route} key=${sym} />`;
+}
+
+function StockMain({ route }) {
   const sym = (route.arg || remember('symbol') || 'COMI').toUpperCase();
   useEffect(() => { remember('symbol', sym); }, [sym]);
   const { data, error } = useApi(`/stock/${encodeURIComponent(sym)}`);
@@ -42,6 +49,7 @@ export function StockPage({ route }) {
   const [ibars, setIbars] = useState({ '4h': 130, '1h': 110 });
   const hourly = useApi(view === 'agent' && frame !== '1d' ? `/stock/${encodeURIComponent(sym)}/intraday` : null);
 
+  const rights = (useStore(s => s.rights) || []).find(r => r.base === sym);   // its KORA_r1 while it lasts
   const quotes = useQuotes(data && data.has_data ? [data.symbol] : []);
   const quote = quotes[sym];
   if (!data) return html`<${PageLoading} error=${error} />`;
@@ -55,7 +63,8 @@ export function StockPage({ route }) {
         <div class="sym-line"><${StockAvatar} symbol=${data.symbol} size=${40} /><span class="sym-big" style="font-size:26px">${data.symbol}</span>
           <${WatchStar} symbol=${data.symbol} label /><${StockBell} sym=${data.symbol} tg=${data.telegram} /><${IndexPills} info=${info} />
           ${data.signal && html`<${StatusChip} status=${data.signal.action} />`}
-          ${data.position && html`<span class="tag"><${Icon} name="briefcase" size=${13} />${t('You hold it')}</span>`}</div>
+          ${data.position && html`<span class="tag"><${Icon} name="briefcase" size=${13} />${t('You hold it')}</span>`}
+          ${rights && html`<a class="tag" href=${stockHref(rights.symbol)}><${Icon} name="split" size=${13} />${rights.symbol}</a>`}</div>
         <div class="row" style="gap:8px"><span class="stock-name" dir="rtl">${info.name_ar || ''}</span>
           <span class="faint">·</span><span class="stock-sector">${tn(info.sector || '')}</span></div>
         <${Badges} info=${info} />

@@ -1496,3 +1496,51 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .change .items .dot { font-size: 9px; color: var(--text-3); vertical-align: 2px; }
 .change .items .dot.up { color: var(--up); }
 .change .items .dot.down { color: var(--down); }
+
+/* A rights issue's page (pages/rights.js): prices, timeline dots, value bars, choice cards, the after-subscription flow */
+.rt-prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin: 14px 0 12px; }
+.rt-prices > div { background: var(--panel-3); border-radius: var(--radius); padding: 10px 12px; }
+.rt-prices .k { font-size: 12px; color: var(--text-2); }
+.rt-prices .v { font-size: 22px; font-weight: 700; margin: 2px 0; }
+.rt-prices .s { font-size: 12px; color: var(--text-3); }
+.rt-track { display: flex; margin: 4px 0 12px; }
+.rt-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; min-width: 0; }
+.rt-step::before { content: ""; position: absolute; top: 7px; inset-inline-start: -50%; width: 100%; height: 3px; background: var(--border); }
+.rt-step:first-child::before { display: none; }
+.rt-step.done::before, .rt-step.next::before { background: var(--up); }
+.rt-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--panel); border: 3px solid var(--border); position: relative; z-index: 1; }
+.rt-step.done .rt-dot { background: var(--up); border-color: var(--up); }
+.rt-step.next .rt-dot { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.rt-date { font-size: 13px; font-weight: 600; color: var(--text-2); line-height: 1; }
+.rt-month { font-size: 11px; color: var(--text-3); min-height: 14px; margin-top: -4px; white-space: nowrap; }
+.rt-step.next .rt-date { color: var(--accent); font-weight: 700; }
+.rt-next { display: flex; gap: 8px; align-items: center; background: var(--accent-soft); color: var(--text); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; }
+.rt-next .icon { color: var(--accent); flex: none; }
+.rt-bars { display: flex; flex-direction: column; gap: 10px; }
+.rt-bar-row { display: grid; grid-template-columns: 56px minmax(0, 1fr) 44px; gap: 8px; align-items: center; font-size: 12px; }
+.rt-bar-l { color: var(--text-2); }
+.rt-bar-v { font-weight: 700; text-align: end; font-size: 13px; }
+.rt-bar { display: flex; height: 16px; background: var(--panel-3); border-radius: 8px; overflow: hidden; position: relative; }
+.rt-bar.half::after { content: ""; position: absolute; inset-block: -2px; inset-inline-start: 50%; border-inline-start: 2px dashed var(--text-3); }
+.seg { display: inline-block; height: 100%; }
+.seg.share { background: var(--accent); }
+.seg.rights { background: var(--warn); }
+.seg.low { background: var(--down); opacity: .75; }
+.rt-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--text-2); }
+.rt-legend span { display: flex; align-items: center; gap: 6px; }
+.rt-legend .seg { width: 12px; height: 12px; border-radius: 3px; }
+.rt-hist { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 4px 8px; align-items: center; }
+.rt-hist-l { grid-column: 1 / -1; font-size: 13px; }
+.rt-choice { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.rt-choice .s { font-size: 12px; color: var(--text-2); }
+.rt-ic { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-3); margin-bottom: 4px; }
+.rt-choice.up .rt-ic { background: var(--up-soft); color: var(--up); }
+.rt-choice.info .rt-ic { background: var(--info-soft); color: var(--info); }
+.rt-choice.down .rt-ic { background: var(--down-soft); color: var(--down); }
+.rt-big { font-size: 20px; font-weight: 700; }
+.rt-choice.up .rt-big { color: var(--up); }
+.rt-choice.down .rt-big { color: var(--down); }
+.rt-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.rt-flow-step { display: flex; flex-direction: column; gap: 4px; font-size: 13px; position: relative; }
+.rt-flow-step .s { font-size: 12px; }
+@media (max-width: 640px) { .rt-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

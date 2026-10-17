@@ -268,7 +268,7 @@ export function RightsCard({ p }) {
         <div class="s up">${fmt.signed(r.value)} ${t('EGP')}</div></div>
     </div>
     <p class="pos-reason" dir="auto">${tn(r.note)}</p>
-    <div class="pos-foot"><a class="btn sm ghost" href=${`#/rights/${encodeURIComponent(p.symbol)}`}>${t('Dates, choices and what happens next')}<${Icon} name="chevron" size=${14} /></a></div>
+    <div class="pos-foot"><a class="btn sm ghost" href=${stockHref(r.symbol)}>${t('Dates, choices and what happens next')}<${Icon} name="chevron" size=${14} /></a></div>
   </article>`;
 }
 
@@ -677,15 +677,18 @@ function matches(stocks, q) {
   if (!s) return stocks.slice(0, 60);
   const starts = [], contains = [], names = [];
   for (const x of stocks) {
-    if (x.symbol.startsWith(s)) starts.push(x);
-    else if (x.symbol.includes(s)) contains.push(x);
+    const sym = x.symbol.toUpperCase();   // KORA_r1
+    if (sym.startsWith(s)) starts.push(x);
+    else if (sym.includes(s)) contains.push(x);
     else if ((x.name_ar || '').includes(q.trim()) || (x.sector || '').toUpperCase().includes(s)) names.push(x);
   }
   return [...starts, ...contains, ...names].slice(0, 60);
 }
 
 export function StockPicker({ value, onChange, starred = [], placeholder = 'Search stocks…', search, hotkey, invalid }) {
-  const stocks = useStore(s => s.stocks);
+  const listed = useStore(s => s.stocks);
+  const rights = useStore(s => s.rights);   // KORA_r1 and the like, while they last (views.rights_list)
+  const stocks = useMemo(() => listed && [...listed, ...(rights || [])], [listed, rights]);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(0);

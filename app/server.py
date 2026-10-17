@@ -439,6 +439,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def stocks(d: views.Data = Depends(get_data)):
         return JSON(views.stocks_list(d))
 
+    @app.get("/api/rights")
+    def rights(d: views.Data = Depends(get_data)):
+        return JSON(views.rights_list(d))
+
     @app.get("/api/today")
     def today(d: views.Data = Depends(get_data)):
         return JSON(views.today(d))

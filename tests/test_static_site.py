@@ -294,6 +294,24 @@ def test_rights_before_you_decide_count_like_your_broker(tmp_path, cfg):
         assert js["out"][8][0][k] == pytest.approx(was[k]), k
 
 
+def test_the_rights_have_their_own_symbol_until_the_new_shares_list(tmp_path, cfg):
+    """KORA_r1 is on the Stocks page (search and its page) from the ex-date, with its milestones, until about three
+    months after the subscription closes."""
+    from egx_agent.data import news
+    conn = db.connect(tmp_path / "r.db")
+    news.save_corporate_actions(conn, news.KNOWN_ACTIONS)
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('KORA', '2026-10-14', 1.833333, 'x')")
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) "
+                 "VALUES ('KORA', '2026-10-14', 2.53, 2.99, 2.53, 2.92, 1e6)")
+    conn.commit()
+    d = views.Data(conn, cfg, views.Cache())
+    (r,) = views.rights_list(d, "2026-10-17")
+    assert (r["symbol"], r["base"], r["close"], r["price"], r["ratio"]) == ("KORA_r1", "KORA", 2.32, 0.205, 0.9)
+    assert [s[2] for s in r["schedule"]][3:] == ["Rights trading starts", "Rights trading ends", "Round 1 ends",
+                                                 "Subscription closes"]       # pages/rights.js stage() reads these
+    assert views.rights_list(d, "2026-10-13") == [] and views.rights_list(d, "2027-03-01") == []
+
+
 @needs_node
 def test_mac_portfolio_backup_restores_on_the_site(tmp_path, cfg):
     """Your Mac portfolio, saved as a site backup: the site shows the same positions, cash and pending bonus shares."""

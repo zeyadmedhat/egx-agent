@@ -205,6 +205,21 @@ def stocks_list(d: Data) -> list[dict]:
     return out
 
 
+def rights_list(d: Data, today: str | None = None) -> list[dict]:
+    """Rights issues with their own symbol on the Stocks page (KORA_r1, like your broker's), from the ex-date until
+    about three months after the subscription closes, when the new shares are listed and the rights go."""
+    today = today or date.today().isoformat()
+    out = []
+    for e in corporate.events(d.conn):
+        t = e["terms"]
+        if not t or not t.get("schedule") or not e["ex_date"] <= today <= \
+                (date.fromisoformat(t["schedule"][-1][0]) + timedelta(days=92)).isoformat():
+            continue
+        out.append({"symbol": f"{e['symbol']}_r1", "base": e["symbol"], "ex_date": e["ex_date"],
+                    "name_ar": d.info(e["symbol"]).get("name_ar"), "close": t["ref"], "change": None, **t})
+    return out
+
+
 def signals(d: Data) -> tuple[str | None, list[dict]]:
     """The latest scan's signals for this person: their Shariah filter applied and BUYs sized for their account.
 

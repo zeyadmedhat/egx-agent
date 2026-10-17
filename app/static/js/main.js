@@ -53,7 +53,7 @@ function lazy(file, name) {
 
 const PAGES = Object.fromEntries(Object.entries({
   today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
-  stock: lazy('stock', 'StockPage'), rights: lazy('rights', 'RightsPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
+  stock: lazy('stock', 'StockPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
   calc: lazy('calc', 'CalcPage'), backtest: lazy('backtest', 'BacktestPage'), settings: lazy('settings', 'SettingsPage'), admin: lazy('admin', 'AdminPage'),
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
 
@@ -236,7 +236,7 @@ function App() {
   useEffect(() => { if (version) loadStocks(); }, [version, tick]);
   const page = PAGES[route.page] ? route.page : 'today';
   useEffect(() => {
-    document.title = `${page === 'stock' && route.arg ? route.arg : page === 'rights' ? `${route.arg}_r1` : t(pageTitle(page))} · EGX Trading Agent`;
+    document.title = `${page === 'stock' && route.arg ? route.arg.replace(/_R1$/i, '_r1') : t(pageTitle(page))} · EGX Trading Agent`;
     setMenu(false);
   }, [page, route.arg, lang]);
   const Page = PAGES[page];
