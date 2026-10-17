@@ -311,6 +311,9 @@ def rights_history(conn: sqlite3.Connection, today: str | None = None) -> dict |
 # stock's and the market's trend didn't separate them once the last week was known.
 CHECK_SESSIONS = 5             # the last week with the rights
 PATH_BEFORE = 15               # sessions shown before the last day with the rights
+TRADE_SESSIONS = 10            # about how long rights trade, from the ex-date (KORA: 14 Oct → 27 Oct)
+# What the share did after its last week with the rights (rights_study "stages"), by how it moved in that week
+STAGE_GROUPS = (("Fell 10% or more", -9.0, -0.10), ("Fell up to 10%", -0.10, 0.0), ("Rose", 0.0, 9.0))
 
 
 def rights_check(last5: float | None) -> str | None:
@@ -365,7 +368,12 @@ def rights_study(conn: sqlite3.Connection, today: str | None = None) -> dict | N
         r = lambda n: float(s.iloc[i + n] / s.iloc[last] - 1) if i + n < len(s) and pd.notna(s.iloc[i + n]) else None  # noqa: E731
         x = lambda n: float(idx.iloc[i + n] / idx.iloc[last] - 1) if i + n < len(s) else None                     # noqa: E731
         k = slice(max(0, last - PATH_BEFORE), end + 1)
+        tr = lambda a, b: float(s.iloc[i + b] / s.iloc[i + a] - 1) if i + b < len(s) and pd.notna(s.iloc[i + b]) else None  # noqa: E731
         row.update({"ex_day": r(0), "two_weeks": r(10), "quarter": r(QUARTER), "egx30_quarter": x(QUARTER),
+                    # the share alone after the split: while its rights traded (about 10 sessions), then to 3 months
+                    "trade_weeks": tr(0, TRADE_SESSIONS), "after_trade": tr(TRADE_SESSIONS, QUARTER),
+                    "trade": [{"date": d.date().isoformat(), "close": round(float(v), 3)}
+                              for d, v in s.iloc[i:i + TRADE_SESSIONS + 1].items() if pd.notna(v)],
                     "path": {"date": [d.date().isoformat() for d in s.index[k]],
                              "stock": [round(float(v / s.iloc[last] * 100), 1) for v in s.iloc[k]],
                              "egx30": [round(float(v / idx.iloc[last] * 100), 1) for v in idx.iloc[k]]},
@@ -396,8 +404,14 @@ def rights_study(conn: sqlite3.Connection, today: str | None = None) -> dict | N
     entries = [(label, df[col].dropna()) for label, col in (("On the announcement", "ann_entry"),
                                                               ("On the last day with the rights", "beat"),
                                                               ("On the ex-date (no rights)", "ex_entry"))]
+    stat = lambda v: {"up": float((v > 0).mean()), "median": float(v.median())} if len(v) else None  # noqa: E731
+    stages = []
+    for label, lo, hi in STAGE_GROUPS:
+        g = df[(df["last5"] > lo) & (df["last5"] <= hi)]
+        stages.append({"label": label, "n": int(len(g)), "ex_day": stat(g["ex_day"].dropna()),
+                       "trade_weeks": stat(g["trade_weeks"].dropna()), "after_trade": stat(g["after_trade"].dropna())})
     return {
-        "n": len(df), "since": int(df["ex"].min()[:4]), "all": group(df),
+        "n": len(df), "since": int(df["ex"].min()[:4]), "all": group(df), "stages": stages,
         "checks": {c: group(df[df["check"] == c]) for c in ("better", "weaker")},
         # what each thing measured on the last day said: how often the higher half and the lower half beat EGX30
         "factors": [halves("last5", "The last week's move"), halves("value", "How busy the trading was"),

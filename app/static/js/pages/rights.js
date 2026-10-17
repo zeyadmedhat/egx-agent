@@ -70,6 +70,7 @@ function CurrentRights({ base }) {
 
     <${ShareValue} is=${is} day=${day} sharePrice=${sharePrice} price=${price} base=${base} />
     ${study && html`<${CheckCard} study=${study} row=${study.past.find(p => p.symbol === base && p.ex === is.ex_date)} />`}
+    ${study && study.stages && html`<${StagesCard} study=${study} mine=${(study.past.find(p => p.symbol === base && p.ex === is.ex_date) || {}).last5} />`}
     <${Choices} is=${is} pos=${pos} price=${price} at=${at} />
     <${AfterSub} base=${base} r=${is.symbol} />
     ${div && div.rights_history && div.rights_history.run_up && html`<${History} h=${div.rights_history} />`}
@@ -203,6 +204,25 @@ function CheckCard({ study, row }) {
   </article>`;
 }
 
+// What the share did after its last week with the rights, by how it moved that week (corporate.rights_study
+// stages): a grid, green where it mostly rose, red where it mostly fell. `mine`: the row this issue falls in.
+const STAGE_COLS = [['ex_day', 'Split day'], ['trade_weeks', 'While the rights trade'], ['after_trade', 'Then, to 3 months']];
+export function StagesCard({ study, mine }) {
+  const row = mine == null ? null : mine <= -0.10 ? 0 : mine <= 0 ? 1 : 2;
+  const tint = v => (v >= 0.6 ? 'good' : v <= 0.4 ? 'bad' : '');
+  return html`<article class="card"><div class="card-title">${t('After the last week with the rights: what the share did next')}</div>
+    <div class="rt-grid">
+      <div></div>${STAGE_COLS.map(([, l]) => html`<div class="rt-grid-h">${t(l)}</div>`)}
+      ${study.stages.map((g, i) => html`<div class=${cls('rt-grid-l', i === row && 'mine')}><b>${t(g.label)}</b>
+          <span class="faint">${t('{n} issues', { n: g.n })}${i === row ? ` · ${t('this one')}` : ''}</span></div>
+        ${STAGE_COLS.map(([k]) => (g[k] ? html`<div class=${cls('rt-cell', tint(g[k].up), i === row && 'mine')}>
+          <b>${fmt.pct(g[k].up, 0, false)}</b><span>${t('rose')}</span><span>${t('typ. {v}', { v: fmt.pct(g[k].median, 1) })}</span></div>`
+          : html`<div class="rt-cell">–</div>`))}`)}
+    </div>
+    <p class="faint s" style="margin:10px 0 0">${t('The split day counts the rights at their worth. The rights follow the share: a right is worth about the share price less the subscription price, so it rises and falls with it, by a bit more in %. The rights\u2019 own past prices are gone, so they can\u2019t be measured directly. Few issues fell 10% or more: treat it as a hint.')}</p>
+  </article>`;
+}
+
 // A group's three numbers as tiles: beat EGX30, typical lead over it, the worst 1 in 10.
 function GroupStats({ g }) {
   return html`<div class="rt-prices" style="margin:0">
@@ -238,6 +258,7 @@ export function RightsListPage() {
       <p class="faint s" style="margin:10px 0 0">${t('Bought at the close of the last day with the rights and subscribed, held 3 months. Picked on the years before 2022 and still there after, though smaller. Facts from the past, not a promise.')}</p>
     </article>
 
+    ${data.stages && html`<${StagesCard} study=${data} />`}
     <article class="card"><div class="card-title">${t('When to buy: how often it beat EGX30 in 3 months')}</div>
       <div class="rt-bars">${data.entries.map((e, i) => html`<div class="rt-hist">
         <div class="rt-hist-l">${t(e.label)} <span class="faint">(${t('typically {v}', { v: fmt.pct(e.median, 1) })})</span></div>
@@ -306,6 +327,11 @@ function PastRights({ base, ex }) {
       <ol class="steps">${steps.map(([day, what]) => html`<li class="done"><div><b>${t(what)}</b> <span class="faint">${fmt.date(day)}</span></div></li>`)}</ol></article>
     ${p.rights && p.rights.length > 0 && html`<article class="card"><div class="card-title">${t('{r} over its trading period', { r: `${base}_r1` })}</div>
       <${LineChart} lines=${[{ data: p.rights.map(r => ({ time: r.date, value: r.close })), color: '--accent', title: `${base}_r1` }]} height=${240} format="price" /></article>`}
+    ${!(p.rights && p.rights.length) && p.trade && p.trade.length > 1 && html`<article class="card">
+      <div class="card-title">${t('{sym} while its rights traded', { sym: base })}<span class="faint right s">${fmt.date(p.trade[0].date, false)} – ${fmt.date(p.trade.at(-1).date, false)}</span></div>
+      <${LineChart} lines=${[{ data: p.trade.map(r => ({ time: r.date, value: r.close })), color: '--accent', title: base }]} height=${240} format="price" />
+      <p class="faint s" style="margin:8px 0 0">${t('The share from the split day for about the 10 sessions its rights traded (the exact dates aren\u2019t in the data). The rights\u2019 own prices are gone; a right is worth about the share price less the subscription price, so they moved with it.')}</p></article>`}
+    ${data.stages && html`<${StagesCard} study=${data} mine=${p.last5} />`}
     <article class="card"><div class="card-title">${t('{sym} and EGX30, 100 = the last day with the rights', { sym: base })}</div>
       <${LineChart} lines=${lines} height=${300} format="num" />
       <p class="faint s" style="margin:8px 0 0">${t(p.rights && p.rights.length ? 'Counting the rights at their worth (a holder who subscribed).' : 'Counting the rights at their worth (a holder who subscribed). The rights’ own prices from back then are gone: TradingView drops them when an issue ends. Since October 2026 the site keeps them.')}</p></article>

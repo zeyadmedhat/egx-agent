@@ -1553,3 +1553,13 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .rt-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(34px, 1fr)); gap: 6px; }
 .rt-days div { border: 1px dashed var(--border); border-radius: 8px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; font-size: 13px; }
 .rt-days span { font-size: 10px; color: var(--text-3); }
+.rt-grid { display: grid; grid-template-columns: minmax(84px, 1.1fr) repeat(3, minmax(0, 1fr)); gap: 6px; align-items: stretch; }
+.rt-grid-h { font-size: 11px; color: var(--text-2); text-align: center; align-self: end; padding-bottom: 2px; }
+.rt-grid-l { display: flex; flex-direction: column; justify-content: center; font-size: 12px; padding: 6px 8px; border-radius: 8px; }
+.rt-grid-l .faint { font-size: 11px; }
+.rt-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 4px; border-radius: 8px;
+  background: var(--panel-3); font-size: 11px; color: var(--text-2); text-align: center; }
+.rt-cell b { font-size: 17px; color: var(--text); }
+.rt-cell.good { background: var(--up-soft); } .rt-cell.good b { color: var(--up); }
+.rt-cell.bad { background: var(--down-soft); } .rt-cell.bad b { color: var(--down); }
+.rt-grid .mine { outline: 2px solid var(--accent); outline-offset: -2px; }
