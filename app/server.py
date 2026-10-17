@@ -443,6 +443,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def rights(d: views.Data = Depends(get_data)):
         return JSON(views.rights_list(d))
 
+    @app.get("/api/rights/history")
+    def rights_history(d: views.Data = Depends(get_data)):
+        return JSON(corporate.rights_study(d.conn))
+
     @app.get("/api/today")
     def today(d: views.Data = Depends(get_data)):
         return JSON(views.today(d))

@@ -2,7 +2,7 @@
 // own tabs (Market, EGX30) and the BUY signals are on Picks (pages/picks.js), which reads the same /today.
 import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, todayISO, copyText, STATIC } from '../lib.js';
 import {
-  Icon, Badges, Empty, Callout, PageHead, SectionHead, PageLoading, JobControl, SessionBadge, useQuotes, livePosition,
+  Icon, Badges, Empty, Callout, PageHead, SectionHead, PageLoading, JobControl, SessionBadge, useQuotes, quoteSymbols, livePosition,
   PositionCard, RightsCard, ownerText,
 } from '../ui.js';
 import { t, isAr, tn } from '../i18n.js';
@@ -110,7 +110,7 @@ function Brief({ data, blocked, alerts }) {
 
 // Your positions as cards: what to do, the price and profit/loss (live during the session), stop to target.
 function Positions({ positions, cfg, alerts }) {
-  const q = useQuotes(positions.map(p => p.symbol));
+  const q = useQuotes(quoteSymbols(positions));
   const list = positions.map(p => livePosition(p, q));
   const total = list.reduce((s, p) => s + p.pnl + (p.rights ? p.rights.value : 0), 0);
   return html`<section class="section">

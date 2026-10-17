@@ -332,6 +332,30 @@ def test_past_rights_issues_are_measured_from_the_close_before_the_ex_date(tmp_p
     assert corporate.rights_history(conn, today=str(days[40].date())) is None     # not past its ex-date yet
 
 
+def test_the_rights_check_splits_past_issues_by_their_last_week(tmp_path):
+    """Rights issues whose share fell over its last 5 sessions with the rights go in 'better', those that rose in
+    'weaker'; each group's 3 months against EGX30, and a coming one checked on its sessions so far."""
+    conn = db.connect(tmp_path / "t.db")
+    days = make_ohlcv(np.ones(120), start="2026-01-04").index
+    db.upsert_prices(conn, "EGX30", _frame(np.full(120, 1000.0)))
+    for k in range(24):
+        fell, sym = k < 12, f"R{k:02d}"
+        before = np.r_[np.full(35, 10.0), np.full(5, 9.5 if fell else 10.5)]        # sessions 35–39: the last week
+        after = np.linspace(before[-1], before[-1] * (1.1 if fell else 0.95), 80)   # ex-date (40) on: +10% / −5%
+        db.upsert_prices(conn, sym, _frame(np.r_[before, after]))
+        conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective) VALUES (?, 'rights', 'R', ?, ?)",
+                     (sym, str(days[10].date()), str(days[40].date())))
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective) "
+                 "VALUES ('R00', 'rights', 'R', '2026-06-01', '2026-12-20')")                 # coming up
+    s = corporate.rights_study(conn, today="2026-06-10")
+    assert s["n"] == 24 and s["checks"]["better"]["n"] == 12 and s["checks"]["better"]["beat"] == 1.0
+    assert s["checks"]["weaker"]["beat"] == 0.0 and s["factors"][0] == {"label": "The last week's move", "hi": 0.0, "lo": 1.0}
+    (c,) = s["coming"]
+    assert c["symbol"] == "R00" and c["check"] == "weaker" and c["last_day"] == "2026-12-17"     # still rising; Thu before Sun 20
+    p = next(x for x in s["past"] if x["symbol"] == "R00")
+    assert p["path"]["stock"][corporate.PATH_BEFORE] == 100.0 and p["check"] == "better"
+
+
 def test_market_page_loads(client):  # noqa: F811
     m = client.get("/api/market").json()
     assert m["breadth"]["stocks"] == 2 and m["verdict"]["text"]

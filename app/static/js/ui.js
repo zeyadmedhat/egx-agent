@@ -188,10 +188,17 @@ export function useQuotes(symbols) {
   return q;
 }
 
+// The symbols to ask live prices for: each position's, and its rights' (KORAR1) while it holds them.
+export const quoteSymbols = ps => ps.flatMap(p => (p.rights ? [p.symbol, `${p.symbol}R1`] : [p.symbol]));
+
 // A position at the newest price when there is one: price, P&L after fees (the selling fee on the new value) and
 // whether it has already crossed its stop or target. Live only while the session is open; otherwise the quote is the
 // last close. p: views.open_positions / local/api.js openPositions.
 export function livePosition(p, q) {
+  // the rights beside the shares (Thndr's KORA_r1) at their last trade once they trade (TradingView's KORAR1)
+  const rq = p.rights && q && q[`${p.symbol}R1`];
+  if (rq) p = { ...p, rights: { ...p.rights, price: rq.price, value: p.rights.units * rq.price, change: rq.change, live: true },
+    rights_gain: p.rights.units * rq.price - p.rights.value };
   const quote = q && q[p.symbol];
   if (!quote || (p.adjust && !p.rights)) return { ...p, price: p.last, live: false, day_change: null };
   const price = quote.price;
@@ -257,13 +264,13 @@ export function RightsCard({ p }) {
   return html`<article class="card pos-card" id=${`pos-${p.id}-rights`}>
     <div class="pos-head">
       <${StockAvatar} symbol=${p.symbol} size=${36} />
-      <div class="pos-who"><span class="sym-big">${r.symbol}</span>
+      <div class="pos-who"><a class="sym-big" href=${stockHref(r.symbol)}>${r.symbol}</a>
         <div class="faint pos-sub">${t('{n} rights · subscription price {price}', { n: fmt.int(r.units), price: fmt.price(r.sub_price) })}</div></div>
       <span class="chip nodata"><span class="dot"></span>${t('Rights')}</span>
     </div>
     <div class="pos-nums">
-      <div><div class="k">${t('Price')}</div><div class="v">${fmt.price(r.price)}</div>
-        <div class="faint s">${t('before the rights trade')}</div></div>
+      <div><div class="k">${t(r.live ? 'Last trade price' : 'Price')}</div><div class="v">${fmt.price(r.price)}</div>
+        <div class="faint s">${r.live ? html`<${Change} value=${r.change} />` : t('before the rights trade')}</div></div>
       <div class="r"><div class="k">${t('Market value')}</div><div class="v">${fmt.int(r.value)}</div>
         <div class="s up">${fmt.signed(r.value)} ${t('EGP')}</div></div>
     </div>

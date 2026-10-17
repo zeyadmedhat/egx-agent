@@ -53,7 +53,7 @@ function lazy(file, name) {
 
 const PAGES = Object.fromEntries(Object.entries({
   today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
-  stock: lazy('stock', 'StockPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
+  stock: lazy('stock', 'StockPage'), rights: lazy('rights', 'RightsListPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
   calc: lazy('calc', 'CalcPage'), backtest: lazy('backtest', 'BacktestPage'), settings: lazy('settings', 'SettingsPage'), admin: lazy('admin', 'AdminPage'),
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
 
@@ -63,7 +63,7 @@ const SECTIONS = [
   { id: 'home', label: 'Home', icon: 'home',
     tabs: [['today', 'Summary'], ['market', 'Market'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['dividends', 'Dividends & results'], ['news', 'News']] },
   { id: 'picks', label: 'Picks', icon: 'target', tabs: [['signals', 'Picks'], ['predict', 'Rankings'], ['record', 'Track record']] },
-  { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist']] },
+  { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist'], ['rights', 'Rights issues']] },
   { id: 'portfolio', label: 'Portfolio', icon: 'briefcase',
     tabs: [['portfolio', 'My portfolio'], ['paper', 'Practice'], ['calc', 'Calculator'], ['backtest', 'Rules test']] },
 ].map(s => ({ ...s, tabs: s.tabs.filter(([id]) => id in PAGES) }));

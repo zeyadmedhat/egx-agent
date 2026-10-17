@@ -29,7 +29,7 @@ const PANES_ON = { zones: true, fib: false, ema: true, volume: true, rsi: true, 
 // A rights issue's rights (KORA_r1) open their own view (rights.js); every other symbol the stock's page.
 export function StockPage({ route }) {
   const sym = (route.arg || remember('symbol') || 'COMI').toUpperCase();
-  return /_R1$/.test(sym) ? html`<${RightsPage} base=${sym.slice(0, -3)} key=${sym} />` : html`<${StockMain} route=${route} key=${sym} />`;
+  return /_R1$/.test(sym) ? html`<${RightsPage} base=${sym.slice(0, -3)} ex=${route.query.ex} key=${sym + (route.query.ex || '')} />` : html`<${StockMain} route=${route} key=${sym} />`;
 }
 
 function StockMain({ route }) {

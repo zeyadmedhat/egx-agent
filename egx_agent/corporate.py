@@ -301,3 +301,105 @@ def rights_history(conn: sqlite3.Connection, today: str | None = None) -> dict |
         "trading": {"median": float(df["trading"].median()), "up": up(df["trading"])},
         "after_sub": {"median": float(df["after_sub"].median()), "up": up(df["after_sub"]), "beat": up(df["sub_beat"])},
     }
+
+
+# The rights check (rights_study): what past EGX rights issues did for a holder who bought on the last day with the
+# rights and subscribed, held three months, against EGX30. Of everything measured (Oct 2026, 94 issues since 2016)
+# only the share's move over its last 5 sessions with the rights told them apart: those that rose did worse (beat
+# EGX30 about half the time, 1 in 10 lost a third) than those that fell or stayed flat (about 3 in 4); picked on the
+# years before 2022, it held (more weakly) after. How busy the trading was, the move since the announcement, the
+# stock's and the market's trend didn't separate them once the last week was known.
+CHECK_SESSIONS = 5             # the last week with the rights
+PATH_BEFORE = 15               # sessions shown before the last day with the rights
+
+
+def rights_check(last5: float | None) -> str | None:
+    """'better' (fell or stayed flat over its last week with the rights) or 'weaker' (rose), as past issues did."""
+    return None if last5 is None else "weaker" if last5 > 0 else "better"
+
+
+def rights_study(conn: sqlite3.Connection, today: str | None = None) -> dict | None:
+    """Every past EGX rights issue (Mubasher's list) as its stock and EGX30 moved around it, on re-based prices (a
+    holder who subscribed, or sold the rights for their worth), each with the rights check; what each thing measured
+    said; and the rights issues coming up, with their check so far."""
+    from . import holidays
+    today = today or date.today().isoformat()
+    ev = pd.read_sql_query("SELECT symbol, MIN(announced) AS announced, effective FROM corp_actions "
+                           "WHERE kind = 'rights' AND effective != '' GROUP BY symbol, effective", conn)
+    if ev.empty:
+        return None
+    syms = sorted(set(ev["symbol"]) | {"EGX30"})
+    px = pd.read_sql_query(f"SELECT symbol, date, close, volume FROM prices WHERE symbol IN ({','.join('?' * len(syms))})",
+                           conn, params=syms)
+    px["date"] = pd.to_datetime(px["date"])
+    cl = px.pivot(index="date", columns="symbol", values="close")
+    vo = px.pivot(index="date", columns="symbol", values="volume")
+    if "EGX30" not in cl:
+        return None
+    idx = cl.pop("EGX30").dropna()
+    cl, vo = cl.reindex(idx.index).ffill(limit=5), vo.reindex(idx.index)
+    past, coming = [], []
+    for e in ev.itertuples():
+        if e.symbol not in cl:
+            continue
+        s = cl[e.symbol]
+        upcoming = e.effective > today
+        i = len(s) if upcoming else int(s.index.searchsorted(pd.Timestamp(e.effective)))   # the ex-date
+        last = i - 1                                                       # the last day with the rights (or today)
+        if last < CHECK_SESSIONS + 20 or s.iloc[last - CHECK_SESSIONS - 20:last + 1].isna().any():
+            continue
+        last5 = float(s.iloc[last] / s.iloc[last - CHECK_SESSIONS] - 1)
+        value = float((s * vo[e.symbol]).iloc[last - 20:last].median())   # EGP a session, the same re-based or not
+        a = int(s.index.searchsorted(pd.Timestamp(e.announced))) if e.announced else -1
+        row = {"symbol": e.symbol, "announced": e.announced or None, "ex": e.effective, "last5": last5, "value": value,
+               "run_up": float(s.iloc[last] / s.iloc[a] - 1) if 0 <= a < last else None,
+               "trend": float(s.iloc[last] / s.iloc[last - QUARTER] - 1) if last >= QUARTER and pd.notna(s.iloc[last - QUARTER]) else None,
+               "market": float(idx.iloc[last] / idx.iloc[last - QUARTER] - 1) if last >= QUARTER else None}
+        if upcoming:
+            row["last_day"] = (pd.Timestamp(e.effective) - holidays.session_day()).date().isoformat()
+            coming.append(row)
+            continue
+        if s.iloc[i] / s.iloc[last] < 0.8:
+            continue                                                       # TradingView didn't re-base this one
+        end = min(i + QUARTER, len(s) - 1)
+        r = lambda n: float(s.iloc[i + n] / s.iloc[last] - 1) if i + n < len(s) and pd.notna(s.iloc[i + n]) else None  # noqa: E731
+        x = lambda n: float(idx.iloc[i + n] / idx.iloc[last] - 1) if i + n < len(s) else None                     # noqa: E731
+        k = slice(max(0, last - PATH_BEFORE), end + 1)
+        row.update({"ex_day": r(0), "two_weeks": r(10), "quarter": r(QUARTER), "egx30_quarter": x(QUARTER),
+                    "path": {"date": [d.date().isoformat() for d in s.index[k]],
+                             "stock": [round(float(v / s.iloc[last] * 100), 1) for v in s.iloc[k]],
+                             "egx30": [round(float(v / idx.iloc[last] * 100), 1) for v in idx.iloc[k]]},
+                    "ann_entry": float(s.iloc[i + QUARTER] / s.iloc[a] - idx.iloc[i + QUARTER] / idx.iloc[a])
+                    if 0 <= a < last and i + QUARTER < len(s) else None,
+                    "ex_entry": float(s.iloc[i + QUARTER] / s.iloc[i] - idx.iloc[i + QUARTER] / idx.iloc[i])
+                    if i + QUARTER < len(s) else None})
+        past.append(row)
+    done = [p for p in past if p["quarter"] is not None]
+    if len(done) < 20:
+        return None
+    df = pd.DataFrame(done)
+    df["beat"] = df["quarter"] - df["egx30_quarter"]
+    for p in past + coming:
+        p["check"] = rights_check(p["last5"])
+    df["check"] = [rights_check(a) for a in df["last5"]]
+    group = lambda g: {"n": int(len(g)), "beat": float((g["beat"] > 0).mean()), "median": float(g["beat"].median()),  # noqa: E731
+                       "p10": float(g["quarter"].quantile(0.1)), "up": float((g["quarter"] > 0).mean())} if len(g) else None
+
+    def halves(col: str, label: str) -> dict:
+        d = df[df[col].notna()]
+        hi = d[col].astype(float) > d[col].astype(float).median()
+        return {"label": label, "hi": float((d.loc[hi, "beat"] > 0).mean()), "lo": float((d.loc[~hi, "beat"] > 0).mean())}
+    entries = [(label, df[col].dropna()) for label, col in (("On the announcement", "ann_entry"),
+                                                              ("On the last day with the rights", "beat"),
+                                                              ("On the ex-date (no rights)", "ex_entry"))]
+    return {
+        "n": len(df), "since": int(df["ex"].min()[:4]), "all": group(df),
+        "checks": {c: group(df[df["check"] == c]) for c in ("better", "weaker")},
+        # what each thing measured on the last day said: how often the higher half and the lower half beat EGX30
+        "factors": [halves("last5", "The last week's move"), halves("value", "How busy the trading was"),
+                    halves("run_up", "The move since the announcement"), halves("trend", "The stock's last 3 months"),
+                    halves("market", "EGX30's last 3 months")],
+        "entries": [{"label": label, "beat": float((v > 0).mean()), "median": float(v.median()), "n": int(len(v))}
+                    for label, v in entries],
+        "past": sorted(past, key=lambda p: p["ex"], reverse=True), "coming": sorted(coming, key=lambda p: p["ex"]),
+    }

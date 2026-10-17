@@ -6,7 +6,7 @@ import {
 } from '../lib.js';
 import {
   Icon, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, Field,
-  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, livePosition, PositionCard, RightsCard, More, DateInput, lastSession,
+  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, quoteSymbols, livePosition, PositionCard, RightsCard, More, DateInput, lastSession,
 } from '../ui.js';
 import { t, tn, tp } from '../i18n.js';
 import { LineChart } from '../charts.js';
@@ -27,14 +27,14 @@ export function PortfolioPage({ route }) {
   useEffect(() => { if (route.query.open) setOpenId(Number(route.query.open)); }, [route.query.open]);
   useEffect(() => { if (route.query.buy) setAdd('type'); }, [route.query.buy]);
   useEffect(() => { if (data && route.query.open) setTimeout(() => scrollTo(`pos-${route.query.open}`), 50); }, [!!data, route.query.open]);
-  const q = useQuotes(data ? data.positions.map(p => p.symbol) : []);
+  const q = useQuotes(data ? quoteSymbols(data.positions) : []);
   if (!data) return html`<${PageLoading} error=${error} />`;
   const s = data.summary;
   const openClosed = data.closed.find(r => r.id === closedId) || null;
   const list = data.positions.map(p => livePosition(p, q));
   const live = list.some(p => p.live);
   const openPnl = list.reduce((a, p) => a + p.pnl + (p.rights ? p.rights.value : 0), 0);
-  const equity = s.equity + list.reduce((a, p) => a + (p.price - p.last) * p.shares, 0);
+  const equity = s.equity + list.reduce((a, p) => a + (p.price - p.last) * p.shares + (p.rights_gain || 0), 0);
   const startAdd = mode => { setAdd(mode); setTimeout(() => scrollTo('buy-form'), 0); };
   const closeCard = id => { setOpenId(null); setTimeout(() => scrollTo(`pos-${id}`, 'nearest'), 0); };
   const closedColumns = [

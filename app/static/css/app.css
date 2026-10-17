@@ -1526,6 +1526,7 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .seg.share { background: var(--accent); }
 .seg.rights { background: var(--warn); }
 .seg.low { background: var(--down); opacity: .75; }
+.seg.muted { background: var(--text-3); opacity: .6; }
 .rt-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--text-2); }
 .rt-legend span { display: flex; align-items: center; gap: 6px; }
 .rt-legend .seg { width: 12px; height: 12px; border-radius: 3px; }
@@ -1534,13 +1535,18 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .rt-choice { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
 .rt-choice .s { font-size: 12px; color: var(--text-2); }
 .rt-ic { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-3); margin-bottom: 4px; }
-.rt-choice.up .rt-ic { background: var(--up-soft); color: var(--up); }
-.rt-choice.info .rt-ic { background: var(--info-soft); color: var(--info); }
-.rt-choice.down .rt-ic { background: var(--down-soft); color: var(--down); }
+.rt-choice.c-up .rt-ic { background: var(--up-soft); color: var(--up); }
+.rt-choice.c-info .rt-ic { background: var(--info-soft); color: var(--info); }
+.rt-choice.c-down .rt-ic { background: var(--down-soft); color: var(--down); }
 .rt-big { font-size: 20px; font-weight: 700; }
-.rt-choice.up .rt-big { color: var(--up); }
-.rt-choice.down .rt-big { color: var(--down); }
+.rt-choice.c-up .rt-big { color: var(--up); }
+.rt-choice.c-down .rt-big { color: var(--down); }
 .rt-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .rt-flow-step { display: flex; flex-direction: column; gap: 4px; font-size: 13px; position: relative; }
 .rt-flow-step .s { font-size: 12px; }
 @media (max-width: 640px) { .rt-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rt-factor { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--radius); }
+.rt-factor.key { background: var(--up-soft); }
+.rt-factor .rt-hist { grid-template-columns: minmax(0, 1fr) 44px 84px; }
+.rt-half { white-space: nowrap; }
+.rt-h2 { font-size: 16px; margin: 0 0 10px; }
