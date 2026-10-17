@@ -349,7 +349,7 @@ def test_the_rights_check_splits_past_issues_by_their_last_week(tmp_path):
                  "VALUES ('R00', 'rights', 'R', '2026-06-01', '2026-12-20')")                 # coming up
     s = corporate.rights_study(conn, today="2026-06-10")
     assert s["n"] == 24 and s["checks"]["better"]["n"] == 12 and s["checks"]["better"]["beat"] == 1.0
-    assert s["checks"]["weaker"]["beat"] == 0.0 and s["factors"][0] == {"label": "The last week's move", "hi": 0.0, "lo": 1.0}
+    assert s["checks"]["weaker"]["beat"] == 0.0 and s["factors"][0] == {"label": "The share's last 5 days", "hi": 0.0, "lo": 1.0}
     assert [g["n"] for g in s["stages"]] == [0, 12, 12] and s["stages"][0]["ex_day"] is None   # none fell 10%+
     assert s["stages"][2]["trade_weeks"] == {"up": 0.0, "median": pytest.approx(10.5 * (1 - 0.05 * 10 / 79) / 10.5 - 1)}
     (c,) = s["coming"]

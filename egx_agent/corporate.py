@@ -313,7 +313,7 @@ CHECK_SESSIONS = 5             # the last week with the rights
 PATH_BEFORE = 15               # sessions shown before the last day with the rights
 TRADE_SESSIONS = 10            # about how long rights trade, from the ex-date (KORA: 14 Oct → 27 Oct)
 # What the share did after its last week with the rights (rights_study "stages"), by how it moved in that week
-STAGE_GROUPS = (("Fell 10% or more", -9.0, -0.10), ("Fell up to 10%", -0.10, 0.0), ("Rose", 0.0, 9.0))
+STAGE_GROUPS = (("Fell 10% or more", -9.0, -0.10), ("Fell under 10%, or flat", -0.10, 0.0), ("Rose", 0.0, 9.0))
 
 
 def rights_check(last5: float | None) -> str | None:
@@ -401,9 +401,9 @@ def rights_study(conn: sqlite3.Connection, today: str | None = None) -> dict | N
         d = df[df[col].notna()]
         hi = d[col].astype(float) > d[col].astype(float).median()
         return {"label": label, "hi": float((d.loc[hi, "beat"] > 0).mean()), "lo": float((d.loc[~hi, "beat"] > 0).mean())}
-    entries = [(label, df[col].dropna()) for label, col in (("On the announcement", "ann_entry"),
-                                                              ("On the last day with the rights", "beat"),
-                                                              ("On the ex-date (no rights)", "ex_entry"))]
+    entries = [(label, df[col].dropna()) for label, col in (("On the news day", "ann_entry"),
+                                                              ("On the last day to get the rights", "beat"),
+                                                              ("On the split day (no rights)", "ex_entry"))]
     stat = lambda v: {"up": float((v > 0).mean()), "median": float(v.median())} if len(v) else None  # noqa: E731
     stages = []
     for label, lo, hi in STAGE_GROUPS:
@@ -414,8 +414,8 @@ def rights_study(conn: sqlite3.Connection, today: str | None = None) -> dict | N
         "n": len(df), "since": int(df["ex"].min()[:4]), "all": group(df), "stages": stages,
         "checks": {c: group(df[df["check"] == c]) for c in ("better", "weaker")},
         # what each thing measured on the last day said: how often the higher half and the lower half beat EGX30
-        "factors": [halves("last5", "The last week's move"), halves("value", "How busy the trading was"),
-                    halves("run_up", "The move since the announcement"), halves("trend", "The stock's last 3 months"),
+        "factors": [halves("last5", "The share's last 5 days"), halves("value", "How busy the trading was"),
+                    halves("run_up", "The move since the news"), halves("trend", "The stock's last 3 months"),
                     halves("market", "EGX30's last 3 months")],
         "entries": [{"label": label, "beat": float((v > 0).mean()), "median": float(v.median()), "n": int(len(v))}
                     for label, v in entries],

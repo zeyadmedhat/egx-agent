@@ -117,13 +117,13 @@ function Results({ rows }) {
 // What EGX stocks did around their past rights issues (egx_agent/corporate.py rights_history). Facts, not a forecast.
 function RightsPast({ h, open }) {
   const p = v => fmt.pct(v, 0, false), r = v => fmt.pct(v, 1);
-  return html`<${More} label=${t('What happened around {n} past rights issues on EGX (since {year})', { n: h.n, year: h.since })} open=${open}>
+  return html`<${More} label=${t('What {n} past rights issues did (since {year})', { n: h.n, year: h.since })} open=${open}>
     <ul class="reasons">
-      <li>${t('Bought at the close before the ex-date (the last day that gets the rights): up on the ex-date {up} of the time, typically {median}.', { up: p(h.ex_day.up), median: r(h.ex_day.median) })}</li>
-      <li>${t('A week later most of that was gone: up {up} of the time, typically {median}.', { up: p(h.week.up), median: r(h.week.median) })}</li>
-      <li>${t('Three months later: up {up} of the time, typically {median}, and ahead of EGX30 {beat} of the time. 1 in 10 lost {p10} or more; 1 in 10 gained {p90} or more.', { up: p(h.quarter.up), median: r(h.quarter.median), beat: p(h.quarter.beat), p10: fmt.pct(-h.quarter.p10, 0, false), p90: fmt.pct(h.quarter.p90, 0, false) })}</li>
-      <li>${t('Bought on the announcement instead and held to the same day: ahead of EGX30 only {beat} of the time.', { beat: p(h.announced.beat) })}</li>
-      <li>${t('Bought on the ex-date itself (no rights then): down a week later {down} of the time, typically {median}.', { down: p(1 - h.after.up), median: r(h.after.median) })}</li>
+      <li>${t('Bought on the last day to get the rights: up the next day (split day) {up} of the time, usually {median}.', { up: p(h.ex_day.up), median: r(h.ex_day.median) })}</li>
+      <li>${t('A week later most of that gain was gone: up {up} of the time, usually {median}.', { up: p(h.week.up), median: r(h.week.median) })}</li>
+      <li>${t('After 3 months: up {up} of the time, usually {median}. Better than EGX30 {beat} of the time. 1 in 10 lost {p10} or more; 1 in 10 gained {p90} or more.', { up: p(h.quarter.up), median: r(h.quarter.median), beat: p(h.quarter.beat), p10: fmt.pct(-h.quarter.p10, 0, false), p90: fmt.pct(h.quarter.p90, 0, false) })}</li>
+      <li>${t('Bought on the news day instead: better than EGX30 only {beat} of the time.', { beat: p(h.announced.beat) })}</li>
+      <li>${t('Bought on the split day (no rights): down a week later {down} of the time, usually {median}.', { down: p(1 - h.after.up), median: r(h.after.median) })}</li>
     </ul>
-    <p class="faint">${t("These count the rights at their worth: you get that only if you subscribe and pay for the new shares, or sell the rights while they trade (they can sell for less). New shares can't be sold until they're listed, weeks after the subscription. Past rights issues, not a forecast for any one stock.")}</p><//>`;
+    <p class="faint">${t("This counts the rights at their value. You get it only if you pay to subscribe, or sell the rights (often for less). New shares can be sold only weeks later. This is the past, not a promise.")}</p><//>`;
 }
