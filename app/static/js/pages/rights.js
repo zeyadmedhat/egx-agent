@@ -3,7 +3,7 @@
 // share was worth before and after, your three choices, what comes after the subscription, and what past rights
 // issues did. Facts only, never which choice to make. The issue: views.rights_list; your rights: /portfolio.
 import { html, useApi, useStore, useState, fmt, cls, go, stockHref } from '../lib.js';
-import { PageLoading, PageHead, Callout, More, StockAvatar, useQuotes, sessionState, Empty, Icon, DataTable, Seg } from '../ui.js';
+import { PageLoading, PageHead, Callout, More, StockAvatar, useQuotes, sessionState, Empty, Icon, DataTable, Seg, LiveChart } from '../ui.js';
 import { t } from '../i18n.js';
 import { LineChart } from '../charts.js';
 
@@ -67,6 +67,10 @@ function CurrentRights({ base }) {
 
     <${Timeline} sched=${sched} day=${day} />
 
+    ${day >= at('Rights trading starts') && day <= at('Round 1 ends') && html`<article class="card">
+      <div class="card-title">${t('{r} live, 1-hour candles', { r: is.symbol })}</div>
+      <${LiveChart} symbol=${`${base}R1`} interval="60" height=${420} />
+      <p class="faint s" style="margin:8px 0 0">${t('From TradingView, about 15 minutes late. Each candle is one hour of trading.')}</p></article>`}
     <${TradingChart} is=${is} day=${day} live=${live} share=${q[base]} />
 
     <${ShareValue} is=${is} day=${day} sharePrice=${sharePrice} price=${price} base=${base} />

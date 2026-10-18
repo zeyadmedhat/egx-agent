@@ -840,12 +840,12 @@ function TvFrame({ src, height, title }) {
     referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>`;
 }
 
-export function LiveChart({ symbol, height = 520 }) {
+export function LiveChart({ symbol, height = 520, interval = 'D' }) {
   const theme = useStore(s => s.theme);
-  const q = new URLSearchParams({ symbol: tvSymbol(symbol), interval: 'D', theme, style: '1', locale: tvLocale(),
+  const q = new URLSearchParams({ symbol: tvSymbol(symbol), interval, theme, style: '1', locale: tvLocale(),
     timezone: 'Africa/Cairo', hidesidetoolbar: '1', symboledit: '0', saveimage: '0', withdateranges: '1',
     hideideas: '1' });
-  return html`<${TvFrame} key=${theme + symbol} src=${`https://s.tradingview.com/widgetembed/?${q}`} height=${height}
+  return html`<${TvFrame} key=${theme + symbol + interval} src=${`https://s.tradingview.com/widgetembed/?${q}`} height=${height}
     title=${`${symbol} live chart from TradingView`} />`;
 }
 

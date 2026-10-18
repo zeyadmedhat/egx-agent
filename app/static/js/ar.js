@@ -1989,4 +1989,6 @@ export const AR = {
   "Each row: how the share moved in the 5 days before the last day to get the rights. Green: it went up most times. Red: it went down most times.": "كل صف: حركة السهم في الأيام الخمسة قبل آخر يوم للحصول على الحق. الأخضر: صعد في معظم المرات. الأحمر: هبط في معظم المرات.",
   "The rights move with the share, a little more. Only {n} issues fell 10% or more, so take that row as a hint.": "الحقوق تتحرك مع السهم وبنسبة أكبر قليلًا. فقط {n} زيادة هبطت 10% أو أكثر، فاعتبر هذا الصف مؤشرًا فقط.",
   "Both start at 100 on the last day to get the rights. Above 100 means it went up.": "كلاهما يبدأ من 100 في آخر يوم للحصول على الحق. فوق 100 يعني أنه صعد.",
+  "{r} live, 1-hour candles": "{r} مباشر، شموع ساعة",
+  "From TradingView, about 15 minutes late. Each candle is one hour of trading.": "من TradingView، متأخر نحو 15 دقيقة. كل شمعة ساعة واحدة من التداول.",
 };
