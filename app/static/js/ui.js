@@ -270,7 +270,8 @@ export function RightsCard({ p }) {
     </div>
     <div class="pos-nums">
       <div><div class="k">${t(r.live ? 'Last trade price' : 'Price')}</div><div class="v">${fmt.price(r.price)}</div>
-        <div class="faint s">${r.live ? html`<${Change} value=${r.change} />` : t('before the rights trade')}</div></div>
+        <div class="faint s">${r.live ? html`<${Change} value=${r.change} />` : r.last
+          ? html`${t('last close')} <${Change} value=${r.last.change} />` : t('before the rights trade')}</div></div>
       <div class="r"><div class="k">${t('Market value')}</div><div class="v">${fmt.int(r.value)}</div>
         <div class="s up">${fmt.signed(r.value)} ${t('EGP')}</div></div>
     </div>

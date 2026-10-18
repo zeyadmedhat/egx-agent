@@ -312,6 +312,11 @@ def test_the_rights_have_their_own_symbol_until_the_new_shares_list(tmp_path, cf
     assert r["trading"]["days"] == ["2026-10-18", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22",
                                     "2026-10-25", "2026-10-26", "2026-10-27"] and r["trading"]["bars"] == []
     assert views.rights_list(d, "2026-10-13") == [] and views.rights_list(d, "2027-03-01") == []
+    # once they trade (18 Oct: 2.32 → 2.63), at the scan's last close: TradingView's screener has no live KORAR1
+    conn.execute("INSERT INTO rights_prices VALUES ('KORA_r1', '2026-10-18', 2.32, 2.71, 1.77, 2.63, 1.2e8)")
+    (r,) = views.rights_list(d, "2026-10-18")
+    assert r["close"] == 2.63 and r["change"] == pytest.approx(2.63 / 2.32 - 1)
+    assert corporate.rights_holding(corporate.events(conn)[0], 1000)["value"] == pytest.approx(900 * 2.63)
 
 
 @needs_node

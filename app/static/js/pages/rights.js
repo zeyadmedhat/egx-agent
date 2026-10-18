@@ -43,7 +43,7 @@ function CurrentRights({ base }) {
   const day = sessionState().day, sched = is.schedule;
   const at = what => (sched.find(s => s[2] === what) || [])[0];
   const live = q[`${base}R1`];
-  const price = live ? live.price : is.ref;
+  const price = live ? live.price : is.close;
   const sharePrice = (q[base] && q[base].price) ?? ((stocks || []).find(s => s.symbol === base) || {}).close;
   const pos = pf && pf.positions.find(p => p.symbol === base && p.rights);
   const [label, tone] = stage(sched, day);
@@ -55,7 +55,8 @@ function CurrentRights({ base }) {
         <span class=${cls('chip', tone)}><span class="dot"></span>${t(label)}</span></div>
       <div class="rt-prices">
         <div><div class="k">${t(live ? 'Last trade price' : 'Price')}</div><div class="v">${fmt.price(price)}</div>
-          <div class="s">${live ? html`<span class=${live.change >= 0 ? 'up' : 'down'}>${fmt.pct(live.change)}</span>` : t('not traded yet')}</div></div>
+          <div class="s">${live || is.last ? html`<span class=${(live || is.last).change >= 0 ? 'up' : 'down'}>${fmt.pct((live || is.last).change)}</span>${live ? '' : ` · ${t('last close')}`}`
+            : t('not traded yet')}</div></div>
         <div><div class="k">${t('Subscription price')}</div><div class="v">${fmt.price(is.price)}</div>
           <div class="s">${t('per 1 right')}</div></div>
         ${pos && html`<div><div class="k">${t('Your rights')}</div><div class="v">${fmt.int(pos.rights.units)}</div>

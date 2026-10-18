@@ -68,8 +68,13 @@ def rights_terms(conn: sqlite3.Connection, symbol: str, ex_date: str) -> dict | 
     from .data.news import KNOWN_ACTIONS
     sched = next((k["schedule"] for k in KNOWN_ACTIONS if k["symbol"] == symbol and k.get("schedule")
                   and abs((date.fromisoformat(k["effective"]) - date.fromisoformat(ex_date)).days) <= 7), [])
-    return {"ratio": float(m[1]), "price": price, "ref": max(0.0, math.floor((op[0] - price) * 100 + 1e-6) / 100),
-            "note": a["note"], "schedule": sched}
+    ref = max(0.0, math.floor((op[0] - price) * 100 + 1e-6) / 100)
+    # once they trade, their last close (rights_prices, kept by each scan): TradingView's screener has no live price
+    last = conn.execute("SELECT date, close FROM rights_prices WHERE symbol=? AND date>=? ORDER BY date DESC LIMIT 2",
+                        (f"{symbol}_r1", ex_date)).fetchall()
+    return {"ratio": float(m[1]), "price": price, "ref": ref, "note": a["note"], "schedule": sched,
+            "last": {"date": last[0][0], "close": last[0][1],
+                     "change": last[0][1] / (last[1][1] if len(last) > 1 else ref) - 1 if ref else None} if last else None}
 
 
 def rights_holding(ev: dict | None, shares: int) -> dict | None:
@@ -78,10 +83,11 @@ def rights_holding(ev: dict | None, shares: int) -> dict | None:
     t = ev and ev.get("terms")
     if not t:
         return None
-    units = math.floor(shares * t["ratio"] + 1e-6)
-    return {"symbol": f"{ev['symbol']}_r1", "units": units, "price": t["ref"], "value": units * t["ref"],
+    units, last = math.floor(shares * t["ratio"] + 1e-6), t.get("last")
+    price = last["close"] if last else t["ref"]
+    return {"symbol": f"{ev['symbol']}_r1", "units": units, "price": price, "value": units * price,
             "sub_price": t["price"], "note": t["note"], "ratio": t["ratio"],
-            "schedule": t.get("schedule", [])}
+            "schedule": t.get("schedule", []), "last": last}
 
 
 def events(conn: sqlite3.Connection) -> list[dict]:

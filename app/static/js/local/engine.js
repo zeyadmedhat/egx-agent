@@ -354,9 +354,9 @@ export function pending(book, events, account = 'real') {
 export function rightsHolding(ev, shares) {
   const t = ev && ev.terms;
   if (!t) return null;
-  const units = Math.floor(shares * t.ratio + 1e-6);
-  return { symbol: `${ev.symbol}_r1`, units, price: t.ref, value: units * t.ref, sub_price: t.price, note: t.note,
-    ratio: t.ratio, schedule: t.schedule || [] };
+  const units = Math.floor(shares * t.ratio + 1e-6), last = t.last || null, price = last ? last.close : t.ref;
+  return { symbol: `${ev.symbol}_r1`, units, price, value: units * price, sub_price: t.price, note: t.note,
+    ratio: t.ratio, schedule: t.schedule || [], last };
 }
 
 // The average price on the new prices (corporate.new_average). Bonus shares or a split: the same cost over more

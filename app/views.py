@@ -225,7 +225,7 @@ def rights_list(d: Data, today: str | None = None) -> list[dict]:
                        "share": [{"date": r["date"], "close": r["close"]}
                                  for r in d.conn.execute(q.format("prices"), (e["symbol"], start, end))]}
         out.append({"symbol": f"{e['symbol']}_r1", "base": e["symbol"], "ex_date": e["ex_date"],
-                    "name_ar": d.info(e["symbol"]).get("name_ar"), "close": t["ref"], "change": None, **t,
+                    "name_ar": d.info(e["symbol"]).get("name_ar"), "close": (t["last"] or {}).get("close", t["ref"]), "change": (t["last"] or {}).get("change"), **t,
                     "trading": trading})
     return out
 
