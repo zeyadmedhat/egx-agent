@@ -397,6 +397,12 @@ console.log("why, morning, screenshots ok")
   const res = await quotes(new URL("https://w/quotes?s=comi,AIHC,bad!"), get)
   assert.deepEqual(asked.symbols.tickers, ["EGX:AIH", "EGX:COMI"])
   assert.deepEqual(await res.json(), { AIHC: { price: 0.75, change: 0.015 }, COMI: { price: 127.7, change: -0.004 } })
+  // rights (KORAR1) aren't in the screener: they come from TradingView's data feed
+  let fed = null
+  const feed = async s => { fed = s; return { KORAR1: { price: 2.63, change: 0.1336 } } }
+  const r2 = await quotes(new URL("https://w/quotes?s=KORA,KORAR1"), async () => ({ ok: true, json: async () => ({ data: [{ s: "EGX:KORA", d: [2.73, -1.44] }] }) }), feed)
+  assert.deepEqual(fed, ["KORAR1"])
+  assert.deepEqual(await r2.json(), { KORA: { price: 2.73, change: -0.0144 }, KORAR1: { price: 2.63, change: 0.1336 } })
   console.log("quotes ok")
 }
 

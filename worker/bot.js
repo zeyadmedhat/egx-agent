@@ -924,7 +924,7 @@ export async function webAppUser(initData, botToken, now = Date.now()) {
 // boxes). GET /quotes?s=COMI,ETEL → {COMI: {price, change}}, change against the last close. Kept a minute; 40 at most.
 const TV_ALIASES = { AIHC: "AIH", ANFI: "TYCN", FCMD: "EGS3I0S1C019", NAPR: "EGS370O1C013" }   // app/static/js/ui.js
 const QUOTES = new Map()
-export async function quotes(url, get = fetch) {
+export async function quotes(url, get = fetch, feed = tvFeed) {
   const syms = [...new Set((url.searchParams.get("s") || "").toUpperCase().split(","))]
     .filter(s => /^[A-Z0-9]{1,12}$/.test(s)).slice(0, 40).sort()
   const key = syms.join(","), hit = QUOTES.get(key)
@@ -939,9 +939,48 @@ export async function quotes(url, get = fetch) {
     const [price, change] = row.d || []
     if (tv[row.s] && price > 0) out[tv[row.s]] = { price, change: change == null ? null : change / 100 }
   }
+  const rights = syms.filter(s => !out[s] && /^[A-Z]{2,6}R\d$/.test(s))     // KORAR1: the screener leaves rights out
+  if (rights.length) Object.assign(out, await feed(rights).catch(() => ({})))
   if (QUOTES.size > 200) QUOTES.clear()
   QUOTES.set(key, { at: Date.now(), out })
   return json(out)
+}
+
+// Prices from TradingView's own data feed (its charts' websocket, the same ~15 minutes late), for what its screener
+// leaves out: rights (EGX:KORAR1, type "right"). {SYM: {price, change}}; whatever came within 4 seconds.
+async function tvFeed(syms) {
+  const res = await fetch("https://data.tradingview.com/socket.io/websocket",
+    { headers: { Upgrade: "websocket", Origin: "https://www.tradingview.com" } }).catch(() => null)
+  const ws = res && res.webSocket
+  if (!ws) return {}
+  ws.accept()
+  const got = {}, frame = o => { const s = JSON.stringify(o); return `~m~${s.length}~m~${s}` }
+  return new Promise(resolve => {
+    let left = syms.length, over = false
+    const done = () => {
+      if (over) return
+      over = true; clearTimeout(timer); try { ws.close() } catch {}
+      resolve(Object.fromEntries(Object.entries(got).filter(([, v]) => v.price > 0)))
+    }
+    const timer = setTimeout(done, 4000)
+    ws.addEventListener("message", e => {
+      for (const part of String(e.data).split(/~m~\d+~m~/)) {
+        if (part.startsWith("~h~")) { ws.send(`~m~${part.length}~m~${part}`); continue }     // its heartbeat, echoed
+        let o
+        try { o = JSON.parse(part) } catch { continue }
+        if (o.m === "qsd") {
+          const { n, v = {} } = o.p[1], s = String(n).replace("EGX:", ""), q = got[s] || (got[s] = { price: null, change: null })
+          if (v.lp != null) q.price = v.lp
+          if (v.chp != null) q.change = v.chp / 100
+        } else if (o.m === "quote_completed" && --left <= 0) done()
+      }
+    })
+    ws.addEventListener("close", done)
+    ws.addEventListener("error", done)
+    for (const m of [["set_auth_token", ["unauthorized_user_token"]], ["quote_create_session", ["qs_r"]],
+                     ["quote_set_fields", ["qs_r", "lp", "chp"]], ["quote_add_symbols", ["qs_r", ...syms.map(s => `EGX:${s}`)]]])
+      ws.send(frame({ m: m[0], p: m[1] }))
+  })
 }
 
 const json = (body, status = 200) =>
