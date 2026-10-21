@@ -289,6 +289,7 @@ def adjust_reason(ev: dict, rights: dict | None = None) -> str:
 
 def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
     pending = corporate.pending(d.conn, "real")
+    events = corporate.events(d.conn)
     dividends = corporate.dividends_by_trade(d.conn, "real")
     # a big loss's averaging-down rule: only when the stock earns a buy on its own (a BUY signal or a top-10% rating)
     buys = {x["symbol"] for x in signals(d)[1] if x["action"] == "BUY"}
@@ -337,6 +338,8 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
             "sell_by": sessions_after(r.entry_date, d.cfg["max_hold_days"] - 1),
             "fees": fees, "dividends": div, "notes": r.notes or "", "fills": fills, "adjust": ev, "rights": rights,
             "n_buys": sum(1 for f in fills if f["side"] == "buy") or 1,
+            "real": corporate.real_cost(fills, int(r.shares), float(r.entry_price), fees, worth, d.cfg, rights,
+                                        events, r.symbol),
         })
     out.sort(key=lambda p: (STATUS_ORDER.get(p["status"], 9), p["symbol"]))
     return clean(out)

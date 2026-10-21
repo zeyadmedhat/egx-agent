@@ -320,6 +320,78 @@ def test_the_rights_have_their_own_symbol_until_the_new_shares_list(tmp_path, cf
 
 
 @needs_node
+def test_the_real_cost_after_selling_the_rights(tmp_path, cfg):
+    """Thndr keeps KORA_r1 at no cost, so selling the rights never lowers KORA's cost there: its average and break-even
+    stay too high. The real cost takes the rights' cash off (the user's own orders, Oct 2026). Before deciding, the
+    rights' three options side by side. Python and the browser agree."""
+    from egx_agent.data import news
+    free = {**cfg, "broker": "other", "fee_pct_per_side": 0.0}       # no selling fee: the break-even is the real average
+    conn = db.connect(tmp_path / "real.db")
+    t1 = portfolio.add_real_buy(conn, free, "KORA", "2026-09-23", 97192.34 / 15170, 15170, 0.3, "Energy", fees_in=True)
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) "
+                 "VALUES ('KORA', 'rights', 'Capital Increase - Rights Issue', '2026-10-04', '2026-10-14', ?, 'x')",
+                 (news.KNOWN_ACTIONS[0]["note"],))
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('KORA', '2026-10-14', 1.833333, 'x')")
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) "
+                 "VALUES ('KORA', '2026-10-14', 2.53, 2.99, 2.53, 2.92, 1e6)")
+    conn.commit()
+    events = corporate.events(conn)
+    # Case 1: sold the 13,653 rights at 1.90 (25,940.70), then bought 8,000 @2.04, 4,618 @2.08 and 529 @2.06:
+    # 27,038.43 with Thndr's fees
+    corporate.apply(conn, t1, corporate.pending(conn, "real")[t1]["event_id"], 15170, got=25940.70)
+    k = 27038.43 / (8000 * 2.04 + 4618 * 2.08 + 529 * 2.06)
+    for n, px in ((8000, 2.04), (4618, 2.08), (529, 2.06)):
+        portfolio.add_real_buy(conn, free, "KORA", "2026-10-20", px * k, n, 0.3, "Energy", fees_in=True)
+    t = conn.execute("SELECT * FROM trades WHERE id=?", (t1,)).fetchone()
+    fills = [dict(r) for r in conn.execute("SELECT * FROM fills WHERE trade_id=? ORDER BY date, id", (t1,))]
+    args = [fills, t["shares"], t["entry_price"], t["fees"], 2.05, free, None, events, "KORA", "2026-10-21"]
+    r = corporate.real_cost(*args)
+    assert t["shares"] == 28317 and r["app_avg"] == pytest.approx(4.38714, abs=1e-4)
+    assert r["real_cost"] == pytest.approx(98290.07, abs=0.01) and r["break_even"] == pytest.approx(3.471, abs=1e-3)
+    assert r["pnl"] == pytest.approx(-40240, abs=1) and r["pnl_pct"] == pytest.approx(-0.409, abs=1e-3)
+    assert r["unlisted"] == 0 and r["break_even"] == pytest.approx(r["real_avg"])
+    with_fee = corporate.real_cost(*args[:5], {**cfg, "broker": "thndr"}, *args[6:])
+    assert with_fee["break_even"] > r["break_even"] and with_fee["to_break_even"] == pytest.approx(with_fee["break_even"] / 2.05 - 1)
+    # Case 1 had they subscribed instead: 13,653 × 0.205 = 2,798.87 more → break-even 3.469
+    o1 = [15170, 97192.34, 13653, 1.90, 2.05, 0.205, free]
+    c = corporate.rights_options(*o1)["C"]
+    assert c["pay"] == pytest.approx(2798.87, abs=0.01) and c["break_even"] == pytest.approx(3.469, abs=1e-3)
+
+    # Case 2, before selling: 1,170 shares (avg 6.4444) and 1,053 rights; KORA 2.05, a right 1.90
+    buy = {"id": 1, "date": "2026-09-23", "side": "buy", "shares": 1170, "price": 6.4444, "fees": 0.0, "note": ""}
+    args2 = [[buy], 1170, 6.4444, 0.0, 2.05, free, {"value": 1053 * 1.90}, events, "KORA", "2026-10-21"]
+    r2 = corporate.real_cost(*args2)
+    assert 1170 * 2.05 + r2["unsold"] == pytest.approx(4399.2, abs=0.01)
+    assert r2["pnl"] == pytest.approx(-3140, abs=1) and r2["pnl_pct"] == pytest.approx(-0.416, abs=1e-3)
+    assert r2["app_avg"] is None                                              # nothing sold yet: the same either way
+    o2 = [1170, 1170 * 6.4444, 1053, 1.90, 2.05, 0.205, free, 8.34, 1014, 2.0566]
+    a, b, c = (corporate.rights_options(*o2)[x] for x in "ABC")
+    assert (a["shares"], a["new"]) == (2146, 976) and a["pay"] == pytest.approx(2007.2, abs=0.1)
+    assert a["app_avg"] == pytest.approx(4.45, abs=0.005) and a["real_cost"] == pytest.approx(7546.5, abs=0.1)
+    assert a["break_even"] == pytest.approx(3.52, abs=0.005) and a["pnl"] == pytest.approx(-3148, abs=1)
+    assert a["extra_cash"] == 0
+    assert b["shares"] == 2184 and b["extra_cash"] == pytest.approx(77, abs=1) and b["break_even"] == pytest.approx(3.49, abs=0.005)
+    assert c["shares"] == 2223 and c["pay"] == pytest.approx(215.87, abs=0.01) and c["break_even"] == pytest.approx(3.489, abs=1e-3)
+
+    # subscribed shares wait to be listed (about three months after the subscription closes on 10 Nov)
+    sub = {"id": 2, "date": "2026-10-14", "side": "bonus", "shares": 1053, "price": 0.205, "fees": 0.0,
+           "note": "Rights issue: 1,053 new shares at 0.205, 1,170 → 2,223 shares"}
+    args3 = [[buy, sub], 2223, (1170 * 6.4444 + 1053 * 0.205) / 2223, 0.0, 2.05, free, None, events, "KORA", "2026-10-21"]
+    assert corporate.real_cost(*args3)["unlisted"] == 1053
+    assert corporate.real_cost(*args3[:-1], "2027-03-01")["unlisted"] == 0
+    # a position without a rights issue: nothing changes
+    assert corporate.real_cost([buy], 1170, 6.4444, 0.0, 2.05, free) is None
+
+    (js,) = run_js({"op": "rightsMath", "args": {"cost": [args, args2, args3], "options": [o1, o2]}})
+    for py, j in zip([r, r2, corporate.real_cost(*args3)], js["cost"]):
+        assert_same(py, j, py.keys())
+    for py, j in zip([corporate.rights_options(*o1), corporate.rights_options(*o2)], js["options"]):
+        assert_same(py, j, ["got"])
+        for x in "ABC":
+            assert_same(py[x], j[x], py[x].keys())
+
+
+@needs_node
 def test_mac_portfolio_backup_restores_on_the_site(tmp_path, cfg):
     """Your Mac portfolio, saved as a site backup: the site shows the same positions, cash and pending bonus shares."""
     conn = db.connect(tmp_path / "mac.db")

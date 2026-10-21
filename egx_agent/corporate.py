@@ -14,10 +14,12 @@ from __future__ import annotations
 import math
 import re
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from fractions import Fraction
 
 import pandas as pd
+
+from . import config
 
 
 def describe(factor: float) -> str:
@@ -88,6 +90,81 @@ def rights_holding(ev: dict | None, shares: int) -> dict | None:
     return {"symbol": f"{ev['symbol']}_r1", "units": units, "price": price, "value": units * price,
             "sub_price": t["price"], "note": t["note"], "ratio": t["ratio"],
             "schedule": t.get("schedule", []), "last": last}
+
+
+# ------------------------------------------------------------------ the real cost after a rights issue
+# Your broker (Thndr) keeps the rights as a holding of their own at no cost, so the cash from selling them never comes
+# off the shares' cost: its average and break-even stay too high and the loss looks bigger than it is. The real cost
+# does take it off (apply, got). Mirrored in local/engine.js (realCost, rightsOptions).
+
+def break_even(cost: float, shares: int, cfg: dict) -> float:
+    """The price at which selling every share gets back what the position cost, after your broker's selling fee."""
+    v = cost
+    for _ in range(30):     # the fee depends on the sale's value: settles in a few rounds
+        v = cost + config.order_fee(v, cfg)
+    return v / shares
+
+
+def _listing_day(ev: dict | None) -> str | None:
+    """When a rights issue's new shares can be sold: its 'New shares listed' date, or about three months after the
+    subscription closes (rights_list keeps the rights that long). None without a schedule."""
+    at = {x[2]: x[0] for x in ((ev or {}).get("terms") or {}).get("schedule") or []}
+    if at.get("New shares listed"):
+        return at["New shares listed"]
+    close = at.get("Subscription closes")
+    return close and (date.fromisoformat(close) + timedelta(days=92)).isoformat()
+
+
+def real_cost(fills: list[dict], shares: int, avg: float, fees: float, last: float, cfg: dict,
+              rights: dict | None = None, events: list[dict] = (), symbol: str = "", today: str | None = None) -> dict | None:
+    """A position's cost after a rights issue, your broker's way and the real way: averages, the break-even after
+    the selling fee, how far the price must rise to it, and the P&L with any unsold rights at their price. None for a
+    position without a rights issue. fills: its buys, sells and updates, oldest first (views.open_positions)."""
+    today = today or date.today().isoformat()
+    rf = [f for f in fills if f["side"] == "bonus" and (f.get("note") or "").startswith("Rights issue")]
+    if not rights and not rf:
+        return None
+    cost = n = 0.0       # your broker's way: buys and subscribed shares in, sales out at the average, rights cash ignored
+    for f in fills:
+        k, s = f["side"], f["shares"] or 0
+        if k == "buy":
+            cost, n = cost + s * f["price"] + (f["fees"] or 0), n + s
+        elif k == "sell" and n:
+            cost, n = cost * (1 - s / n), n - s
+        elif k == "bonus":
+            cost, n = cost + s * (f["price"] or 0), n + s
+    sold = any(f["note"].startswith("Rights issue: sold the rights") for f in rf)
+    net, unsold = avg * shares + fees, rights["value"] if rights else 0.0
+    be, pnl = break_even(net, shares, cfg), last * shares + unsold - net
+    ev = lambda f: next((e for e in events if e["symbol"] == symbol and e["ex_date"] == f["date"]), None)  # noqa: E731
+    return {"app_avg": cost / n if sold and round(n) == shares else None, "real_cost": net, "real_avg": net / shares,
+            "break_even": be, "to_break_even": be / last - 1 if last else None, "pnl": pnl, "pnl_pct": pnl / net,
+            "unsold": unsold,
+            # subscribed shares your broker can't sell yet (they wait for the new shares to be listed)
+            "unlisted": sum(f["shares"] for f in rf if f["shares"] > 0 and (_listing_day(ev(f)) or "") > today)}
+
+
+def rights_options(shares: int, cost: float, units: int, right_price: float, share_price: float, sub_price: float,
+                   cfg: dict, wallet: float = 0.0, buy_n: int | None = None, buy_price: float | None = None) -> dict:
+    """What unsold rights could do for the position, each at today's prices: A sell them and buy the share with that
+    cash (and the wallet's), B sell them and buy buy_n shares (adding cash if needed), C subscribe. cost: what the
+    position cost so far (real_cost). buy_price: a share's price with the buying fee (default: your broker's fee)."""
+    fee = lambda v: config.order_fee(v, cfg)  # noqa: E731
+    got = units * right_price - fee(units * right_price)
+    pay = lambda n: n * buy_price if buy_price else n * share_price + fee(n * share_price)  # noqa: E731
+    n_a = math.floor((got + wallet) / (buy_price or share_price))
+    while n_a > 0 and pay(n_a) > got + wallet:
+        n_a -= 1
+    sub_fee = 60.0 if cfg.get("broker") == "thndr" else 0.0      # Thndr's subscription fee (none on Thndr Trader)
+
+    def option(new: int, paid: float, cash_in: float) -> dict:
+        total, net = shares + new, cost - cash_in + paid
+        return {"shares": total, "new": new, "pay": paid, "extra_cash": max(0.0, paid - cash_in - wallet),
+                "app_avg": (cost + paid) / total, "real_avg": net / total, "real_cost": net,
+                "break_even": break_even(net, total, cfg), "pnl": total * share_price - net}
+    n_b = units if buy_n is None else int(buy_n)
+    return {"got": got, "A": option(n_a, pay(n_a), got), "B": option(n_b, pay(n_b), got),
+            "C": option(units, units * sub_price + sub_fee, 0.0)}
 
 
 def events(conn: sqlite3.Connection) -> list[dict]:

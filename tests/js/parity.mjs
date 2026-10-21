@@ -58,6 +58,8 @@ const OPS = {
   // your wallet (local/api.js walletView): the account with its top-ups, withdrawals and fees, and what's settling
   wallet: ({ book, cfg, today }) => ({ summary: E.accountSummary(book, 'real', cfg, {}, []),
     unsettled: today.map(d => E.unsettled(book, d)) }),
+  // the real cost after a rights issue and the rights' three options (corporate.py real_cost, rights_options)
+  rightsMath: ({ cost, options }) => ({ cost: cost.map(a => E.realCost(...a)), options: options.map(a => E.rightsOptions(...a)) }),
   plan: args => planTrade(args),
   // Thndr Trader (engine.js planMonth / planFree / planRenewals) and its fee on an order in and after the free 50
   thndrPlan: ({ plan, book, days, today, cfg, value }) => ({

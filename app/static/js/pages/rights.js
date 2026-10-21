@@ -6,6 +6,7 @@ import { html, useApi, useStore, useState, fmt, cls, go, stockHref } from '../li
 import { PageLoading, PageHead, Callout, More, StockAvatar, useQuotes, sessionState, Empty, Icon, DataTable, Seg, LiveChart } from '../ui.js';
 import { t } from '../i18n.js';
 import { LineChart } from '../charts.js';
+import { rightsOptions } from '../local/engine.js';
 
 // Where the issue stands on a Cairo day: [label, chip tone], from its milestones (news.KNOWN_ACTIONS schedule).
 function stage(sched, day) {
@@ -33,6 +34,7 @@ function CurrentRights({ base }) {
   const stocks = useStore(s => s.stocks);
   const { data: pf } = useApi('/portfolio');
   const { data: div } = useApi('/dividends');
+  const { data: acct } = useApi('/calc');        // your broker's fees, for the options' costs
   const q = useQuotes([base, `${base}R1`]);
   if (!issues) return html`<${PageLoading} />`;
   const is = issues.find(x => x.base === base);
@@ -77,6 +79,7 @@ function CurrentRights({ base }) {
     ${study && html`<${CheckCard} study=${study} row=${study.past.find(p => p.symbol === base && p.ex === is.ex_date)} />`}
     ${study && study.stages && html`<${StagesCard} study=${study} mine=${(study.past.find(p => p.symbol === base && p.ex === is.ex_date) || {}).last5} />`}
     <${Choices} is=${is} pos=${pos} price=${price} at=${at} />
+    ${pos && pos.real && sharePrice && acct && html`<${Options} is=${is} pos=${pos} price=${price} sharePrice=${sharePrice} cfg=${acct.cfg} base=${base} />`}
     <${AfterSub} base=${base} r=${is.symbol} />
     ${div && div.rights_history && div.rights_history.run_up && html`<${History} h=${div.rights_history} />`}
     <${Callout}>${t("Facts, not advice. Check the dates and price in your broker's app before you act.")}<//>`;
@@ -161,6 +164,32 @@ function Choices({ is, pos, price, at }) {
       ${card('xCircle', 'down', 'Do nothing', `−${money(n * price)}`, [t('The rights expire and that value is lost.')])}
     </div>
     <p class="faint s" style="margin:10px 0 0">${t('You can mix: sell some rights and subscribe with the rest. Thndr charges 60 EGP to subscribe (free on Thndr Trader), and your national ID must stay valid until 45 days after the subscription ends.')}</p>
+  </article>`;
+}
+
+// Your rights' three options side by side at today's prices (engine.js rightsOptions): what you'd hold, the cash you
+// add, the real break-even after the selling fee, and the P&L at today's price. Facts, not which to pick.
+function Options({ is, pos, price, sharePrice, cfg, base }) {
+  const units = pos.rights.units;
+  const [n, setN] = useState(String(units));
+  const o = rightsOptions(pos.shares, pos.real.real_cost, units, price, sharePrice, is.price, cfg, 0, Math.max(0, Number(n) || 0));
+  const rows = [{ k: 'A', what: t('Sell the rights, buy {sym} with that cash', { sym: base }), ...o.A },
+    { k: 'B', what: t('Sell the rights, buy {n} {sym}', { n: fmt.int(o.B.new), sym: base }), ...o.B },
+    { k: 'C', what: t('Subscribe'), ...o.C }];
+  const line = (k, v, sub) => html`<div class="rt-opt-l"><span>${t(k)}</span><b>${v}</b>${sub ? html`<span class="faint s">${sub}</span>` : ''}</div>`;
+  return html`<article class="card"><div class="card-title">${t('Your options, side by side')}</div>
+    <p class="s" style="margin:0 0 10px">${t('At today’s prices: {sym} {s}, a right {r}. Selling the rights brings about {got} EGP.', {
+      sym: base, s: fmt.price(sharePrice), r: fmt.price(price), got: fmt.int(o.got) })}</p>
+    <label class="row" style="gap:8px;align-items:center;margin-bottom:10px"><span class="s">${t('B: how many {sym} to buy', { sym: base })}</span>
+      <input class="input" type="number" min="0" step="1" style="max-width:120px" value=${n} onInput=${e => setN(e.target.value)} /></label>
+    <div class="grid grid-3">${rows.map(r => html`<div class="rt-opt">
+      <b>${r.k} · ${r.what}</b>
+      ${line('Shares', fmt.int(r.shares), `+${fmt.int(r.new)}`)}
+      ${line('You add', r.extra_cash > 0.5 ? `${fmt.int(r.extra_cash)} ${t('EGP')}` : '–')}
+      ${line('Break-even', fmt.price(r.break_even), t('needs {v}', { v: fmt.pct(r.break_even / sharePrice - 1, 0) }))}
+      ${line('Profit / loss now', html`<span class=${r.pnl >= 0 ? 'up' : 'down'}>${fmt.signed(r.pnl)}</span>`)}
+    </div>`)}</div>
+    <p class="faint s" style="margin:10px 0 0">${t('Break-even: the price at which selling all your shares, after the selling fee, gets back everything they really cost (the rights cash taken off). Profit / loss counts your shares at today’s price; cash left over isn’t counted. Subscribed shares can be sold only once they are listed.')}</p>
   </article>`;
 }
 

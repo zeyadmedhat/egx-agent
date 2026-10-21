@@ -359,6 +359,58 @@ export function rightsHolding(ev, shares) {
     ratio: t.ratio, schedule: t.schedule || [], last };
 }
 
+// ------------------------------------------------------------------ the real cost after a rights issue
+// Your broker keeps the rights as a holding of their own at no cost, so the cash from selling them never comes off the
+// shares' cost: its average and break-even stay too high. The real cost takes it off (corporate.py real_cost).
+export function breakEven(cost, shares, cfg) {
+  let v = cost;
+  for (let i = 0; i < 30; i++) v = cost + orderFee(v, cfg);     // the fee depends on the sale's value
+  return v / shares;
+}
+
+function listingDay(ev) {
+  const at = Object.fromEntries(((ev && ev.terms && ev.terms.schedule) || []).map(x => [x[2], x[0]]));
+  if (at['New shares listed']) return at['New shares listed'];
+  return at['Subscription closes'] ? addDays(at['Subscription closes'], 92) : null;
+}
+
+export function realCost(fills, shares, avg, fees, last, cfg, rights = null, events = [], symbol = '', today = '') {
+  const rf = fills.filter(f => f.side === 'bonus' && (f.note || '').startsWith('Rights issue'));
+  if (!rights && !rf.length) return null;
+  let cost = 0, n = 0;
+  for (const f of fills) {
+    const s = f.shares || 0;
+    if (f.side === 'buy') { cost += s * f.price + (f.fees || 0); n += s; }
+    else if (f.side === 'sell' && n) { cost *= 1 - s / n; n -= s; }
+    else if (f.side === 'bonus') { cost += s * (f.price || 0); n += s; }
+  }
+  const sold = rf.some(f => f.note.startsWith('Rights issue: sold the rights'));
+  const net = avg * shares + fees, unsold = rights ? rights.value : 0;
+  const be = breakEven(net, shares, cfg), pnl = last * shares + unsold - net;
+  const ev = f => events.find(e => e.symbol === symbol && e.ex_date === f.date) || null;
+  return { app_avg: sold && Math.round(n) === shares ? cost / n : null, real_cost: net, real_avg: net / shares,
+    break_even: be, to_break_even: last ? be / last - 1 : null, pnl, pnl_pct: pnl / net, unsold,
+    unlisted: rf.filter(f => f.shares > 0 && (listingDay(ev(f)) || '') > today).reduce((a, f) => a + f.shares, 0) };
+}
+
+// What unsold rights could do for the position at today's prices: A sell them and buy the share with that cash (and
+// the wallet's), B sell them and buy buyN shares, C subscribe (corporate.py rights_options).
+export function rightsOptions(shares, cost, units, rightPrice, sharePrice, subPrice, cfg, wallet = 0, buyN = null, buyPrice = null) {
+  const fee = v => orderFee(v, cfg);
+  const got = units * rightPrice - fee(units * rightPrice);
+  const pay = n => (buyPrice ? n * buyPrice : n * sharePrice + fee(n * sharePrice));
+  let nA = Math.floor((got + wallet) / (buyPrice || sharePrice));
+  while (nA > 0 && pay(nA) > got + wallet) nA -= 1;
+  const subFee = cfg.broker === 'thndr' ? 60 : 0;          // Thndr's subscription fee (none on Thndr Trader)
+  const option = (n, paid, cashIn) => {
+    const total = shares + n, net = cost - cashIn + paid;
+    return { shares: total, new: n, pay: paid, extra_cash: Math.max(0, paid - cashIn - wallet), app_avg: (cost + paid) / total,
+      real_avg: net / total, real_cost: net, break_even: breakEven(net, total, cfg), pnl: total * sharePrice - net };
+  };
+  const nB = buyN == null ? units : Math.trunc(buyN);
+  return { got, A: option(nA, pay(nA), got), B: option(nB, pay(nB), got), C: option(units, units * subPrice + subFee, 0) };
+}
+
 // The average price on the new prices (corporate.new_average). Bonus shares or a split: the same cost over more
 // shares. A rights issue: the new shares add what they cost (paid each); kept the old count (sold the rights): what
 // you got for them comes off the cost (got; without it, as old records did, the cost ÷ factor).

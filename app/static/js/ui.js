@@ -200,11 +200,14 @@ export function livePosition(p, q) {
   if (rq) p = { ...p, rights: { ...p.rights, price: rq.price, value: p.rights.units * rq.price, change: rq.change, live: true },
     rights_gain: p.rights.units * rq.price - p.rights.value };
   const quote = q && q[p.symbol];
-  if (!quote || (p.adjust && !p.rights)) return { ...p, price: p.last, live: false, day_change: null };
+  const real = (price, extra = 0) => p.real && { ...p.real, pnl: p.real.pnl + (price - p.last) * p.shares + extra,
+    pnl_pct: (p.real.pnl + (price - p.last) * p.shares + extra) / p.real.real_cost, to_break_even: p.real.break_even / price - 1 };
+  if (!quote || (p.adjust && !p.rights)) return { ...p, price: p.last, live: false, day_change: null, real: real(p.last, p.rights_gain || 0) };
   const price = quote.price;
   const pnl = p.pnl + (price - p.last) * p.shares;          // like the broker's: selling fees count once you sell
   const cost = p.avg_price * p.shares + (p.fees || 0);
   return { ...p, price, live: sessionState().state === 'open', day_change: quote.change, pnl, pnl_pct: (price * p.shares - cost) / cost,
+    real: real(price, p.rights_gain || 0),
     hit_stop: p.stop != null && price <= p.stop, hit_target: price >= p.target };
 }
 
@@ -246,6 +249,7 @@ export function PositionCard({ p, hold, children, onOpen, open }) {
         <div class=${cls('v', tone(p.pnl))}>${fmt.pct(p.pnl_pct, 1)}</div>
         <div class=${cls('s', tone(p.pnl))}>${fmt.signed(p.pnl)} ${t('EGP')}</div></div>
     </div>
+    <${RealCost} r=${p.real} />
     ${p.status !== 'BOUNCE' && html`<${PlanBar} p=${p} />`}
     ${urgent && html`<div class=${cls('pos-urgent', urgent.tone)}><${Icon} name="alert" size=${14} />${t(urgent.text)}</div>`}
     ${p.status !== 'HOLD' && html`<p class="pos-reason" dir="auto">${tn(p.reason)}</p>`}
@@ -255,6 +259,20 @@ export function PositionCard({ p, hold, children, onOpen, open }) {
         : html`<button class="btn sm ghost" onClick=${onOpen} aria-expanded="false">${t('Sell or edit')}<${Icon} name="chevron" size=${14} /></button>`)}</div>
     ${children}
   </article>`;
+}
+
+// After a rights issue: what the shares really cost (corporate.real_cost). Your broker never takes the cash from
+// selling the rights off the shares' cost, so its average, break-even and loss look worse than they are.
+function RealCost({ r }) {
+  if (!r) return null;     // the P&L above already uses the real cost once the rights are recorded; unsold: theirs added
+  const tile = (k, v, sub, c = '') => html`<div><div class="k">${t(k)}</div><div class=${cls('v', c)}>${v}</div><div class="s">${sub}</div></div>`;
+  return html`<div class="real-cost"><div class="k">${t('Counting the rights')}</div><div class="rt-prices">
+    ${r.app_avg != null && tile('Average at your broker', fmt.price(r.app_avg), t('without the rights cash'))}
+    ${tile('Real average', fmt.price(r.real_avg), t(r.app_avg != null ? 'rights cash taken off' : 'what you paid'))}
+    ${tile('Break-even', fmt.price(r.break_even), r.to_break_even > 0 ? t('needs {v}, after the selling fee', { v: fmt.pct(r.to_break_even, 1) })
+      : t('reached'), r.to_break_even > 0 ? '' : 'up')}
+    ${r.unsold > 0 && tile('Real profit / loss', fmt.pct(r.pnl_pct, 1), `${fmt.signed(r.pnl)} ${t('EGP')} · ${t('with the rights')}`, tone(r.pnl))}
+  </div>${r.unlisted > 0 && html`<p class="faint s" style="margin:0 0 10px">${t('{n} subscribed shares can be sold once the new shares are listed.', { n: fmt.int(r.unlisted) })}</p>`}</div>`;
 }
 
 // A rights issue's rights beside the shares they came with, as your broker lists them (Thndr: KORA_r1, cost 0): at

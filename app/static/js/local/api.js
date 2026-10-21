@@ -154,6 +154,7 @@ async function openPositions(c, symbol = null) {
       from_high: b.length ? last / Math.max(...b.slice(-60).map(x => x.close)) - 1 : null,
       stop_src: r.stop_src || null, target_src: r.target_src || null, day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
       notes: r.notes || '', fills, adjust: ev || null, rights, n_buys: fills.filter(f => f.side === 'buy').length || 1,
+      real: E.realCost(fills, r.shares, r.entry_price, fees, worth, cfg, rights, core.events, r.symbol, localToday()),
     };
   });
   out.sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || (a.symbol < b.symbol ? -1 : 1));
