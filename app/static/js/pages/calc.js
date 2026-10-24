@@ -55,7 +55,7 @@ export function CalcPage({ route }) {
   const res = planTrade({
     symbol: st.symbol, sector: st.info.sector || 'Other', entry: Number(f.entry), stop: Number(f.stop),
     equity: Number(f.equity), cash: Number(f.cash), avgValue: st.stats.value_avg20, positions: acct.positions,
-    cfg: acct.cfg, riskOff: acct.risk_off, half: f.size === 'half',
+    cfg: acct.cfg, riskOff: acct.risk_off, half: f.size === 'half', brake: acct.brake,
   });
   const cfg = acct.cfg;
   const pred = st.prediction;

@@ -88,3 +88,26 @@ def test_telegram_warns_when_the_record_runs_cold(monkeypatch):
     assert "ربحت 30% مقابل 45%" in alerts._cold_lines(None, "ar")[1]
     h["status"] = "ok"
     assert alerts._cold_lines(None) == []
+
+
+def test_each_stocks_past_buys_are_replayed_one_at_a_time(tmp_path, cfg):
+    import json
+    from egx_agent import backtest
+    ind = _bars([10.0, 10.1, 10.4, 10.3, 10.2, 9.6], [10.2, 10.5, 10.9, 10.4, 10.3, 9.8],
+                [9.9, 10.0, 10.3, 10.2, 9.3, 9.5], [10.0, 10.4, 10.8, 10.3, 9.5, 9.7])
+    sf = pd.DataFrame({"entry_high": 10.3, "stop": 9.4, "target": 10.8}, index=ind.index)
+    buy = pd.DataFrame({"X": [True, True, False, True, False, True], "Y": False}, index=ind.index)
+    prep = backtest.Prepared({"X": ind}, {"X": sf}, ind, buy.astype(float), buy, pd.Series(False, index=ind.index), {})
+    past = record.by_stock(prep, cfg, ind.index[0])
+    f = cfg["fee_pct_per_side"] / 100
+    won, lost = 10.8 * (1 - f) / (10.1 * (1 + f)) - 1, 9.4 * (1 - f) / (10.2 * (1 + f)) - 1
+    # day 1's BUY: still held, not counted again; the last day's: nothing to buy at yet; Y never gave one
+    assert set(past) == {"X"} and past["X"]["n"] == 2 and past["X"]["wins"] == 1 and past["X"]["target"] == 1
+    assert np.isclose(past["X"]["avg"], (won + lost) / 2)
+    assert record.by_stock(prep, cfg, ind.index[2])["X"]["n"] == 1          # only the BUYs since the start
+
+    conn = db.connect(tmp_path / "t.db")
+    assert record.stock_past(conn) == {}
+    db.set_meta(conn, record.ODDS_KEY, json.dumps({"from": "2016-10-23", "stocks": past, "settings": "x"}))
+    assert record.stock_past(conn)["X"] == {**past["X"], "from": "2016-10-23"}
+    assert record.public_odds(record.stored_odds(conn)) == {"from": "2016-10-23"}    # the cards get it per stock

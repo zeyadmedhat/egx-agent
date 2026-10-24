@@ -103,7 +103,9 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
     d = views.Data(conn, cfg, views.Cache(), is_admin=False, multi_user=True)
     scan_date, df = views.current_scan(conn)
     signals = views.records(df)
+    past = record.stock_past(conn)              # each stock's BUYs in the 10-year test
     for r in signals:
+        r["past"] = past.get(r["symbol"])
         sector = d.table.loc[r["symbol"], "sector"] if r["symbol"] in d.table.index else None
         r["sector"] = sector or "Other"
         high = d.prices(r["symbol"])["high"].tail(20)

@@ -27,6 +27,8 @@ export function PicksPage() {
     <${Light} m=${m} b=${data.breadth} blocked=${blocked} />
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
       ${m.warnings.map(w => html`<${Callout} tone="warn">${tn(w)}<//>`)}</div>`}
+    ${data.brake && data.brake.on && html`<div style="margin-top:12px"><${Callout} tone="bad">${t('Loss brake: your trades closed in the last 30 days lost {pct} of your account, past your limit of {limit}%. Take a break from new buys; the BUYs below are only for reference.', {
+      pct: fmt.pct(-data.brake.pct, 1, false), limit: data.brake.limit })}<//></div>`}
     <section class="section">
       <${SectionHead} title="Buy at the next session" count=${data.buys.length}
         hint=${data.buys.length ? "Don't pay more than Buy up to. If it opens higher, skip it." : ''} />
@@ -90,6 +92,18 @@ function Odds({ s, odds }) {
   if (!b || !b.n) return null;
   return html`<p class="odds-line">${t('In {years} of tests, BUYs scored {from}–{to} won {win} of the time, {avg} a trade on average after fees ({n} trades).', {
     years: t('10 years'), from: b.from, to: b.to, win: fmt.pct(b.win_rate, 0, false), avg: fmt.pct(b.avg, 1), n: fmt.int(b.n) })}</p>`;
+}
+
+// Every BUY the rules gave this stock in the 10-year test, each replayed on its own (record.by_stock): its own past,
+// next to the odds of every stock with its score.
+function Past({ s, odds }) {
+  const p = s.past;
+  if (!p) return odds ? html`<p class="odds-line">${t('No BUY for {sym} in the 10 years of tests: this is its first.', { sym: s.symbol })}</p>` : null;
+  const verdict = p.n < 5 ? 'Too few to judge.' : p.avg < 0 ? 'It lost money on average: be careful.'
+    : p.avg >= 0.02 && p.wins / p.n >= 0.5 ? 'A good record.' : 'Mixed: close to break-even.';
+  return html`<p class="odds-line">${t('{sym} itself: the rules gave it {n} BUYs since {year}. {wins} made money ({target} reached the target), {avg} a trade on average after fees.', {
+    sym: s.symbol, n: fmt.int(p.n), year: String(p.from || '').slice(0, 4), wins: fmt.int(p.wins), target: fmt.int(p.target),
+    avg: fmt.pct(p.avg, 1) })} <b>${t(verdict)}</b></p>`;
 }
 
 // Two opinions: the rules (BUY and their score, or none for a model pick) and the model (its rating, and next week's
@@ -179,6 +193,7 @@ function PickCard({ s, m, wk, odds, fee, model, bell }) {
     <${Checks} items=${checks(s, m)} />
     <${Money} s=${s} fee=${fee} />
     <${Odds} s=${s} odds=${odds} />
+    <${Past} s=${s} odds=${odds} />
     <${More} label="Why this signal">
       <ul class="reasons" dir="auto">${(s.reasons || []).map(r => html`<li class=${/^Caution/.test(r) ? 'caution' : ''}>${tn(r)}</li>`)}</ul>
       ${model && s.pred && html`<div class="model-line"><${Icon} name="target" size=${14} />

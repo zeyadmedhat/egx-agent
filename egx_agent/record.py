@@ -110,6 +110,55 @@ def odds_from_trades(trades: pd.DataFrame) -> dict:
     return {"all": _stats(rets.tolist()), "bands": bands}
 
 
+def by_stock(prep: backtest.Prepared, cfg: dict, start) -> dict[str, dict]:
+    """Every BUY the rules gave each stock since `start`, each replayed on its own with the backtest's rules
+    (engine.py), whether or not the portfolio had room for it: the BUY card's "This stock's past". As on the live
+    record, a BUY while the last one is still held isn't counted again, one whose next open broke its limits is
+    skipped, and one still open at the end isn't counted yet."""
+    fee = cfg["fee_pct_per_side"] / 100
+    out = {}
+    for sym in prep.buy.columns:
+        col = prep.buy[sym]
+        days = col.index[col.to_numpy() & (col.index >= pd.Timestamp(start))]
+        if not len(days) or sym not in prep.ind:
+            continue
+        ind, sf = prep.ind[sym], prep.sf[sym]
+        rets, target, held_until = [], 0, None
+        for d in days:
+            if held_until is not None and d < held_until or d not in sf.index:
+                continue
+            i = ind.index.searchsorted(d, side="right")
+            if i >= len(ind):
+                break
+            order = {"symbol": sym, "shares": 1, "stop": float(sf.at[d, "stop"]), "target": float(sf.at[d, "target"]),
+                     "entry_limit": float(sf.at[d, "entry_high"])}
+            pos, _ = engine.fill_order(order, ind.iloc[i])
+            if pos is None:
+                continue
+            res, paid, j = None, 0.0, i
+            for j in range(i, len(ind)):
+                bar = ind.iloc[j]
+                if j > i:                      # held at the close before: the dividend is paid (as backtest.run)
+                    paid += engine.bar_dividend(bar)
+                if res := engine.process_bar(pos, bar, cfg):
+                    break
+            if not res:
+                break
+            held_until = ind.index[j]
+            rets.append((res[0] * (1 - fee) + paid) / (pos.entry_price * (1 + fee)) - 1)
+            target += res[1].startswith("Target")
+        if rets:
+            out[sym] = {"n": len(rets), "wins": sum(r > 0 for r in rets), "target": target,
+                        "avg": sum(rets) / len(rets)}
+    return out
+
+
+def stock_past(conn: sqlite3.Connection) -> dict[str, dict]:
+    """by_stock from the last odds run, by symbol ({} before the first one)."""
+    odds = stored_odds(conn) or {}
+    return {s: {**p, "from": odds.get("from")} for s, p in (odds.get("stocks") or {}).items()}
+
+
 def stored_odds(conn: sqlite3.Connection) -> dict | None:
     raw = db.get_meta(conn, ODDS_KEY)
     try:
@@ -128,7 +177,7 @@ def refresh_odds(conn: sqlite3.Connection, cfg: dict, today: date | None = None)
     or when the strategy changed. Returns True when it ran."""
     old = stored_odds(conn)
     today = today or date.today()
-    if old and old.get("settings") == _fingerprint(cfg) and \
+    if old and old.get("settings") == _fingerprint(cfg) and "stocks" in old and \
             today - date.fromisoformat(old["built"][:10]) < ODDS_MAX_AGE:
         return False
     table = universe.stock_table(conn, cfg.get("egx33_extra"))
@@ -141,11 +190,12 @@ def refresh_odds(conn: sqlite3.Connection, cfg: dict, today: date | None = None)
     res = backtest.run(prep, cfg, start)
     out = {**odds_from_trades(res["trades"]), "from": str(prep.index_ind.index[prep.index_ind.index >= start][0].date()),
            "to": str(end.date()), "built": datetime.now().isoformat(timespec="seconds"), "settings": _fingerprint(cfg),
-           "cagr": res["metrics"]["cagr"], "max_drawdown": res["metrics"]["max_drawdown"]}
+           "cagr": res["metrics"]["cagr"], "max_drawdown": res["metrics"]["max_drawdown"],
+           "stocks": by_stock(prep, cfg, start)}
     db.set_meta(conn, ODDS_KEY, json.dumps(out))
     return True
 
 
 def public_odds(odds: dict | None) -> dict | None:
     """What the pages show (no settings fingerprint)."""
-    return {k: v for k, v in odds.items() if k != "settings"} if odds else None
+    return {k: v for k, v in odds.items() if k not in ("settings", "stocks")} if odds else None

@@ -416,8 +416,10 @@ def today(d: Data) -> dict:
     warn = cautions_map(d)
     firms = company_brief(d)
     floats = free_floats(d)
+    past = record.stock_past(d.conn)          # every BUY the rules gave each stock in the 10-year test
     for r in [dict(x) for x in rows]:
         r["info"] = d.info(r["symbol"])
+        r["past"] = past.get(r["symbol"])
         r["free_float"] = floats.get(r["symbol"])
         r["pred"] = preds["by_symbol"].get(r["symbol"])
         r["cautions"] = warn.get(r["symbol"], [])
@@ -456,6 +458,7 @@ def today(d: Data) -> dict:
         "cfg": {**{k: cfg[k] for k in ("max_hold_days", "review_day", "riskoff_block_buys", "auto_paper", "buy_score",
                                        "shariah_filter")}, "fee_pct_per_side": config.fee_pct(cfg)},
         "record": signal_record(d), "odds": record.public_odds(record.stored_odds(d.conn)),
+        "brake": loss_brake(d, portfolio.account_summary(d.conn, "real", cfg, d.closes())["equity"]),
     })
 
 
@@ -844,6 +847,23 @@ CALC_KEYS = ("capital", "risk_per_trade_pct", "max_position_pct", "max_open_risk
              "max_pct_of_adv", "broker", "fee_pct_per_side", "target_r", "stop_min_pct", "stop_max_pct")
 
 
+BRAKE_DAYS = 30
+
+
+def loss_brake(d: Data, equity: float) -> dict | None:
+    """Your real trades closed in the last BRAKE_DAYS days, against your account: past the loss brake (Settings →
+    Risk per trade), Picks and the Calculator say to take a break from new buys. None when it's off (0).
+    ponytail: the sell price minus the buy price and fees, as My Portfolio counts it; dividends don't count."""
+    limit = float(d.cfg.get("max_month_loss_pct") or 0)
+    if limit <= 0 or not equity or equity <= 0:
+        return None
+    since = (pd.Timestamp.today() - pd.Timedelta(days=BRAKE_DAYS)).strftime("%Y-%m-%d")
+    closed = portfolio.trades_df(d.conn, "real", ("closed",))
+    closed = closed[closed["exit_date"].fillna("") >= since]
+    pnl = float(((closed.exit_price - closed.entry_price) * closed.shares - closed.fees.fillna(0)).sum())
+    return {"pnl": pnl, "pct": pnl / equity, "limit": limit, "on": pnl / equity * 100 <= -limit, "n": len(closed)}
+
+
 def calc_view(d: Data) -> dict:
     """The size calculator's side of things: your account, your limits and the market's state. The stock's own numbers
     come from its page (stock_detail), and the calculator sizes with the same rule as the BUY signals (risk.py)."""
@@ -861,6 +881,7 @@ def calc_view(d: Data) -> dict:
         "risk_off": bool(m.get("risk_off")) if m else False,
         "switch": breadth.switch(b["above50"]) if b else None,
         "money": money_rates(d.conn), "shares_value": real["equity"] - real["cash"],
+        "brake": loss_brake(d, real["equity"]),
     })
 
 
@@ -1531,6 +1552,9 @@ SETTINGS_SECTIONS = [
         _f("max_per_sector", "Max positions in one sector", 1, 10, 1, kind="int"),
         _f("max_pct_of_adv", "Max position vs daily traded value", 0.5, 25, 0.5, "%",
            "Keeps you out of stocks too thin to exit quickly."),
+        _f("max_month_loss_pct", "Loss brake", 0, 30, 0.5, "% in 30 days",
+           "When your trades closed in the last 30 days lost this much of your account, Picks and the Calculator "
+           "say to take a break from new buys. 0 turns it off."),
     ]},
     {"title": "Your stops", "fields": [
         {"key": "stop_moves", "label": "Your positions' stops move", "kind": "choice",

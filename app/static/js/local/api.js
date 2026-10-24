@@ -276,6 +276,7 @@ async function today(c) {
     cfg: { ...Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
       'shariah_filter'].map(k => [k, cfg[k]])), fee_pct_per_side: E.feePct(cfg) },
     record: core.record || null, odds: core.odds || null,
+    brake: lossBrake(c, E.accountSummary(c.book, 'real', cfg, closes(c), core.events).equity),
     telegram: core.telegram || null,      // Picks' bell: the site's bot (/watch SYMBOL)
   };
 }
@@ -436,6 +437,15 @@ function orders30(book) {
   const f = book.fills.filter(x => real.has(x.trade_id) && (x.side === 'buy' || x.side === 'sell') && x.date >= since);
   return { n: f.length, value: f.reduce((a, x) => a + x.shares * x.price, 0) };
 }
+// views.loss_brake: your real trades closed in the last 30 days, against your account (0 in Settings: off).
+function lossBrake(c, equity) {
+  const limit = +c.cfg.max_month_loss_pct || 0;
+  if (limit <= 0 || !(equity > 0)) return null;
+  const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const closed = E.trades(c.book, 'real', ['closed']).filter(t => (t.exit_date || '') >= since);
+  const pnl = closed.reduce((a, t) => a + (t.exit_price - t.entry_price) * t.shares - (t.fees || 0), 0);
+  return { pnl, pct: pnl / equity, limit, on: pnl / equity * 100 <= -limit, n: closed.length };
+}
 function calcView(c) {
   const real = E.accountSummary(c.book, 'real', c.cfg, closes(c), c.core.events);
   const b = c.core.breadth_today;
@@ -443,7 +453,7 @@ function calcView(c) {
     equity: real.equity, cash: real.cash, orders_30d: orders30(c.book), positions: E.positionsForAllocation(c.book, 'real', ['open']),
     cfg: Object.fromEntries(CALC_KEYS.map(k => [k, c.cfg[k]])),
     risk_off: !!(c.core.market && c.core.market.risk_off), switch: (b && b.switch) || null,
-    money: c.core.money || null, shares_value: real.equity - real.cash,
+    money: c.core.money || null, shares_value: real.equity - real.cash, brake: lossBrake(c, real.equity),
   };
 }
 

@@ -65,6 +65,7 @@ DEFAULTS: dict = {
     "max_open_risk_pct": 6.0,        # total risk of all open positions (% of equity)
     "max_per_sector": 2,
     "max_pct_of_adv": 5.0,           # position value <= this % of the stock's 20-day avg traded value
+    "max_month_loss_pct": 6.0,       # loss brake: pause new buys once trades closed in 30 days lost this % (0: off)
     # Universe filters
     "min_avg_value_egp": 5_000_000.0,  # 20-day average traded value
     "min_price": 1.0,
@@ -129,8 +130,8 @@ DEFAULTS: dict = {
 # Each person's own numbers on the shared website. Everything else is the strategy, which the admin sets for all.
 PERSONAL_KEYS = (
     "capital", "paper_capital", "broker", "fee_pct_per_side", "risk_per_trade_pct", "max_position_pct", "max_positions",
-    "max_open_risk_pct", "max_per_sector", "max_pct_of_adv", "shariah_filter", "auto_paper", "stop_moves",
-    "telegram_chat_id", "telegram_only_action",
+    "max_open_risk_pct", "max_per_sector", "max_pct_of_adv", "max_month_loss_pct", "shariah_filter", "auto_paper",
+    "stop_moves", "telegram_chat_id", "telegram_only_action",
 )
 
 

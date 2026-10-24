@@ -10,9 +10,10 @@ const bad = text => ({ level: 'bad', text });
 
 // symbol/sector: the stock; entry/stop: prices; equity/cash/positions: your real account (positions as
 // portfolio.positions_for_allocation gives them); avgValue: the stock's average daily traded value (20 days);
-// cfg: your limits (views.CALC_KEYS); riskOff: a weak market (scan.py); half: buy half the usual size.
+// cfg: your limits (views.CALC_KEYS); riskOff: a weak market (scan.py); half: buy half the usual size;
+// brake: your loss brake (views.loss_brake), or null when it's off.
 export function planTrade({ symbol, sector, entry, stop, equity, cash, avgValue, positions = [], cfg, riskOff = false,
-  half = false }) {
+  half = false, brake = null }) {
   const perShare = entry - stop;
   if (!(entry > 0) || !(stop > 0)) return { ok: false, error: 'Enter an entry price and a stop.' };
   if (!(perShare > 0)) return { ok: false, error: 'The stop must be below the entry price.' };
@@ -51,6 +52,9 @@ export function planTrade({ symbol, sector, entry, stop, equity, cash, avgValue,
     (riskAfter / equity) * 100 > cfg.max_open_risk_pct + 1e-9
       ? warn(`If every stop were hit you'd lose ${pct(riskAfter / equity)} of your account (your limit is ${cfg.max_open_risk_pct}%).`)
       : ok(`If every stop were hit, including this one, you'd lose ${pct(riskAfter / equity)} of your account (limit ${cfg.max_open_risk_pct}%).`),
+    brake && (brake.on
+      ? bad(`Your trades closed in the last 30 days lost ${pct(-brake.pct)} of your account, past your loss brake of ${brake.limit}%. Take a break from new buys.`)
+      : ok(`Trades closed in the last 30 days: ${brake.pct >= 0 ? '+' : ''}${pct(brake.pct)} of your account (loss brake at -${brake.limit}%).`)),
   ].filter(Boolean);
   return {
     ok: true, shares, full_shares: full.shares, amount, buy_fee: buyFee, per_share: perShare, stop_pct: stopPct,

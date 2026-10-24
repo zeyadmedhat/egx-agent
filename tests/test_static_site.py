@@ -740,6 +740,26 @@ def test_size_calculator_uses_the_signals_own_sizing_rule():
     assert off["max_positions"] == 2 and any("portfolio is full" in c["text"] for c in off["checks"])
     assert any(c["level"] == "warn" and "usual stop is 4–12%" in c["text"] for c in wide["checks"])
     assert bad_stop == {"ok": False, "error": "The stop must be below the entry price."}
+    on, calm = run_js({"op": "plan", "args": {**base, "brake": {"on": True, "pct": -0.07, "limit": 6}}},
+                      {"op": "plan", "args": {**base, "brake": {"on": False, "pct": 0.012, "limit": 6}}})
+    assert any(c["level"] == "bad" and "lost 7.0% of your account" in c["text"] for c in on["checks"])
+    assert levels(calm) == {"ok"} and any("+1.2% of your account" in c["text"] for c in calm["checks"])
+
+
+def test_the_loss_brake_counts_real_trades_closed_in_the_last_30_days(tmp_path, cfg):
+    from datetime import date, timedelta
+    conn = db.connect(tmp_path / "t.db")
+    cfg = {**cfg, "capital": 100_000.0, "max_month_loss_pct": 6.0}
+    day = lambda n: (date.today() - timedelta(days=n)).isoformat()           # noqa: E731
+    for bought, sold, price in ((day(70), day(60), 5.0), (day(10), day(5), 9.5)):   # the 60-day-old loss: too old
+        tid = portfolio.add_real_buy(conn, cfg, "AAA", bought, 10.0, 1000, 0.3)
+        portfolio.sell_real(conn, cfg, tid, sold, price, 1000, "test")
+    d = views.Data(conn, cfg, views.Cache())
+    b = views.loss_brake(d, 100_000.0)
+    assert b["n"] == 1 and -700 < b["pnl"] < -500 and not b["on"]          # 500 lost plus fees: under 6%
+    assert views.loss_brake(d, 8_000.0)["on"]                                # the same loss on a small account
+    assert views.loss_brake(views.Data(conn, {**cfg, "max_month_loss_pct": 0}, views.Cache()), 8_000.0) is None
+    conn.close()
 
 
 
