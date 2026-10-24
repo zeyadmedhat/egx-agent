@@ -22,12 +22,12 @@ If macOS says the file can't be opened, right-click it → **Open** → **Open**
 
 1. **After 3:30 pm Cairo time**, open the dashboard. It scans automatically when new closing prices are available,
    or press **Run scan** (top right). The progress shows in the top bar and you can keep using the pages meanwhile.
-2. **Today** page:
+2. **Home → Summary** and **Picks**:
    - **Orders for tomorrow** lists everything to do at your broker, most urgent first: sells, stops to move up,
      bonus-share updates and buys. Tick each one off as you place it, or press Copy.
    - The market banner says if EGX30 is healthy. When it is below its 50-day average the agent makes **no new BUY
      calls**. That is deliberate: in the backtest this was the single most helpful rule.
-   - **BUY cards** show the stock, *Buy up to* price, stop-loss, target, number of shares and the maximum
+   - **BUY cards** (on Picks) show the stock, *Buy up to* price, stop-loss, target, number of shares and the maximum
      loss in EGP (about 1.5% of your capital). Next morning, don't pay more than *Buy up to*.
    - **Your open positions** show one of: 🔴 EXIT, 🟠 REVIEW, 🔵 TIGHTEN STOP (move your stop order up) or 🟢 HOLD.
 3. After you buy or sell at your broker, record it on **My Portfolio** so the agent can track it.
@@ -39,20 +39,23 @@ The ⚙ button (**More** on a phone) holds Settings, Admin, the language and the
 
 | Section → tab | What it's for |
 |---|---|
-| **Today → Summary** | "Today in one minute" (the market, the signals and your positions in a few plain sentences), a badge saying whether the session is open and the numbers are final, the orders checklist for the next session, your open positions and what to do with each, the market with a 6-month EGX30 chart, and live prices (tap to open) |
-| **Today → Signals** | The BUY signals (each with **Log buy**, **Size it** and **Why this signal**) and the stocks close to a BUY |
-| **Today → News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month |
-| **Market → Overview** | Breadth: how many stocks are above their 50-day average, up/down counts, 1-year highs/lows, the biggest movers (day, week, month), a sector table and the market switch for the model's picks. The 1-year breadth chart and the 20-/200-day counts open on a tap. Context only: it doesn't change the BUY rules |
-| **Market → Predictions** | A machine-learning model's chance that each liquid stock reaches its target before its stop within 2 weeks and 1 month. How it did on years it never saw, its live track record and the experiment open on a tap. Information only |
-| **Market → Dividends & results** | Every EGX company's cash dividends from TradingView (coming up, highest yields), the companies whose results are expected in the next 6 weeks, and the bonus shares, rights issues and splits announced on Mubasher. Recent dividends and last year's bonus shares open on a tap |
-| **Stocks → Stock** | The live price, and a switch between the agent's chart and TradingView's live chart. The agent's chart has averages, volume, RSI, MACD, your levels and your buys/sells marked; why a stock does or doesn't qualify; the model's chance and rank; news and anything to know now; dividends and Shariah details open on a tap |
-| **Stocks → Screener** | Every stock in one table: trend (above its 20/50/200-day averages), RSI, 1- and 3-month returns, the model's top picks, dividend yield and signal. Quick presets, the main filters, and **More filters**, remembered on the device |
-| **Stocks → Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/unwatch COMI` and `/list`, checked after each close |
-| **Portfolio → My portfolio** | Three tabs. **Positions**: log real buys and sells. Click a position to sell some or all of it, record a cash dividend, see its transactions, or delete it if it was logged by mistake. Buying more of a stock you hold joins it at the average price. See status, days held (of 20) and P&L after fees and dividends. **Health**: your account against EGX30 since your first buy, money by sector, what you'd lose if every stop were hit, and how closely your stocks move together. **Journal**: win rate, average win and loss, profit factor, results by signal setup, exit reason and month, and your profit after Egypt's inflation |
-| **Portfolio → Paper** | A virtual 100k account the agent trades by itself. Watch it for 3–4 weeks before using real money |
-| **Portfolio → Calculator** | How many shares to buy with your own risk rules (the same sizing as the BUY signals): amount, fees, loss at the stop, gain at the target, and a check against your portfolio limits. Full or half size |
-| **Portfolio → Backtest** | Replays the exact rules on 1–4 years of history and compares with EGX30. The last result is kept |
-| **⚙ → Settings** | Telegram alerts and the daily scan, then every number the agent uses: capital, risk, fees, filters, Shariah filter, exits. Plus the data status and refresh buttons |
+| **Home → Summary** | "Today in one minute" (the market, the signals and your positions in a few plain sentences), a badge saying whether the session is open and the numbers are final, the orders checklist for the next session, your open positions as cards (what to do in plain words, the price and profit/loss, live during the session, and where the price sits between your stop and your target), and the market with a 6-month EGX30 chart |
+| **Picks → Picks** | What to buy at the next session and what may come next, the BUY rules and the prediction model side by side (`pages/picks.js`). A **market light** first: green (BUYs allowed), amber (only the strongest BUYs, or the model's picks at half size or none) or red (no new BUYs), from the rules' EGX30 check and the market switch, with EGX30 against its 50-day average and the share of stocks in an uptrend. Then each BUY as a card: **two opinions** (the rules: BUY and their score; the model: its rating out of 100 and next week's chance), *Both agree* when a rules BUY is also one of the model's top 10% (information only: keeping only those BUYs didn't hold up in tests), *Buy up to* and a ruler from the stop to the target, a **checklist** (setup, market, rating, the company's profit, cautions in its reasons, results or a dividend coming), **your money** (the shares for your account and what the stop would cost and the target would make, after fees), what BUYs scored like it did in the 10-year test, *Why this signal*, **Size it** and **Log buy**. **Getting close**: the stocks close to a BUY, best rated first, with how far each is from its breakout price (during the session with live prices: *Above it now: wait for the close*) and, on the website, a 🔔 that opens Telegram and sets `/watch SYMBOL` in one tap (`t.me/<bot>?start=watch-SYMBOL`). **The model's picks for next week** (its top 5) and **Can I trust it now?** (the rules' BUYs, the 2-week model and next week's strong picks, live against their tests) |
+| **Picks → Track record** | Every BUY the agent published, followed with the same exit rules from the next open (fees included), set against the test, with a warning when 10 points fewer of its signals win than in the test (after 30 ended; also in Telegram), and the model's live check and how its daily top 10 did lately |
+| **Home → News** | The last month's headlines about EGX stocks and the market (Mubasher, Reuters, Zawya, Al Borsa News, Daily News Egypt), filtered by your stocks, source, topic and tone, with the dividends, bonus shares and rights issues coming up and announced this month |
+| **Home → Market** | Breadth: how many stocks are above their 50-day average, up/down counts, 1-year highs/lows, the biggest movers (day, week, month), a sector table and the market switch for the model's picks. The 1-year breadth chart and the 20-/200-day counts open on a tap. Context only: it doesn't change the BUY rules |
+| **Home → EGX30** | The index on its own page (the top bar's EGX30 opens it): its chart with the 20-/50-day averages, RSI and MACD (or TradingView's live chart), where it stands against its 50- and 200-day averages, its 1-year range and record close, its value in dollars, the agent's rule about it (no new BUYs while it's under its 50-day average), its returns over a week to 5 years in pounds, in dollars and next to EGX70's, each calendar year in pounds and dollars, and how jumpy it is (`views.index_view`) |
+| **Home → Heatmap** | The whole market in one picture: a tile for every stock that traded at the last close, grouped by sector, sized by the company's market value (or the money traded in it), green or red by its move over the last session, week or month. Tap a tile for the stock |
+| **Picks → Rankings** | *Next week* (first): each actively traded stock's chance of rising 1.5× its daily range before falling as far within 5 sessions, highest first, with that target and stop in EGP, *Strong* on its top picks in an uptrend while the market is healthy, a warning to skip short trades in a weak market, and *How honest its chances are* (what it said against what happened). *Next 2 weeks*: three numbers on how good the model is, its live check and how its daily top 10 did lately, then today's ranking: each actively traded stock's chance of reaching its target before its stop within 2 weeks, what trades rated like it made on average, its chart stop/target and ▲▼ for its move in rank. *How it was tested* (the BUY rules with and without it, and the model's details) opens on a tap. Information only |
+| **Home → Dividends & results** | Every EGX company's cash dividends from TradingView (coming up, highest yields), the companies whose results are expected in the next 6 weeks, and the bonus shares, rights issues and splits announced on Mubasher. Recent dividends and last year's bonus shares open on a tap |
+| **Stocks → Stock** | One summary card on top: the verdict (Buy / Hold / Sell / Wait / Avoid, and why) and the stock's **rating** out of 100 with its reason in one line (see below); the live price next to the close during the session; four key numbers (3-month change, 1-year low–high, money traded a day, P/E). Then the agent's chart (always first) or TradingView's live chart. The agent's chart has daily, 4-hour and 1-hour candles, the support and resistance zones shaded, Fibonacci levels on a tap, averages, volume, RSI, MACD, your levels and your buys/sells marked; a *Stop-loss & target* card gives every stock's stop and target from the chart with the support and resistance behind them, and lists the levels with how far each is from the price (every resistance up to 8, so the goals past the target show too); your position as the same card as on Home → Summary; why a stock isn't a BUY yet (on a tap); the company's numbers (P/E, growth, margins, debt) next to its sector's; news and anything to know now; dividends and Shariah details open on a tap |
+| **Stocks → Screener** | Every stock in one table, best rated first: rating, trend (above its 20/50/200-day averages), RSI, 1- and 3-month returns, the model's top picks, dividend yield, P/E, next ex-dividend date and signal. Ready-made lists in one tap (Best rated, Shariah and close to a BUY, Ex-dividend in the next 30 days, At a 1-year high, Cheapest on P/E, Uptrend with volume, High dividend yield), the main filters, and **More filters**, remembered on the device |
+| **Stocks → Watchlist** | The stocks you starred (☆ on a stock's page or in the Screener) with their numbers. Kept with your portfolio (on the site: in your browser and its backups). In Telegram, the website's bot answers `/watch COMI` (a BUY signal), `/watch COMI 45` (a close past 45), `/watch COMI levels` (a close near a strong support, or at resistance), `/unwatch COMI` (`/unwatch all`) and `/list`, checked after each close; it also answers `/stock COMI` (or just `COMI`: its next-week chance too), `/why COMI` (its rating and what stocks rated like it did, the BUY rule's checks passed or not, and the chart's levels), `/week` (next week's 10 best chances with their targets and stops, strong picks marked, and a warning in a weak market), `/top`, `/top 20`, `/buys` and `/egx30` (the index's returns, in dollars too, its 1-year range and whether it's above its 50-day average) from the website's data; each close's message names next week's three best chances (or says the market is too weak for short trades). *Connect Telegram* in Settings also links your portfolio (or send `/link` and type its code there): your browser then sends the bot a copy whenever it changes, so `/portfolio` (profit/loss counted like Thndr's, what to do in plain words, the big-loss plan) and `/watchlist` answer there too and each close's message says what to do with your positions (`/unlink` deletes the copy). Send the bot a screenshot of your broker's holdings and it checks each stock against your website portfolio by what you paid (market value − profit/loss, so the price moving since doesn't count): ✅ matches, ⚠️ differs (and by how much) or ➕ not on the website yet. The bot reads messages every few hours, or at once after a one-time double-click on **Set up instant Telegram replies.command** (a free Cloudflare Worker, `worker/bot.js`) |
+| **Portfolio → My portfolio** | Account value, open and closed profit/loss (live during the session) and the loss if every stop were hit, then three tabs. **My stocks**: each position as a card (what to do, price, profit/loss after the buy fees and with dividends, counted like Thndr's: the selling fees count once you sell, stop to target, days held of 20); *Sell or edit* opens the sale form, *Change the stop* (on the website: your own stop, e.g. right on a support, above the automatic one and under the price; it counts from the day you set it, so an earlier dip doesn't sell, never brings a "raise your stop" reminder, can still rise to a newer support unless *Settings → Your stops* says only you move it, and *Back to the automatic stop* undoes it; the stock's support list has a *Stop here* button on each support between your stop and the price), a cash dividend, its transactions (on the website each buy and sale can be edited or deleted, and one added: the position is rebuilt from them, `engine.js` `rebuildTrade`), or deleting it if it was logged by mistake; tapping a closed trade opens its transactions the same way, with *Delete this trade*; *Close* at its top or bottom folds it away (the stock's page opens it straight from *Sell or edit in My Portfolio*). Buying more of a stock you hold joins it at the average price. **Checkup**: a checkup against your own limits (one stock over 25% of the account, over 40% in one sector, too many stocks, too much at risk, stocks that move together, cash below zero), each with what to do; your account against EGX30 and a bank deposit (the interbank rate, added daily) since your first buy, **in pounds, dollars or grams of gold**; money by sector, what you'd lose if every stop were hit, and how closely your stocks move together. *Log a buy* and, on the website, *From a screenshot* sit side by side at the top and open the same box with a switch: type a buy in, or fill in your holdings from a picture of your broker's portfolio screen (Thndr or another): the bot reads every stock on it with Cloudflare's free AI, you check every row, then the ticked ones are logged like buys (the picture isn't kept; 20 a day). Thndr's home screen shows only each stock's market value and profit/loss: what you paid is market value − profit/loss (fees in, exact), the shares are the market value ÷ the price now (flagged so you check the units in Thndr; changing them recalculates the average cost) and a stock you already hold is checked instead (it matches, or what you paid differs). Each stock has its own *Bought on* date. Dates everywhere are picked on the site's own calendar (`ui.js` `DateInput`): trade dates only Sunday–Thursday and never after today, a sheet from the bottom on a phone. A buy (and editing one) can be typed as *Price paid* (the site adds the broker's fees), *Average cost* or *Purchase value* (both already have Thndr's fees in them, so none are added; screenshot imports use the average cost). Thndr rounds the purchase value it shows, so *Exact from Thndr* works it out from the same screen's Market value − Profit/Loss. **Past trades**: win rate, average win and loss, profit factor, results by signal setup, exit reason and month, and your profit after Egypt's inflation |
+| **Portfolio → Practice** | A virtual 100k account the agent trades by itself. Watch it for 3–4 weeks before using real money |
+| **Portfolio → Calculator** | **Position size**: how many shares to buy with your own risk rules (the same sizing as the BUY signals): amount, fees, loss at the stop, gain at the target, and a check against your portfolio limits. Full or half size. **Zakat**: 2.5% of your shares at market value plus your cash and savings, less debts due, when it's over the nisab (85 g of 21-carat gold, as Dar al-Ifta counts it; 24-carat on a tap), from today's gold price. **Bank certificate**: what the same money earns a month or at the end over 1 or 3 years, after inflation, and the return your trades need to beat it. **Thndr fees**: what one order costs on Thndr (its EGP 2 + 0.1% commission, then the exchange's and government's fees), and whether the **Thndr Trader** plan (245 EGP a month, no Thndr commission on the first 50 orders) pays for itself at your pace, filled in from your last 30 days of orders |
+| **Portfolio → Rules test** | Replays the exact rules on 1–4 years of history and compares with EGX30. The last result is kept |
+| **⚙ → Settings** | Telegram alerts and the daily scan, then every number the agent uses: capital, your broker (Thndr, Thndr Trader or another broker at a % you set: Thndr's exact fees go into every logged buy and sale, the profit/loss and the size calculator; the website starts on Thndr), risk, *Your stops* (your positions' stops rise by themselves to each newer support, as tested, or move only when you change them: then no "raise your stop" reminders), filters, Shariah filter, exits. Plus the data status and refresh buttons |
 
 Old links (from Telegram or bookmarks) still open the same page. Handy: press **/** to search any stock by symbol or
 Arabic name. On the chart, use the 3M…All buttons to zoom and drag to move.
@@ -63,17 +66,20 @@ history open on a tap.
 
 **Arabic.** العربية in the ⚙ menu switches the whole site to Arabic, right to left (English switches
 back); each device remembers its choice. Menus, titles, labels, buttons and explanations are translated
-(`app/static/js/i18n.js`); the agent's own detailed notes (a signal's reasons, an order's details, sector names) stay
-in English for now.
+(`app/static/js/i18n.js`), and so are the agent's own notes (a signal's reasons, an order's details, the exit rules'
+notes, sizing notes, sector names), by their patterns (`tn()`); anything new it doesn't know yet shows in English.
+The password screen has its own English/العربية button.
 
 **Market words explained.** Words with a dotted underline (stop-loss, target, 50-day average, breadth, RSI, ADX,
 risk-off, ex-dividend, results…) show a two-line explanation when you tap them. Longer fine print sits under
 *Details* links you can open.
 
-**Live prices** come from TradingView's free boxes, about 15 minutes late (the orange D next to a price). They're
-for watching during the session only: the signals, stops, targets and your P&L still use the last close, because
-the rules were tested on closing prices. The boxes are sealed off from the page, so TradingView can't see your
-portfolio or the signals; it only learns which stocks' prices your browser asks for.
+**Live prices** come from TradingView, about 15 minutes late. Your position cards and a stock's page ask TradingView's
+screener for the latest price once a minute during the session (on the website through its bot, `worker/bot.js`
+`/quotes`; on the Mac through the dashboard), and show the profit/loss at that price, with a warning when it has
+already crossed your stop or reached your target. The signals, stops and targets still come from the last close,
+because the rules were tested on closing prices. The live chart on a stock's page is TradingView's own box, sealed
+off from the page.
 
 ## Alerts on your phone
 
@@ -140,9 +146,26 @@ By default this is information only. To only get BUY signals for compliant stock
   room to run) and need 70+.
 - **Size:** shares = 1.5% of your account ÷ (entry − stop), capped at 25% of the account per stock, 5 positions,
   2 per sector, 6% total risk.
-- **Stop:** 2× the stock's average daily range below entry (kept between 4% and 12%).
-- **Exits:** target at 2× the risk; stop moves to breakeven after +1× risk, then trails; exit on a close below
-  the 50-day average; **review at day 10 (2 weeks), hard exit at day 20 (1 month)**.
+- **Stop and target from the chart:** the agent marks support and resistance from swing lows/highs of the last
+  year, Fibonacci retracements (23.6–78.6%) and extensions (127.2%, 161.8%) of the latest big rise, the 20- and
+  50-day averages, monthly pivot points, the most-traded price of 6 months and the 1-year high. Levels close
+  together make one zone; the more tools agree, the stronger it is. The **stop** goes just under the nearest solid
+  support (at least a normal day's move away, at most 12%); the **target** just under the first resistance that pays
+  at least 1.5× the risk (at most 3×). With nothing usable on the chart it falls back to the old rule (stop 2× the
+  daily range, kept 4–12%; target 2× the risk). Every stock's page shows its levels. Settings → Exits switches back
+  to the fixed rule. Tested on 2016–2026 years the prediction model never saw: the BUY rules made 13.4% a year with
+  chart levels vs 7.8% with the fixed rule, worst drop −20% vs −22%; with the model's own picks 24.4% vs 27.7%
+  (the fixed rule's lead is all in the 2021–26 boom; 2016–21: 13.4% vs 9.2%), worst drop −22% vs −26%.
+- **Exits:** each evening the stop rises to just under the nearest solid support below the price (never down); it
+  also moves to the buy price plus 1.5% after +1× risk (enough to cover both fees, so a trade that comes back still
+  ends a small win), then trails 2× the daily range under the highest close. The target stays
+  where it was set. Exit on a close below the 50-day average; **review at day 10 (2 weeks), hard exit at day 20
+  (1 month)**. The rising stop, tested on 2016–2026 years the model never saw, with its picks: 31.8% a year against
+  22.3% for the stop that waited for +1× risk (worst drop −25.2% against −22.7%); the rules alone 20.4% against 13.4%.
+  The +1.5% floor (Oct 2026, 4 seeds): 48.0% of trades won against 44.9% with the stop at the buy price, higher in
+  every seed, the same 33.7% a year, worst drop −17.9% against −18.3%.
+  A logged buy takes the chart's stop and target for its buy date, however late you log it. Your stock page shows one
+  stop and one target, each with where it comes from, and the next resistance above the target.
 
 ## Backtest results (Sep 2022 – Sep 2026, default settings)
 
@@ -157,19 +180,23 @@ Be honest with yourself about these numbers:
 
 - **The agent made money in both halves, but far less than simply holding EGX30.** Much of EGX30's rise is the
   pound's devaluation, which a strategy that is often in cash doesn't capture.
-- **Fees matter a lot.** Around 100 trades a year at 0.25% per side cost roughly half the gross profit. Set
-  your broker's real fee in Settings.
+- **Fees matter a lot.** Around 100 trades a year at 0.25% per side cost roughly half the gross profit. Pick
+  your broker in Settings (Thndr's fees are built in, `egx_agent/config.py` `order_fee`, from its Aug 2026 fee
+  sheet; the tests and the model's numbers still use 0.25% a side, a little above Thndr's ~0.19%).
 - Only today's listed stocks are tested (survivorship bias), so real results would likely be somewhat worse.
 - Pullback and MACD entries lost money in testing, so they're off by default (you can enable them in Settings).
 
-## The prediction model (Predict page)
+## The prediction model (Picks → Rankings)
 
 **What it predicts.** After each close, for every liquid stock: if you bought at the next open with the agent's usual
-plan (stop 2× the average daily range below, kept 4–12% under the price; target 2× the risk above), what is the
-chance the **target is reached before the stop** within 10 sessions (~2 weeks) and within 20 sessions (~1 month)?
-If both are touched on the same day it counts as a loss.
+plan (the stop and target from that day's chart: just under the nearest solid support and resistance, as on the
+stock page; with *Settings → Exits → Stop & target from* set to the ATR rule, stop 2× the average daily range below
+and target 2× the risk above), what is the chance the **target is reached before the stop** within 10 sessions
+(~2 weeks) and within 20 sessions (~1 month)? If both are touched on the same day it counts as a loss. Trained on the
+chart's trades, the rules-plus-its-picks backtest made 26.5% a year against 24.4% when it learnt the ATR ones.
+*Expected* on the Rankings tab is what trades it scored like this averaged in its tests, after fees.
 
-**How it learns.** Press *Train the model* on the Predict page once. The first time it downloads 10 years of prices
+**How it learns.** Press *Train the model* on the Rankings tab once. The first time it downloads 10 years of prices
 (about 4 minutes); then it trains for about 2 minutes. One gradient-boosting model per horizon learns from every
 liquid EGX stock since about 2013 (≈250,000 past examples) using 47 measures: trend, momentum, volume,
 volatility, the stock against its sector, and the whole market's breadth. "Liquid" is judged in the money of its
@@ -193,7 +220,8 @@ The top 10% beat the average stock in all 10 years (AUC 0.59, graded *Useful*). 
 (*Small edge*). Even its best picks usually don't reach the target, so always use the stop.
 
 **Egypt data.** Each scan also downloads USD/EGP, the interbank interest rate, inflation and
-EGX70 from TradingView (`egx_agent/data/macro.py`); each is used only from the day it was published. In the
+EGX70 from TradingView (`egx_agent/data/macro.py`); each is used only from the day it was published. It also downloads
+the gold price for your account in gold and the zakat nisab; the model doesn't use it. In the
 Sep 2026 tests it lifted the 20-session model's top 10% from +1.03% to +1.18% a trade (and it beat the average stock
 in every year). The 10-session model did no better with it alone, but did with the dividend events below, so since
 Sep 2026 both use it. Also tested and **not** used: a
@@ -212,6 +240,33 @@ inside the month reach the target less often (the price drops by the dividend), 
 they did better than the others (+2.9% against +1.7% a trade, 38 trades), so they aren't skipped: the stop moves down
 for the dividend instead, and the signal says so.
 
+**Company results (both models, since Oct 2026).** The same TradingView request as the dividends brings every EGX
+company's last 32 quarters and about 20 years of results (`egx_agent/data/fundamentals.py`). The model sees each
+company as it was known on each day: profit, sales and free cash for its price, its dividend yield, profit and sales
+growth over a year, the last quarter against the same quarter a year before, the profit margin, return on assets,
+debt against assets, whether it made a profit, and how cheap, fast-growing and profitable it is against the other
+stocks that day. A quarter counts only 120 days after it ends (150 for the fiscal year's last one), later than most
+companies publish, so the tests never use numbers that weren't out yet. In the Oct 2026 tests (4 random seeds, the
+rules plus the model's picks replayed day by day on 2016–2026): **33.8% a year against 30.8%, the worst drop −18%
+against −26%**, better in both halves. Counting quarters as known after 75 days did worse in the second half, and only
+a few of the numbers (value and growth) did worse than all of them. The 20-session model neither gains nor loses.
+
+**What was tested for the BUY rules (Oct 2026) and left as it is.** Skipping companies that lost money or whose
+profit shrank, or the dearest 30% for their profit, made the drops smaller but cut the return more (breakouts in
+companies that lost money did *better* over two weeks: 32% reached the target against 22%). A lower or higher score
+bar (60 or 80 instead of 70), 2 or 5 model picks instead of 3, and adding the pullback and MACD setups did no better.
+Taking only the rule BUYs the model ranks in its top 30–40% helped the old model, but not the one with company
+results. So the company results change the BUYs through the model: its rank orders them and picks 3 more.
+
+**Judged on winning trades (Oct 2026).** From then on a change is kept only if more trades win *and* the yearly
+profit doesn't fall (4 seeds, 2016–2026). With today's rules 44.9% of trades win, 33.7% a year. The count of model
+picks (1–5), skipping rule BUYs the model ranks low, comparing a company's numbers with its own sector's, a closer
+target (1–1.25× the risk, also with the model retrained for it) and a shorter or longer hold all moved the winners by
+under a point or cost profit: the closer target won 48% but made 31% a year. Only the +1.5% floor under the stop
+passed (Exits above). Each BUY card and Close to a BUY row shows the model's reason in one line: what lifted its
+rating most from the chart and from the company's results, and what lowered it. The track record warns (on the site
+and in Telegram on days with BUYs) once 30 signals have ended and 10 points fewer of them won than in the test.
+
 **News.** Headlines from Mubasher (each stock's page, Arabic and English, and the latest Egypt news), Reuters and
 Zawya (through TradingView, tagged to the stock), Al Borsa News and Daily News Egypt. Only headlines, dates and links
 are kept. Each gets topics and a good/bad tone from keyword rules. Bad news this week shows as a caution on signals,
@@ -222,7 +277,7 @@ day's signals and your stocks first, then the others in turn (every stock every 
 **Market switch.** From breadth (the share of stocks above their 50-day average): below 40% *no new buys*, 40–50%
 *half size*, otherwise *full size*. It's for the model's picks: tested 2016–2026 on its top 5 every two weeks, it
 took them from 27% to 34% a year and cut the worst drop from −62% to −22% (every cut-off from 30% to 50% did about as
-well). It barely changed the BUY rules' backtest, so they keep their own EGX30 rule. Shown on Today, Market, Predict
+well). It barely changed the BUY rules' backtest, so they keep their own EGX30 rule. Shown on Home, Market, Picks
 and in Telegram.
 
 **After that** it updates its numbers after every scan and retrains by itself once a month (or after you change
@@ -232,7 +287,7 @@ test results. That's the real test.
 
 **How the BUYs use it (since Sep 2026).** Its 10-session rank decides which BUYs get money first, and its top 3 picks
 that pass the liquidity and uptrend checks are BUYs too. Each retraining replays the rules day by day on the years
-it was tested on, with only the scores it gave before seeing each year, and shows the result on the Predict page. When
+it was tested on, with only the scores it gave before seeing each year, and shows the result on the Rankings tab. When
 it was built (2016–2026, dividends counted): the rules alone 15.3% a year, in the model's order 19.8%, plus its top 3
 26.9% with the same worst drop (−20%), better in each half: to Aug 2021 (7.5% → 11.0%) and after (25.0% → 46.9%). Several versions were tried, so the best one flatters itself
 a little: the live record is what counts.
@@ -243,17 +298,42 @@ than the average), it adds no BUYs of its own, you get an alarm, and it goes bac
 again.
 
 **Why it likes a stock.** Each stock's strongest reasons up (green) and down (red), from the model's own trees (like
-SHAP), on the Today cards, the Predict table and the stock page. Whole-market measures are left out: they move every
+SHAP), on the Picks cards, the Rankings table and the stock page. Whole-market measures are left out: they move every
 stock alike.
 
-**Honest numbers.** The Predict page also shows its top 5 as a test portfolio (every 10 or 20 sessions, sized by the
+**The rating (1–100).** Where the 10-session model's score puts a stock among that day's liquid stocks: 100 is its
+first, and 91–100 is its top 10%. It's on each stock page (with the reasons), in the Screener (its default order) and
+in the bot's `/why`, next to how stocks rated in the same band did on the years the model never saw. When it was built:
+91–100 reached the target first 21% of the time (+0.9% a trade after fees), 71–90 17% (+0.5%), 51–70 14% (+0.3%),
+1–50 10% (+0.0%); the average stock 13%. The rules' own BUY score isn't used for it: it barely changed the odds in the
+10-year test. Since Oct 2026 it mixes the chart and the company's results (the model sees both). Illiquid stocks get
+no rating.
+
+**Honest numbers.** The Rankings tab also shows its top 5 as a test portfolio (every 10 or 20 sessions, sized by the
 market switch), the same with 0.5% more cost per trade, and whether its chance numbers beat simply giving every stock
 the average chance (checked year by year). For 20 sessions they don't: use its rank, not the %.
 
-**5-day experiment (paper only).** A third model picks 5 stocks to buy at the next open and sell 5 sessions later.
-Its tests look strong (with the market switch, +65% a year even with 0.5% more cost), but it trades every week and
-has no stop, so it's only tracked on the Predict page. It won't become signals unless its live results match its
-tests for a few months.
+**Next week (Oct 2026).** A third model asks a short question with its own target and stop: bought at the next open,
+does the price rise 1.5× its average daily range (ATR, about 6.5%) before it falls as far, within 5 sessions? A plain
+"higher in 5 days?" was a coin flip in the tests (its best 5 a day 50% against 46%), so it isn't asked. Its chance
+isn't the model's raw number (that was over-sure: its 70%+ came true 42% of the time) but how often stocks at the
+same place in the day's ranking came out right in the years before, learnt apart for three states: a weak market
+(under 40% of stocks above their 50-day average), the stock in an uptrend while at least half are, and the rest. On
+2017–2026 (each year unseen): the average stock 31%, its strong picks (top 10% in an uptrend, healthy market) 48%
+and better every year, in a weak market its top picks 32%; when it said 54% it happened 54%. Buying its top 5 every
+week with the market switch: +26% a year, worst drop −20%; with 0.5% more cost a trade, +7%. Not signals: it's on
+the Rankings tab only.
+
+**Big losses (Oct 2026).** A position 30%+ under its average price that the rules say to sell is sold on the first
+bounce instead: at its first close back above its 20-day average, or after 20 sessions without one (*Sell on a
+bounce*, `portfolio.on_bounce` / `engine.js onBounce`). On 2016–2026, for stocks 30–50% under their 3-month high and
+under their 20-day average, that beat selling at once 68% of the time (median +3.6%, mean +1.3%); 50%+ under it 64%
+(+5.7%, +4.3%). For 10–30% falls the mean gain was about nothing, so normal stops stay. *Sell or edit* on such a position
+shows a *Big loss plan*: how far it must rise, how often stocks that fell as far got back (30–50%: 9% within 3 months,
+25% within 6; 50%+: 3% and 8%) and how often they fell another 20% (28%, 43%), the sell rule, and averaging down worked
+out, offered only when the stock earns a buy on its own (a BUY signal or the model's top 10%) and isn't at half its
+3-month high or less: after such crashes the model's top 10% did worse than the rest (median 6 months −14% against −9%,
+52% fell another 20%), and the stock page says so next to its rating.
 
 **Tested and not used (Sep 2026):** other exits (trailing sooner or later, wider or tighter, no trend exit, partial
 profits, other time limits; none was better in both halves), Bollinger/volume/company-size measures (no gain),
@@ -268,23 +348,45 @@ without a server and without your Mac being on.
 - **Every trading day** GitHub runs the scan by itself after the close (`.github/workflows/site.yml` →
   `app/site_daily.py`): new prices, signals and the prediction model (monthly), then it publishes the site.
   Nothing to do on your side. The run's page on GitHub shows a one-line summary (counts only).
+  During the session (10:00–14:30 Cairo) it also scans the live prices about every half hour
+  (`scan.session_scan_due`; GitHub's timer can start a run late), and an open page shows the new data by itself.
   A scan during trading hours is redone after the close; Telegram waits for that one.
   The site has no Paper Trading or Backtest pages: those stay in the Mac app.
+- **On time.** GitHub starts its timed runs late, or skips them, when it's busy (on 29 Sep 2026 nothing ran between
+  16:16 and 21:18 Cairo time). So the Telegram bot (`worker/bot.js`, a Cloudflare timer every 10 minutes) checks
+  after each close whether that close's scan has arrived and, if not, starts it on GitHub at 15:40, 16:10, 16:40,
+  17:40, 19:10 and 21:10 Cairo time until it has. It needs a GitHub key that can only start this repository's runs:
+  double-click **Set up on-time scans.command** once. A run that finds no new prices tries again 25 minutes later
+  (the Mac still waits 2 hours).
 - **One group password.** Everything the scan publishes is encrypted with it (AES-256, key from the password with
   600,000 PBKDF2 rounds), so the link alone shows nothing. Friends type it once per device. To remove someone,
   change the `SITE_PASSWORD` secret and give the new one to the others.
 - **Each friend's portfolio stays in their own browser**: buys, sells, dividends, bonus-share updates and
-  their own numbers (capital, risk, Shariah filter). Nobody else sees it, not even you. It doesn't
-  sync between devices: *Settings → Download a backup* / *Restore from a backup* moves it. On iPhone, use the
-  site from its Home Screen icon (Safari can delete a website's data after 7 days without a visit).
+  their own numbers (capital, risk, Shariah filter). Nobody else sees it, not even you. Once they connect Telegram
+  (below), the bot keeps a copy for their chat only, and each of their devices they connect brings the newest one
+  (the latest change wins; *Bring my portfolio from Telegram* in Settings does it by hand). Without Telegram,
+  *Settings → Download a backup* / *Restore from a backup* moves it. On iPhone, use the site from its Home Screen
+  icon (Safari can delete a website's data after 7 days without a visit).
+- **Opens at once, even offline.** The site keeps an offline copy of its code and the last close's data on the
+  device (`app/sw.js`), so the Home Screen app opens straight away and shows the last close with no signal. After an
+  update, a page still holding the old front page reloads itself once instead of showing a blank screen.
 - **Same rules as the Mac.** The browser runs a copy of the exit and sizing rules
   (`app/static/js/local/`), and `tests/test_static_site.py` checks it gives exactly the same answers.
 - **Telegram, to each friend:** with the `TELEGRAM_TOKEN` secret set (your bot's token), each friend presses
-  *Settings → Connect Telegram* on the site, then Start. The job checks for new people every 3 hours, answers
-  "Connected", and from then on sends each of them the day's signals after every close (without share counts:
-  each person sizes them on the site). `/stop` stops them. The link comes from the password, so only people who can
-  open the site have it, and changing the password disconnects everyone until they press the new link. After
-  Thursday's close each friend also gets the week's summary (`/weekly off` stops it).
+  *Settings → Connect Telegram* on the site, then Start. The bot answers "Connected" at once (with the Cloudflare
+  Worker; otherwise the job checks for new people every 3 hours), and from then on sends each of them the day's
+  signals after every close (without share counts: each person sizes them on the site). The same tap links that
+  browser's portfolio: after each close the job checks their positions with the exit rules and adds **their own
+  orders** to the message (sell at the open, move a stop up, decide on day 10, lower a stop for a dividend). `/stop`
+  stops them. The link comes from the password, so only people who can open the site have it, and changing the
+  password disconnects everyone until they press the new link. After Thursday's close each friend also gets the
+  week's summary (`/weekly off` stops it); `/quiet` sends the close's message only on days with a BUY or something to
+  do with their positions. At **9:30 on a session morning** the bot reminds each friend what to do at the open (their own
+  orders, then the BUYs), only on days with something to do (`/morning off` stops it). Replies and messages are in Arabic for people whose Telegram is in Arabic (`/lang` to
+  switch). The bot answers a stock's symbol or part of its Arabic name (and suggests the closest for a typo), has
+  buttons under its answers (an alert, the stock's page), and sets its own command menu in both languages.
+  **Open the app** (a button under its messages) opens the website inside Telegram: Telegram vouches for a
+  connected friend, so there's no password to type there, and their portfolio comes with them.
 - **Alarms, to you only:** add the `OWNER_TELEGRAM` secret with your Telegram @username and press *Connect
   Telegram* on the site like a friend. You then get the same alarms as on the Mac (a failed run, prices stuck
   for 2 sessions, a source down for a day, the model not retrained), once when they start and once when they're
@@ -310,8 +412,8 @@ The same TradingView request that brings the dividends also brings each company'
 TradingView's **expected** date for the next ones (`earnings` table, `egx_agent/data/dividends.py`). They're
 estimates from when the company reported before; EGX companies often publish a few days earlier or later.
 Companies whose last results on TradingView are more than 13 months old get no expected date. A stock with results
-expected before a trade would end shows a *Results* note (on Today, the watchlist, the stock page and your
-positions) and the Market page lists the ones coming in the next 6 weeks. It's information only: the rules don't
+expected before a trade would end shows a *Results* note (on Picks, the watchlist, the stock page and your
+positions) and Home → Dividends & results lists the ones coming in the next 6 weeks. It's information only: the rules don't
 skip or resize for results, because the tests didn't cover them.
 
 ## Data sources
@@ -319,6 +421,8 @@ skip or resize for results, because the tests didn't cover them.
 - **Prices:** TradingView via the free, unofficial `tvdatafeed` library. It sometimes drops connections, so the
   agent retries. Some renamed companies use a different code on TradingView than on Kashif (e.g. AIHC → AIH,
   ANFI → TYCN); these are translated automatically, and you can add more under *Settings → TradingView code overrides*.
+  Each scan also downloads about 8 months of hourly bars per stock for the 1-hour and 4-hour charts (the 4-hour
+  bars are made from them, 10:00–14:00 and 14:00 to the close, as on TradingView); only the charts use them.
 - **Stocks with no prices anywhere** (listed in *Settings → Data*):
   - **Listed but never traded:** ACFR, ANCC, DCCC, EFAC, GEOS, KNGC, NMIN, POCO, SIEG. They show only a par-value quote
     with zero volume, so no website has a price history for them. The agent re-checks weekly and adds them once
@@ -336,10 +440,12 @@ If the free price source stops working, the code is ready for a paid provider (E
 - `data/last_backtest.json`: the last backtest result
 - `data/daily.log`: what the daily scan did each time it ran
 - `data/models/`: the trained prediction model and its test results
-- `app/static_site.py` builds the GitHub Pages site, `app/site_daily.py` is its daily job, `app/static/js/local/` runs your portfolio in the browser, `site/strategy.yaml` is the strategy it uses
+- `app/static_site.py` builds the GitHub Pages site, `app/site_daily.py` is its daily job, `app/static/js/local/` runs your portfolio in the browser, `app/sw.js` is its offline copy, `site/strategy.yaml` is the strategy it uses
+- `worker/bot.js`: the Telegram bot on Cloudflare (instant replies, on-time scans, the 9:30 reminder, the portfolio link, the mini app, reading a broker screenshot with Cloudflare's free AI); `node worker/bot.test.mjs` tests it
 - `app/health.py`: the alarms (what counts as broken, sent once when it starts and once when it's fixed) · `app/backup.py`: the site's locked daily backup
 - `deploy/` (kept on this Mac only): the older Oracle server plan; `app/auth.py` and `app/accounts.py` are its logins
-- `egx_agent/`: the analysis code · `tests/`: automated checks (`.venv/bin/python -m pytest`)
+- `egx_agent/`: the analysis code (`levels.py`: the chart's stop and target; `record.py`: the signals' track record
+  and their odds by score, a 10-year replay once a week) · `tests/`: automated checks (`.venv/bin/python -m pytest`)
 - `app/`: the dashboard. `server.py` is a small local web server (FastAPI) that sends data to the page in `app/static/`
   (Preact, with TradingView's Lightweight Charts saved in `app/static/vendor/`, so it needs no build step).
   `alerts.py` sends the Telegram messages, and `daily.py` is the daily scan that `schedule.py` sets up with macOS

@@ -11,8 +11,8 @@ import pandas as pd
 import pytest
 from cryptography.exceptions import InvalidTag
 
-from app import static_site
-from egx_agent import config, corporate, db, portfolio, risk, scan, strategy
+from app import static_site, views
+from egx_agent import config, corporate, db, holidays, levels, portfolio, risk, scan, strategy
 from egx_agent.data import news
 from egx_agent.data import prices as prices_mod
 from egx_agent.indicators import add_indicators
@@ -27,10 +27,12 @@ TRADE_KEYS = ("symbol", "status", "signal_date", "entry_date", "entry_price", "s
               "fees")
 
 
-def run_js(*cases):
+def run_js(*cases, raw=False):
     res = subprocess.run([NODE, str(ROOT / "tests" / "js" / "parity.mjs")], input=json.dumps({"cases": list(cases)}),
                          capture_output=True, text=True, timeout=120, check=True)
     out = json.loads(res.stdout)
+    if raw:                                    # [{ok, value | error}]: for cases that should fail
+        return out
     for r in out:
         assert r["ok"], r.get("error")
     return [r["value"] for r in out]
@@ -50,9 +52,12 @@ def assert_same(py: dict, js: dict, keys):
 
 
 def bars_of(ind: pd.DataFrame) -> list[dict]:
+    """The bars the site's browser code gets, with the support stop the site build adds (levels.with_support)."""
+    ind = levels.with_support(ind, config.DEFAULTS)
     num = lambda v: None if pd.isna(v) else float(v)  # noqa: E731
     return [{"date": str(t.date()), "open": float(r.open), "high": float(r.high), "low": float(r.low),
-             "close": float(r.close), "atr14": num(r.atr14), "ema50": num(r.ema50),
+             "close": float(r.close), "atr14": num(r.atr14), "ema20": num(r.ema20), "ema50": num(r.ema50),
+             "sup": num(r["sup"]) if "sup" in ind else None,
              "div": float(r["div"]) if "div" in ind and r["div"] > 0 else 0} for t, r in ind.iterrows()]
 
 
@@ -76,16 +81,45 @@ def test_exit_rules_match(cfg):
     cases, expected = [], []
     for sym, frame in ind.items():
         for i in (70, 150, 230, 300, 315):
-            day, price = frame.index[i], float(frame.close.iloc[i])
-            stop = float(strategy.initial_stop(price, frame.atr14.iloc[i], cfg))
-            row = pd.Series({"symbol": sym, "entry_date": str(day.date()), "entry_price": price, "shares": 100,
-                             "initial_stop": stop, "stop": stop, "target": price + 2 * (price - stop), "sector": "A"})
-            expected.append(portfolio.real_status(row, frame, cfg))
-            cases.append({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(frame), "cfg": cfg}})
+            for be in (0.0, 5.0):                              # the stop's floor after +1R: the entry, or entry +5%
+                c = {**cfg, "breakeven_pct": be}
+                day, price = frame.index[i], float(frame.close.iloc[i])
+                stop = float(strategy.initial_stop(price, frame.atr14.iloc[i], c))
+                row = pd.Series({"symbol": sym, "entry_date": str(day.date()), "entry_price": price, "shares": 100,
+                                 "initial_stop": stop, "stop": stop, "target": price + 2 * (price - stop), "sector": "A"})
+                expected.append(portfolio.real_status(row, frame, c))
+                cases.append({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(frame), "cfg": c}})
     got = run_js(*cases)
     assert len({e["status"] for e in expected}) >= 2          # the cases cover more than one outcome
+    assert any(a["stop"] != b["stop"] for a, b in zip(expected[::2], expected[1::2]))    # and the floor matters
     for py, js in zip(expected, got):
         assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "prev_stop", "last_close"))
+
+
+@needs_node
+def test_an_old_buy_logged_today_under_its_stop_says_sell_and_a_big_loss_waits_for_a_bounce(cfg):
+    """A buy dated after the last close (an old position logged today at its old price) has no day to replay: if
+    the last close is under its stop the rules say sell, not hold (AMES: bought at 80, logged on 3 Oct, at 46.60).
+    30%+ under its price, they say sell on the first close back above the 20-day average instead, within 20 sessions;
+    once that close came, sell."""
+    frame = market()["S0"]
+    last = float(frame.close.iloc[-1])
+    def case(entry, entry_date="2099-01-01", f=frame):
+        row = pd.Series({"symbol": "S0", "entry_date": entry_date, "entry_price": entry, "shares": 100,
+                         "initial_stop": entry * 0.88, "stop": entry * 0.88, "target": entry * 1.24, "sector": "A"})
+        py = portfolio.real_status(row, f, cfg)
+        js, = run_js({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(f), "cfg": cfg}})
+        assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "last_close", "bounce_by"))
+        return py
+    small = case(last * 1.15)
+    assert small["status"] == "EXIT" and "under your stop" in small["reason"]
+    under = frame.iloc[:int((frame.close < frame.ema20).to_numpy().nonzero()[0][-1]) + 1]   # ends under its 20-day average
+    big = case(float(under.close.iloc[-1]) * 1.7, f=under)
+    assert big["status"] == "BOUNCE" and big["bounce_level"] == pytest.approx(float(under.ema20.iloc[-1]))
+    assert case(last * 1.7)["reason"].startswith("Big loss")       # ends above it: the bounce is here, sell
+    # bought 30 sessions before the end far above the price: 20 sessions without a bounce, or the bounce came
+    old = case(float(frame.close.iloc[-31]) * 2, str(frame.index[-31].date()))
+    assert old["status"] == "EXIT" and old["reason"].startswith("Big loss")
 
 
 @needs_node
@@ -163,6 +197,202 @@ def test_your_trades_bonus_shares_and_dividends_match(tmp_path, cfg):
 
 
 @needs_node
+def test_a_rights_issue_subscribed_or_not_matches(tmp_path, cfg):
+    """KORA-like: 0.9 new share per share at 0.205 against a 6.50 price re-bases past prices ÷ 1.848. AAA subscribed
+    (1,000 → 1,900 shares, paying 0.205 each), BBB sold its rights (kept 1,000). Python and the browser agree."""
+    conn = db.connect(tmp_path / "real.db")
+    t1 = portfolio.add_real_buy(conn, cfg, "AAA", "2026-01-05", 6.5, 1000, 0.3, "Energy")
+    t2 = portfolio.add_real_buy(conn, cfg, "BBB", "2026-01-05", 6.5, 1000, 0.3, "Energy")
+    for sym in ("AAA", "BBB"):
+        conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) "
+                     "VALUES (?, 'rights', 'Capital Increase - Rights Issue', '2026-01-10', '2026-01-20', '', 'x')", (sym,))
+        conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES (?, '2026-01-20', 1.848, 'x')",
+                     (sym,))
+    conn.commit()
+    events = corporate.events(conn)
+    pend = corporate.pending(conn, "real")
+    assert all(e["rights"] for e in events) and pend[t1]["rights"] and pend[t1]["shares_expected"] == 1000
+    assert corporate.adjust_problem(1000, pend[t1], 900) and corporate.adjust_problem(1000, pend[t1], 1900, 0)
+    before = conn.execute("SELECT * FROM trades WHERE id=?", (t1,)).fetchone()
+    a = corporate.apply(conn, t1, pend[t1]["event_id"], 1900, 0.205)
+    b = corporate.apply(conn, t2, pend[t2]["event_id"], 1000)
+    assert a["avg"] == pytest.approx((before["entry_price"] * 1000 + 900 * 0.205) / 1900)   # what you paid in all
+    assert b["avg"] == pytest.approx(before["entry_price"] / 1.848)
+    aaa = conn.execute("SELECT * FROM trades WHERE id=?", (t1,)).fetchone()
+    assert aaa["stop"] == pytest.approx(before["stop"] / 1.848)                             # follows the prices
+    closes = {"AAA": 3.6, "BBB": 3.6}
+    summary = portfolio.account_summary(conn, "real", cfg, closes)
+    trades = portfolio.trades_df(conn, "real").to_dict("records")
+    fills = [dict(r) for r in conn.execute("SELECT * FROM fills ORDER BY id")]
+
+    buy = {"op": "buy", "sector": "Energy", "stop": None, "notes": "", "date": "2026-01-05", "price": 6.5, "shares": 1000,
+           "atr": 0.3}
+    steps = [{**buy, "symbol": "AAA"}, {**buy, "symbol": "BBB"}, {"op": "pending"},
+             {"op": "apply", "trade_id": 1, "event_id": "AAA:2026-01-20", "shares": 1900, "paid": 0.205, "today": "2026-01-21"},
+             {"op": "apply", "trade_id": 3, "event_id": "BBB:2026-01-20", "shares": 1000, "today": "2026-01-21",
+              "closes": closes}]
+    (js,) = run_js({"op": "real", "args": {"cfg": cfg, "steps": steps, "events": events}})
+    assert_same(pend[t1], js["out"][2]["1"], ("factor", "rights", "describe", "shares_now", "shares_expected"))
+    assert_same(a, js["out"][3], ("old", "new", "ratio", "avg"))
+    assert_same(b, js["out"][4], ("old", "new", "ratio", "avg"))
+    for x, y in zip(trades, js["trades"]):
+        assert_same(x, y, TRADE_KEYS)
+    for x, y in zip(fills, js["fills"]):
+        assert_same(x, y, ("symbol", "date", "side", "shares", "price", "fees", "note"))
+    assert_same(summary, js["summary"], ("cash", "equity", "realized", "unrealized", "open_risk"))
+
+    # Editing a transaction later rebuilds the position from them: the rights issue's cost stays in.
+    (again,) = run_js({"op": "real", "args": {"cfg": cfg, "events": events, "steps": steps + [
+        {"op": "edit", "fill": 0, "set": {"note": "edited"}, "atr": 0.3}]}})
+    assert again["out"][-1] == "ok" and again["trades"][0]["entry_price"] == pytest.approx(a["avg"])
+
+
+@needs_node
+def test_rights_before_you_decide_count_like_your_broker(tmp_path, cfg):
+    """Thndr's KORA after the ex-date: the shares at their own price, and the rights (KORA_r1) at 2.53 − 0.205 → 2.32,
+    cost 0, in the account's worth. Python and the browser agree."""
+    from egx_agent.data import news
+    conn = db.connect(tmp_path / "real.db")
+    t1 = portfolio.add_real_buy(conn, cfg, "KORA", "2026-09-23", 6.40688, 15170, 0.3, "Energy")
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) "
+                 "VALUES ('KORA', 'rights', 'Capital Increase - Rights Issue', '2026-10-04', '2026-10-14', ?, 'x')",
+                 (news.KNOWN_ACTIONS[0]["note"],))
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('KORA', '2026-10-14', 1.833333, 'x')")
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) "
+                 "VALUES ('KORA', '2026-10-14', 2.53, 2.99, 2.53, 2.92, 1e6)")
+    conn.commit()
+    events, pend = corporate.events(conn), corporate.pending(conn, "real")
+    assert {k: pend[t1]["terms"][k] for k in ("ratio", "price", "ref")} == {"ratio": 0.9, "price": 0.205, "ref": 2.32}
+    closes = {"KORA": 2.77}
+    summary = portfolio.account_summary(conn, "real", cfg, closes)
+    assert summary["equity"] - summary["cash"] == pytest.approx(15170 * 2.77 + 13653 * 2.32)
+    steps = [{"op": "buy", "symbol": "KORA", "sector": "Energy", "stop": None, "notes": "", "date": "2026-09-23",
+              "price": 6.40688, "shares": 15170, "atr": 0.3}, {"op": "pending", "closes": closes}]
+    (js,) = run_js({"op": "real", "args": {"cfg": cfg, "steps": steps, "events": events}})
+    assert js["out"][1]["1"]["terms"] == pend[t1]["terms"]
+    assert_same(summary, js["summary"], ("cash", "equity", "unrealized"))
+
+    # Sold the rights for 31,000: that comes off the cost, nothing else (not the old ÷ 1.8333 guess, 44k). Recorded by
+    # mistake (they're still held, 15 Oct): taken back, the position is as before, waiting again.
+    before = dict(conn.execute("SELECT * FROM trades WHERE id=?", (t1,)).fetchone())
+    res = corporate.apply(conn, t1, pend[t1]["event_id"], 15170, got=31000)
+    assert res["avg"] == pytest.approx(before["entry_price"] - 31000 / 15170)
+    steps += [{"op": "trades"}, {"op": "apply", "trade_id": 1, "event_id": "KORA:2026-10-14", "shares": 15170, "got": 31000,
+                                 "today": "2026-10-15"}, {"op": "undo"}, {"op": "pending", "closes": closes}]
+    (js,) = run_js({"op": "real", "args": {"cfg": cfg, "steps": steps, "events": events}})
+    was, applied, undone = js["out"][2][0], js["out"][3], js["out"][4]
+    assert_same(res, applied, ("old", "new", "avg"))
+    assert undone["shares"] == 15170 and undone["avg"] == pytest.approx(was["entry_price"])
+    for k in ("entry_price", "stop", "initial_stop", "target"):
+        assert js["trades"][0][k] == pytest.approx(was[k]), k
+    assert js["out"][5]["1"]["terms"]["ref"] == 2.32 and not [f for f in js["fills"] if f["side"] == "bonus"]
+    # what the site recorded on 15 Oct: the count it fills in confirmed as is (avg ÷ 1.8333 → 3.494), then taken back
+    steps += [{"op": "apply", "trade_id": 1, "event_id": "KORA:2026-10-14", "shares": 15170, "today": "2026-10-15"},
+              {"op": "undo"}, {"op": "trades"}]
+    (js,) = run_js({"op": "real", "args": {"cfg": cfg, "steps": steps, "events": events}})
+    assert js["out"][6]["avg"] == pytest.approx(was["entry_price"] / 1.833333)
+    for k in ("entry_price", "stop", "initial_stop", "target"):
+        assert js["out"][8][0][k] == pytest.approx(was[k]), k
+
+
+def test_the_rights_have_their_own_symbol_until_the_new_shares_list(tmp_path, cfg):
+    """KORA_r1 is on the Stocks page (search and its page) from the ex-date, with its milestones, until about three
+    months after the subscription closes."""
+    from egx_agent.data import news
+    conn = db.connect(tmp_path / "r.db")
+    news.save_corporate_actions(conn, news.KNOWN_ACTIONS)
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('KORA', '2026-10-14', 1.833333, 'x')")
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) "
+                 "VALUES ('KORA', '2026-10-14', 2.53, 2.99, 2.53, 2.92, 1e6)")
+    conn.commit()
+    d = views.Data(conn, cfg, views.Cache())
+    (r,) = views.rights_list(d, "2026-10-17")
+    assert (r["symbol"], r["base"], r["close"], r["price"], r["ratio"]) == ("KORA_r1", "KORA", 2.32, 0.205, 0.9)
+    assert [s[2] for s in r["schedule"]][3:] == ["Rights trading starts", "Rights trading ends",
+                                                 "Last day to subscribe on Thndr", "Round 1 ends", "Subscription closes"]       # pages/rights.js stage() reads these
+    assert r["trading"]["days"] == ["2026-10-18", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22",
+                                    "2026-10-25", "2026-10-26", "2026-10-27"] and r["trading"]["bars"] == []
+    assert views.rights_list(d, "2026-10-13") == [] and views.rights_list(d, "2027-03-01") == []
+    # once they trade (18 Oct: 2.32 → 2.63), at the scan's last close: TradingView's screener has no live KORAR1
+    conn.execute("INSERT INTO rights_prices VALUES ('KORA_r1', '2026-10-18', 2.32, 2.71, 1.77, 2.63, 1.2e8)")
+    (r,) = views.rights_list(d, "2026-10-18")
+    assert r["close"] == 2.63 and r["change"] == pytest.approx(2.63 / 2.32 - 1)
+    assert corporate.rights_holding(corporate.events(conn)[0], 1000)["value"] == pytest.approx(900 * 2.63)
+
+
+@needs_node
+def test_the_real_cost_after_selling_the_rights(tmp_path, cfg):
+    """Thndr keeps KORA_r1 at no cost, so selling the rights never lowers KORA's cost there: its average and break-even
+    stay too high. The real cost takes the rights' cash off (the user's own orders, Oct 2026). Before deciding, the
+    rights' three options side by side. Python and the browser agree."""
+    from egx_agent.data import news
+    free = {**cfg, "broker": "other", "fee_pct_per_side": 0.0}       # no selling fee: the break-even is the real average
+    conn = db.connect(tmp_path / "real.db")
+    t1 = portfolio.add_real_buy(conn, free, "KORA", "2026-09-23", 97192.34 / 15170, 15170, 0.3, "Energy", fees_in=True)
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) "
+                 "VALUES ('KORA', 'rights', 'Capital Increase - Rights Issue', '2026-10-04', '2026-10-14', ?, 'x')",
+                 (news.KNOWN_ACTIONS[0]["note"],))
+    conn.execute("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES ('KORA', '2026-10-14', 1.833333, 'x')")
+    conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) "
+                 "VALUES ('KORA', '2026-10-14', 2.53, 2.99, 2.53, 2.92, 1e6)")
+    conn.commit()
+    events = corporate.events(conn)
+    # Case 1: sold the 13,653 rights at 1.90 (25,940.70), then bought 8,000 @2.04, 4,618 @2.08 and 529 @2.06:
+    # 27,038.43 with Thndr's fees
+    corporate.apply(conn, t1, corporate.pending(conn, "real")[t1]["event_id"], 15170, got=25940.70)
+    k = 27038.43 / (8000 * 2.04 + 4618 * 2.08 + 529 * 2.06)
+    for n, px in ((8000, 2.04), (4618, 2.08), (529, 2.06)):
+        portfolio.add_real_buy(conn, free, "KORA", "2026-10-20", px * k, n, 0.3, "Energy", fees_in=True)
+    t = conn.execute("SELECT * FROM trades WHERE id=?", (t1,)).fetchone()
+    fills = [dict(r) for r in conn.execute("SELECT * FROM fills WHERE trade_id=? ORDER BY date, id", (t1,))]
+    args = [fills, t["shares"], t["entry_price"], t["fees"], 2.05, free, None, events, "KORA", "2026-10-21"]
+    r = corporate.real_cost(*args)
+    assert t["shares"] == 28317 and r["app_avg"] == pytest.approx(4.38714, abs=1e-4)
+    assert r["real_cost"] == pytest.approx(98290.07, abs=0.01) and r["break_even"] == pytest.approx(3.471, abs=1e-3)
+    assert r["pnl"] == pytest.approx(-40240, abs=1) and r["pnl_pct"] == pytest.approx(-0.409, abs=1e-3)
+    assert r["unlisted"] == 0 and r["break_even"] == pytest.approx(r["real_avg"])
+    with_fee = corporate.real_cost(*args[:5], {**cfg, "broker": "thndr"}, *args[6:])
+    assert with_fee["break_even"] > r["break_even"] and with_fee["to_break_even"] == pytest.approx(with_fee["break_even"] / 2.05 - 1)
+    # Case 1 had they subscribed instead: 13,653 × 0.205 = 2,798.87 more → break-even 3.469
+    o1 = [15170, 97192.34, 13653, 1.90, 2.05, 0.205, free]
+    c = corporate.rights_options(*o1)["C"]
+    assert c["pay"] == pytest.approx(2798.87, abs=0.01) and c["break_even"] == pytest.approx(3.469, abs=1e-3)
+
+    # Case 2, before selling: 1,170 shares (avg 6.4444) and 1,053 rights; KORA 2.05, a right 1.90
+    buy = {"id": 1, "date": "2026-09-23", "side": "buy", "shares": 1170, "price": 6.4444, "fees": 0.0, "note": ""}
+    args2 = [[buy], 1170, 6.4444, 0.0, 2.05, free, {"value": 1053 * 1.90}, events, "KORA", "2026-10-21"]
+    r2 = corporate.real_cost(*args2)
+    assert 1170 * 2.05 + r2["unsold"] == pytest.approx(4399.2, abs=0.01)
+    assert r2["pnl"] == pytest.approx(-3140, abs=1) and r2["pnl_pct"] == pytest.approx(-0.416, abs=1e-3)
+    assert r2["app_avg"] is None                                              # nothing sold yet: the same either way
+    o2 = [1170, 1170 * 6.4444, 1053, 1.90, 2.05, 0.205, free, 8.34, 1014, 2.0566]
+    a, b, c = (corporate.rights_options(*o2)[x] for x in "ABC")
+    assert (a["shares"], a["new"]) == (2146, 976) and a["pay"] == pytest.approx(2007.2, abs=0.1)
+    assert a["app_avg"] == pytest.approx(4.45, abs=0.005) and a["real_cost"] == pytest.approx(7546.5, abs=0.1)
+    assert a["break_even"] == pytest.approx(3.52, abs=0.005) and a["pnl"] == pytest.approx(-3148, abs=1)
+    assert a["extra_cash"] == 0
+    assert b["shares"] == 2184 and b["extra_cash"] == pytest.approx(77, abs=1) and b["break_even"] == pytest.approx(3.49, abs=0.005)
+    assert c["shares"] == 2223 and c["pay"] == pytest.approx(215.87, abs=0.01) and c["break_even"] == pytest.approx(3.489, abs=1e-3)
+
+    # subscribed shares wait to be listed (about three months after the subscription closes on 10 Nov)
+    sub = {"id": 2, "date": "2026-10-14", "side": "bonus", "shares": 1053, "price": 0.205, "fees": 0.0,
+           "note": "Rights issue: 1,053 new shares at 0.205, 1,170 → 2,223 shares"}
+    args3 = [[buy, sub], 2223, (1170 * 6.4444 + 1053 * 0.205) / 2223, 0.0, 2.05, free, None, events, "KORA", "2026-10-21"]
+    assert corporate.real_cost(*args3)["unlisted"] == 1053
+    assert corporate.real_cost(*args3[:-1], "2027-03-01")["unlisted"] == 0
+    # a position without a rights issue: nothing changes
+    assert corporate.real_cost([buy], 1170, 6.4444, 0.0, 2.05, free) is None
+
+    (js,) = run_js({"op": "rightsMath", "args": {"cost": [args, args2, args3], "options": [o1, o2]}})
+    for py, j in zip([r, r2, corporate.real_cost(*args3)], js["cost"]):
+        assert_same(py, j, py.keys())
+    for py, j in zip([corporate.rights_options(*o1), corporate.rights_options(*o2)], js["options"]):
+        assert_same(py, j, ["got"])
+        for x in "ABC":
+            assert_same(py[x], j[x], py[x].keys())
+
+
+@needs_node
 def test_mac_portfolio_backup_restores_on_the_site(tmp_path, cfg):
     """Your Mac portfolio, saved as a site backup: the site shows the same positions, cash and pending bonus shares."""
     conn = db.connect(tmp_path / "mac.db")
@@ -214,6 +444,17 @@ def test_dates_and_words_match():
                       for t in times]
     assert got[2] == [corporate.describe(f) for f in factors]
     assert got[3] == [views.px(v) for v in values]
+    holidays.HOLIDAYS.update({"2026-10-08": "x", "2026-10-11": "y"})      # the same with EGX's holidays
+    try:
+        pairs += [("2026-10-07", 1), ("2026-10-06", 3)]
+        times += ["2026-10-08T18:00:00+03:00", "2026-10-11T16:00:00+03:00", "2026-10-12T09:00:00+03:00"]
+        got = run_js({"op": "sessionsAfter", "args": {"pairs": pairs, "holidays": dict(holidays.HOLIDAYS)}},
+                     {"op": "expected", "args": {"times": times, "holidays": dict(holidays.HOLIDAYS)}})
+        assert got[0] == [views.sessions_after(d, n) for d, n in pairs] and got[0][-1] == "2026-10-13"
+        assert got[1] == [scan.expected_session_date(datetime.fromisoformat(t).astimezone(scan.CAIRO)).isoformat()
+                          for t in times] and got[1][-3:] == ["2026-10-07"] * 3
+    finally:
+        holidays.HOLIDAYS.clear()
 
 
 # ------------------------------------------------------------------ what gets published
@@ -245,12 +486,13 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
     res = static_site.build(conn, cfg, tmp_path / "site", PASSWORD, "me/egx")
     out = tmp_path / "site"
     info = json.loads((out / "data" / "site.json").read_text())
-    assert set(info) == {"v", "salt", "iter", "stamp", "built"} and info["iter"] >= 600_000
+    assert set(info) == {"v", "salt", "iter", "stamp", "built", "worker"} and info["iter"] >= 600_000
+    assert info["worker"] is None                     # the bot's address, only when it has one
     assert res["stocks"] == 2 and (out / "data" / "stock" / "AAA.bin").exists()
 
     page = (out / "index.html").read_text()
     assert 'data-mode="static"' in page and "Content-Security-Policy" in page and "noindex" in page
-    assert '"./static/vendor/preact.module.js"' in page and '"/static/' not in page
+    assert f'"./static/{static_site.code_version()}/vendor/preact.module.js"' in page and '"/static/' not in page
     assert (out / "robots.txt").read_text().startswith("User-agent: *\nDisallow: /")
 
     # Every published byte: no token, no chat, no portfolio; the data only opens with the password.
@@ -272,6 +514,7 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
     fields = {f["key"] for s in core["sections"] for f in s["fields"]}
     assert "capital" in fields and not fields & {"paper_capital", "auto_paper"}
     assert not {"paper_capital", "auto_paper"} & set(core["personal_defaults"])
+    assert core["personal_defaults"]["shariah_filter"] == "kashif"      # friends start with Kashif-compliant only
     assert "atr14" in files["stock/AAA.bin"]["series"]
     assert files["stock/AAA.bin"]["plan"]["stop"] < files["stock/AAA.bin"]["stats"]["close"]   # for the calculator
     assert {"dividends", "yield", "bonus"} <= set(files["stock/AAA.bin"]["corporate"])
@@ -329,7 +572,7 @@ class FakeBot:
         assert method == "getUpdates" and "offset" not in params
         return list(self.updates)
 
-    def send(self, token, chat, text):
+    def send(self, token, chat, text, buttons=None):
         from app import alerts
         if chat in self.blocked:
             raise alerts.TelegramError("Telegram: Forbidden: bot was blocked by the user", 403)
@@ -343,7 +586,8 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     strategy = tmp_path / "strategy.yaml"
     static_site.export_strategy(dict(config.DEFAULTS), strategy)
     monkeypatch.setattr(config, "CONFIG_PATH", strategy)
-    monkeypatch.setattr(scan, "scan_is_stale", lambda conn: False)          # no downloads in tests
+    monkeypatch.setattr(scan, "scan_is_stale", lambda conn, *_: False)          # no downloads in tests
+    monkeypatch.setattr(scan, "session_scan_due", lambda conn, *_: False)
     scans = []
     monkeypatch.setattr(scan, "run_scan", lambda conn, cfg, progress=None, update_data=True: scans.append(update_data)
                         or {"date": "x", "buys": 1, "watches": 0})
@@ -363,12 +607,12 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     assert [c for c, _ in bot.sent] == ["111", "111"]
     assert "Connected" in bot.sent[0][1]
     daily = bot.sent[1][1]
-    assert "AAA" in daily and "buy up to" in daily and "https://me.github.io/egx/" in daily and "/stop" in daily
+    assert "AAA" in daily and "Buy up to" in daily and "https://me.github.io/egx/" in daily and "/stop" in daily
     assert "shares" not in daily.lower() and "MY PRIVATE NOTE" not in daily
     # The link is only inside the encrypted data; nothing about who connected is published or logged.
     key = static_site.derive_key(PASSWORD, static_site.salt_for("me/egx"))
     core = static_site.unseal((site / "data" / "core.bin").read_bytes(), key)
-    assert core["telegram"] == {"bot": "TestEGXBot", "link": f"https://t.me/TestEGXBot?start={code}"}
+    assert core["telegram"] == {"bot": "TestEGXBot", "link": f"https://t.me/TestEGXBot?start={code}", "worker": None}
     assert core["final"] is True
     # The owner's Run scan button opens the scan on GitHub; the site holds no GitHub key for it.
     assert core["scan_url"] == "https://github.com/me/egx/actions/workflows/site.yml"
@@ -421,7 +665,8 @@ def test_scheduled_runs_publish_only_when_something_changed(tmp_path, monkeypatc
     strategy = tmp_path / "strategy.yaml"
     static_site.export_strategy(dict(config.DEFAULTS), strategy)
     monkeypatch.setattr(config, "CONFIG_PATH", strategy)
-    monkeypatch.setattr(scan, "scan_is_stale", lambda conn: False)
+    monkeypatch.setattr(scan, "scan_is_stale", lambda conn, *_: False)
+    monkeypatch.setattr(scan, "session_scan_due", lambda conn, *_: False)
     monkeypatch.setattr(scan, "run_scan", lambda *a, **k: {"date": "x", "buys": 1, "watches": 0})
     monkeypatch.setattr(jobs, "train_job", lambda conn, say: None)
     first = site_daily.run(src, tmp_path / "site", PASSWORD, "me/egx")
@@ -497,6 +742,63 @@ def test_size_calculator_uses_the_signals_own_sizing_rule():
     assert bad_stop == {"ok": False, "error": "The stop must be below the entry price."}
 
 
+
+
+def test_editing_a_transaction_rebuilds_the_trade_as_if_logged_right():
+    """My Portfolio's edit/delete buttons: logging a wrong price and fixing it gives the same trades as logging it
+    right; deleting the sale of every share opens the position again; deleting its only buy deletes it."""
+    cfg = {**config.DEFAULTS, "broker": "thndr"}
+    buy = {"op": "buy", "symbol": "AAA", "sector": "Banks", "stop": None, "notes": "", "atr": 0.5}
+    right = [{**buy, "date": "2026-01-04", "price": 10.0, "shares": 100}, {**buy, "date": "2026-01-06", "price": 11.0, "shares": 100},
+             {"op": "sell", "trade_id": 1, "date": "2026-01-08", "price": 13.0, "shares": 50, "reason": "Target reached"}]
+    wrong = [right[0], {**right[1], "price": 12.0}, right[2], {"op": "edit", "fill": 1, "set": {"price": 11.0}, "atr": 0.5}]
+    closed = [right[0], {"op": "sell", "trade_id": 1, "date": "2026-01-08", "price": 12.0, "shares": 100, "reason": "Target reached"}]
+    a, b, c, d = run_js(
+        {"op": "real", "args": {"cfg": cfg, "steps": right, "events": []}},
+        {"op": "real", "args": {"cfg": cfg, "steps": wrong, "events": []}},
+        {"op": "real", "args": {"cfg": cfg, "steps": closed + [{"op": "delfill", "fill": 1, "atr": 0.5}], "events": []}},
+        {"op": "real", "args": {"cfg": cfg, "steps": [right[0], {"op": "delfill", "fill": 0, "atr": 0.5}], "events": []}})
+    strip = lambda ts: sorted(({k: v for k, v in x.items() if k != "id"} for x in ts), key=lambda x: x["status"])  # noqa: E731
+    assert len(a["trades"]) == len(b["trades"]) == 2                     # the open rest and the partial sale
+    for x, y in zip(strip(a["trades"]), strip(b["trades"])):
+        assert x.keys() == y.keys()
+        for k in x:
+            assert x[k] == (pytest.approx(y[k]) if isinstance(y[k], float) else y[k]), k
+    assert a["summary"]["cash"] == pytest.approx(b["summary"]["cash"])
+    reopened = c["trades"]
+    assert len(reopened) == 1 and reopened[0]["status"] == "open" and reopened[0]["shares"] == 100 and reopened[0]["exit_date"] is None
+    assert d["out"][-1] == "deleted" and d["trades"] == []
+    oversold, = run_js({"op": "real", "args": {"cfg": cfg, "events": [],
+                        "steps": right + [{"op": "edit", "fill": 2, "set": {"shares": 500}, "atr": 0.5}]}}, raw=True)
+    assert not oversold["ok"] and "you held 200" in oversold["error"]
+
+
+def test_a_price_with_the_fees_in_it_adds_no_fees_and_keeps_that_when_edited():
+    """Thndr's average cost has its fees in it: logged as such (the screenshot import does it), the site adds none,
+    so the loss matches Thndr's (KORA: 12,299 at an exact average of 6.43298, now 6.18: Thndr says −3,111.38)."""
+    cfg = {**config.DEFAULTS, "broker": "thndr_trader"}
+    buy = {"op": "buy", "symbol": "AAA", "sector": "Banks", "stop": None, "notes": "", "atr": 0.3, "date": "2026-01-04",
+           "shares": 12_299, "price": 6.43298, "fees_in": True}
+    a, b = run_js({"op": "real", "args": {"cfg": cfg, "events": [], "steps": [{**buy, "closes": {"AAA": 6.18}}]}},
+                  {"op": "real", "args": {"cfg": cfg, "events": [], "steps": [
+                      buy, {"op": "edit", "fill": 0, "set": {"price": 6.43}, "atr": 0.3}]}})
+    assert a["trades"][0]["fees"] == 0 and a["fills"][0]["fees_in"] is True
+    assert b["trades"][0]["fees"] == 0 and b["trades"][0]["entry_price"] == 6.43       # edited: still no fees added
+    assert a["summary"]["unrealized"] == pytest.approx(-3_111.38, abs=0.5)
+    plain, = run_js({"op": "real", "args": {"cfg": cfg, "events": [], "steps": [{**buy, "fees_in": False}]}})
+    assert plain["trades"][0]["fees"] == pytest.approx(config.order_fee(6.43298 * 12_299, cfg))
+
+
+def test_thndr_fees_match_on_the_site_and_the_mac():
+    from app import views
+    thndr = {**config.DEFAULTS, "broker": "thndr"}
+    assert config.order_fee(1_000, thndr) == pytest.approx(4.75)            # Thndr's own example: EGP 3 + 1.75
+    assert config.order_fee(1_000, {**thndr, "broker": "thndr_trader"}) == pytest.approx(1.75)
+    cfg = {k: thndr[k] for k in views.CALC_KEYS}
+    plan, = run_js({"op": "plan", "args": dict(symbol="BBB", sector="Banks", entry=20.0, stop=18.6, equity=100_000.0,
+                                               cash=60_000.0, avgValue=5e6, positions=[], cfg=cfg, riskOff=False)})
+    assert plan["buy_fee"] == pytest.approx(config.order_fee(plan["amount"], cfg))
+
 def _history_db(path: Path, apply_bonus: bool):
     conn = db.connect(path)
     conn.execute("INSERT INTO stocks(symbol, name_ar, sector_ar) VALUES ('AAA', 'أ', 'بنوك'), ('BBB', 'ب', 'عقاري')")
@@ -567,6 +869,10 @@ def test_market_movers_leave_out_splits_the_prices_dont_show_yet(tmp_path, cfg):
     m = views.movers(views.Data(conn, cfg, views.Cache()))
     week = m["movers"]["ret5"]
     assert [r["symbol"] for r in week["up"]] == ["AAA"] and [r["symbol"] for r in week["down"]] == ["AAA"]
+    money = m["sector_money"]                    # where the money went: shares of the last session, biggest first
+    assert money and sum(r["share"] for r in money) == pytest.approx(1)
+    assert [r["value"] for r in money] == sorted((r["value"] for r in money), reverse=True)
+    assert 0 < sum(r["usual"] for r in money) <= 1 + 1e-9
 
 
 def test_friends_set_alerts_in_telegram_and_get_them_after_a_close(tmp_path, monkeypatch):
@@ -592,7 +898,7 @@ def test_friends_set_alerts_in_telegram_and_get_them_after_a_close(tmp_path, mon
 
     bot.sent.clear()
     assert alerts.fire_watch_alerts(conn, "123:abc", last) == 1     # AAA is a BUY at this close
-    assert "AAA</b> got a BUY signal" in bot.sent[0][1]
+    assert "AAA</b> · BUY signal" in bot.sent[0][1]
     assert alerts.fire_watch_alerts(conn, "123:abc", last) == 0     # once per close
     conn.execute("UPDATE prices SET close=0.5 WHERE symbol='BBB' AND date=?", (last,))
     assert alerts.fire_watch_alerts(conn, "123:abc", last) == 1     # BBB closed below 1: sent, and done
@@ -633,7 +939,8 @@ def test_arabic_translations_keep_their_placeholders():
     import json
     import re
     src = (ROOT / "app" / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
-    body = src[src.index("export const AR = {"):]
+    ar = (ROOT / "app" / "static" / "js" / "ar.js").read_text(encoding="utf-8")       # loaded only for Arabic
+    body = ar[ar.index("export const AR = {"):]
     pairs = re.findall(r'^  ("(?:[^"\\]|\\.)*"): ("(?:[^"\\]|\\.)*"),$', body, re.M)
     assert len(pairs) > 400
     keys = [json.loads(k) for k, _ in pairs]
@@ -655,3 +962,165 @@ def test_nothing_hides_the_translator():
             continue
         bad = [m.group(0) for m in clash.finditer(src)]
         assert not bad, f"{f.name}: {bad}"
+
+
+def test_the_page_may_send_only_to_the_bots_worker():
+    assert "connect-src 'self';" in static_site.index_html()
+    page = static_site.index_html("https://egx-bot.x.workers.dev/")
+    assert "connect-src 'self' https://egx-bot.x.workers.dev;" in page
+    assert "connect-src 'self';" in static_site.index_html("http://evil.example")      # https only
+
+
+def test_each_code_version_is_published_under_its_own_address(tmp_path):
+    ver = static_site.code_version()
+    page = static_site.index_html(None, ver)
+    assert f'"./static/{ver}/js/main.js"' in page and f'"./static/{ver}/vendor/preact.module.js"' in page
+
+
+def test_every_reason_the_model_gives_has_arabic():
+    """i18n.js WHY_AR translates the model's reasons (predict.WHY_TEXT) by their label: a new one needs Arabic too."""
+    import re
+    from egx_agent import predict
+    src = (ROOT / "app" / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+    body = src[src.index("export const WHY_AR = {"):src.index("const WHY_LABELS")]
+    labels = {a or b for a, b in re.findall(r"""(?:'([^']+)'|"([^"]+)"): '""", body)}
+    assert {label for label, _ in predict.WHY_TEXT.values()} <= labels
+
+
+@needs_node
+def test_your_stop_counts_from_the_day_you_set_it():
+    """A stop you set (my_stop) is only ever higher, and a dip under it before the day you set it doesn't sell."""
+    bar = lambda d, low, close: {"date": d, "open": close, "high": close + 0.1, "low": low, "close": close,  # noqa: E731
+                                 "atr14": 0.5, "ema20": 9.0, "ema50": 8.0, "sup": None, "div": 0}
+    bars = [bar("2026-01-04", 9.9, 10.0), bar("2026-01-05", 9.4, 9.8), bar("2026-01-06", 9.7, 10.0),
+            bar("2026-01-07", 9.8, 10.1)]
+    trade = {"symbol": "X", "entry_date": "2026-01-04", "entry_price": 10.0, "shares": 100, "initial_stop": 9.0,
+             "stop": 9.0, "target": 13.0, "highest_close": 10.0, "my_stop": 9.5}
+    case = lambda since: {"op": "realStatus", "args": {"trade": {**trade, "my_stop_from": since}, "bars": bars,  # noqa: E731
+                                                       "cfg": config.DEFAULTS}}
+    after_dip, on_dip, after_close = run_js(case("2026-01-06"), case("2026-01-05"), case("2026-01-08"))
+    assert after_dip["status"] == "HOLD" and after_dip["stop"] == 9.5
+    assert on_dip["status"] == "EXIT" and "2026-01-05" in on_dip["reason"]
+    assert after_close["status"] == "HOLD" and after_close["stop"] == 9.5     # no "raise your stop" for your own stop
+
+
+@needs_node
+def test_your_stop_starts_at_the_next_session():
+    """A stop set during a session counts from the next one (today's open came before it), before the open from today."""
+    times = ["2026-10-04T06:30:00Z", "2026-10-04T09:00:00Z", "2026-10-08T14:00:00Z", "2026-10-09T09:00:00Z"]
+    (got,) = run_js({"op": "stopFrom", "args": {"times": times}})   # Cairo: Sun 09:30, Sun 12:00, Thu 17:00, Fri
+    assert got == ["2026-10-04", "2026-10-05", "2026-10-11", "2026-10-11"]
+
+
+@needs_node
+def test_stops_that_move_only_when_you_change_them(cfg):
+    """stop_moves "mine": no rise to support nor after a 1× gain, in the browser and in Python alike."""
+    ind, cases, expected = market(), [], []
+    c = {**cfg, "stop_moves": "mine"}
+    for sym, frame in ind.items():
+        for i in (70, 150, 230):
+            day, price = frame.index[i], float(frame.close.iloc[i])
+            stop = float(strategy.initial_stop(price, frame.atr14.iloc[i], c))
+            row = pd.Series({"symbol": sym, "entry_date": str(day.date()), "entry_price": price, "shares": 100,
+                             "initial_stop": stop, "stop": stop, "target": price + 2 * (price - stop), "sector": "A"})
+            expected.append(portfolio.real_status(row, frame, c))
+            cases.append({"op": "realStatus", "args": {"trade": row.to_dict(), "bars": bars_of(frame), "cfg": c}})
+            assert expected[-1]["stop"] == stop and expected[-1]["status"] != "TIGHTEN STOP"
+    for py, js in zip(expected, run_js(*cases)):
+        assert_same(py, js, ("status", "reason", "stop", "days_held", "event_date", "prev_stop", "last_close"))
+    auto = [portfolio.real_status(pd.Series(x["args"]["trade"]), ind[x["args"]["trade"]["symbol"]], cfg) for x in cases]
+    assert any(a["stop"] > e["stop"] for a, e in zip(auto, expected))      # the same trades' stops rise by themselves
+
+
+@needs_node
+@needs_node
+def test_thndr_trader_gives_50_orders_a_plan_month_without_commission_and_renews_from_the_wallet():
+    """The plan month starts on the day you subscribed (the 31st: a shorter month's last day); the first 50 buys and
+    sales in it have no commission, the 51st has; renewals after you added the plan here come out of the wallet; and
+    the Mac's fee rule is the same."""
+    plan = {"since": "2026-03-25", "kind": "monthly", "price": 245, "added": "2026-10-08"}
+    trade = {"id": 1, "account": "real", "status": "open", "symbol": "X"}
+    fills = [{"id": 10 + i, "trade_id": 1, "symbol": "X", "date": "2026-09-25" if i < 30 else "2026-10-07",
+              "side": "buy" if i % 2 else "sell", "shares": 1, "price": 10} for i in range(50)]
+    book = {"next_id": 99, "trades": [trade], "fills": fills, "dividends": [], "adjustments": [], "cash": []}
+    cfg = {**config.DEFAULTS, "broker": "thndr_trader"}
+    days = ["2026-03-24", "2026-09-24", "2026-10-08", "2026-10-25"]
+    js, short = run_js({"op": "thndrPlan", "args": {"plan": plan, "book": book, "days": days, "today": "2026-12-01",
+                                                   "cfg": cfg, "value": 10_000}},
+                       {"op": "thndrPlan", "args": {"plan": {**plan, "since": "2026-01-31", "paid_to": "2026-09-30"},
+                                                   "book": book, "days": ["2026-02-28", "2026-03-01"],
+                                                   "today": "2026-12-01", "cfg": cfg, "value": 10_000}})
+    assert js["months"] == [None, ["2026-08-25", "2026-09-25"], ["2026-09-25", "2026-10-25"], ["2026-10-25", "2026-11-25"]]
+    assert js["free"] == [False, True, False, True]           # before subscribing; 0 used; all 50 used; a new month
+    typed, = run_js({"op": "thndrPlan", "args": {"plan": {**plan, "used_at": {"month": "2026-08-25", "n": 50}},
+                                                 "book": book, "days": ["2026-09-24", "2026-10-08"], "today": "2026-10-08",
+                                                 "cfg": cfg, "value": 10_000}})
+    assert typed["free"] == [False, False]                    # Thndr counted 50 that month (none logged); this one: 50 logged
+    assert js["due"] == ["2026-10-25", "2026-11-25"] and js["next"] == "2026-12-25"
+    assert short["months"] == [["2026-02-28", "2026-03-31"], ["2026-02-28", "2026-03-31"]]
+    assert short["due"] == ["2026-10-31", "2026-11-30"]
+    free, paid, unknown = js["fees"]
+    assert paid - free == pytest.approx(2 + 10)               # Thndr's commission: EGP 2 + 0.1%
+    assert unknown == free                                    # no plan saved: every order free, as before
+    for flag, fee in ((True, free), (False, paid), (None, unknown)):
+        assert config.order_fee(10_000, {**cfg, **({} if flag is None else {"free_trade": flag})}) == pytest.approx(fee)
+
+
+def test_wallet_counts_top_ups_withdrawals_fees_and_sales_still_settling():
+    """Top-ups and withdrawals are money in and out, not profit; fees and money back are; a sale's money can't be
+    withdrawn for 2 sessions; and on the account's chart taking money out isn't a fall."""
+    sale = {"id": 1, "account": "real", "status": "closed", "symbol": "X", "entry_date": "2026-10-01",
+            "entry_price": 10, "exit_date": "2026-10-06", "exit_price": 12, "shares": 100, "fees": 0}
+    fills = [{"id": 2, "trade_id": 1, "symbol": "X", "date": "2026-10-01", "side": "buy", "shares": 100, "price": 10},
+             {"id": 3, "trade_id": 1, "symbol": "X", "date": "2026-10-06", "side": "sell", "shares": 100, "price": 12}]
+    cash = [{"id": 4, "date": "2026-10-07", "kind": "deposit", "amount": 1000, "fee": 10},
+            {"id": 5, "date": "2026-10-07", "kind": "withdraw", "amount": 500, "fee": 2.5},
+            {"id": 6, "date": "2026-10-07", "kind": "fee", "amount": 9.59},
+            {"id": 7, "date": "2026-10-07", "kind": "refund", "amount": 20.06}]
+    book = {"next_id": 8, "trades": [sale], "fills": fills, "dividends": [], "adjustments": [], "cash": cash}
+    days = ["a", "b", "c"]
+    curve = {"start": 1000, "fills": [{"date": "a", "symbol": "X", "side": "buy", "shares": 100, "price": 10}],
+             "moves": [{"date": "b", "cash": 1000, "flow": 1000}, {"date": "c", "cash": -500, "flow": -500}],
+             "series": {"X": {"time": days, "close": [10, 10, 10]}}, "index": {"time": days, "close": [100, 100, 110]}}
+    early = {**book, "cash": [*cash, {"id": 8, "date": "2026-10-07", "kind": "settle", "amount": 700, "fee": 5}]}
+    w, c, e = run_js({"op": "wallet", "args": {"book": book, "cfg": {"capital": 10_000}, "today": ["2026-10-07", "2026-10-08"]}},
+                     {"op": "equity", "args": curve},
+                     {"op": "wallet", "args": {"book": early, "cfg": {"capital": 10_000}, "today": ["2026-10-07", "2026-10-08"]}})
+    s = w["summary"]
+    assert s["added"] == 500 and s["start"] == 10_500                       # what you put in, net
+    assert s["cash"] == pytest.approx(10_000 + 200 + 990 - 502.5 - 9.59 + 20.06)
+    assert w["unsettled"] == [1200, 0]                     # sold Tuesday: settles Thursday
+    assert e["unsettled"] == [500, 0] and e["summary"]["cash"] == pytest.approx(s["cash"] - 5)   # Settle now: 700 for 5
+    assert c["value"] == [1000, 2000, 1500] and c["max_drawdown"] == 0 and c["ret"] == 0
+    assert c["index_ret"] == pytest.approx((20 - 500 / 110) * 110 / 1500 - 1)  # what you put in bought EGX30 too
+
+
+@needs_node
+def test_the_orders_list_is_the_same_on_the_site_as_on_the_mac_and_in_telegram(tmp_path, monkeypatch):
+    """views.orders (the Mac and a linked friend's Telegram) and local/api.js orders (the site) are written twice:
+    every kind of order, from the same signals and positions, must come out word for word the same."""
+    day, session = "2026-09-02", "2026-09-03"
+    pos = lambda sym, status, **kw: {"id": len(sym), "symbol": sym, "status": status, "shares": 1250, "stop": 9.87,  # noqa: E731
+                                     "target": 12.5, "day": 4, "reason": f"{sym} reason", **kw}
+    positions = [pos("AAA", "HOLD"), pos("BBB", "EXIT"), pos("CCC", "BOUNCE", bounce_level=8.123),
+                 pos("DDD", "TIGHTEN STOP", prev_stop=9.1), pos("EEE", "REVIEW", day=12),
+                 pos("FFF", "ADJUST", adjust={"describe": "1 free share for every 4 you hold", "ex_date": "2026-08-30"}),
+                 pos("GGG", "HOLD", stop=4.321)]
+    rows = [{"symbol": "HHH", "action": "BUY", "shares": 3400, "entry_high": 15.234, "stop": 13.9, "target": 18.05,
+             "amount": 51795.6, "risk_egp": 4535.6, "source": "model", "score": 80},
+            {"symbol": "III", "action": "BUY", "shares": 0, "size_note": "not enough cash", "score": 70},
+            {"symbol": "JJJ", "action": "WATCH", "shares": 0, "size_note": "watch only", "score": 60}]
+    market = {"risk_off": True}
+    coming = {"GGG": {"ex_date": session, "amount": 0.35}, "AAA": {"ex_date": "2026-09-20", "amount": 1.0}}
+    cfg = {**config.DEFAULTS, "riskoff_block_buys": True}
+    conn = db.connect(tmp_path / "t.db")
+    d = views.Data(conn, cfg, views.Cache())
+    monkeypatch.setattr(views, "signals", lambda _d: (day, rows))
+    monkeypatch.setattr(views, "market_info", lambda _c: market)
+    monkeypatch.setattr(views.dividends, "coming", lambda _c, _day: coming)
+    py = views.orders(d, positions)
+    js, = run_js({"op": "orders", "args": {"scan_date": day, "rows": rows, "positions": positions, "market": market,
+                                           "coming": coming, "cfg": cfg, "holidays": dict(holidays.HOLIDAYS)}})
+    strip = lambda o: {**o, "items": [{k: v for k, v in it.items() if k != "info"} for it in o["items"]]}  # noqa: E731
+    assert len(py["items"]) == 7 and py["session"] == session and py["blocked"]
+    assert strip(js) == strip(py)

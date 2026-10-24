@@ -17,10 +17,46 @@ SHARIAH_MODES = {
     "both": "Kashif compliant AND EGX33 member",
 }
 
+BROKERS = {
+    "thndr": "Thndr",
+    "thndr_trader": "Thndr with the Thndr Trader plan",
+    "other": "Another broker (uses the % below)",
+}
+THNDR_TRADER_EGP = 245         # Thndr Trader's monthly price: no Thndr commission on the first 50 orders a month
+THNDR_FREE_ORDERS = 50
+
+
+def thndr_commission(value: float) -> float:
+    """Thndr's own commission on one order: EGP 2 + 0.1% (none on a Thndr Trader order)."""
+    return 2 + value * 0.001 if value > 0 else 0.0
+
+
+def government_fees(value: float) -> float:
+    """The fees every Egyptian broker passes on, per order (Thndr's fee sheet, Aug 2026): EGX 0.01%, clearing (MCDR)
+    0.01%, investor protection fund 0.005%, stamp duty 0.05%, and the regulator (FRA) 0.005% at EGP 1 to 250."""
+    return value * 0.00075 + min(max(value * 0.00005, 1.0), 250.0) if value > 0 else 0.0
+
+
+def order_fee(value: float, cfg: dict) -> float:
+    """What one buy or sell order of this value (EGP) costs with your broker. Thndr Trader: no commission on the plan
+    month's first 50 orders (free_trade False: one after them; the site counts them, local/engine.js planFree)."""
+    broker = cfg.get("broker", "other")
+    if broker == "thndr":
+        return thndr_commission(value) + government_fees(value)
+    if broker == "thndr_trader":
+        return government_fees(value) + (0.0 if cfg.get("free_trade", True) else thndr_commission(value))
+    return value * cfg["fee_pct_per_side"] / 100
+
+
+def fee_pct(cfg: dict) -> float:
+    """Your fees a side as a %, for estimates where the order's size isn't known."""
+    return {"thndr": 0.18, "thndr_trader": 0.08}.get(cfg.get("broker"), cfg["fee_pct_per_side"])
+
 DEFAULTS: dict = {
     # Money
     "capital": 100_000.0,            # real account starting capital (EGP)
     "paper_capital": 100_000.0,      # virtual account starting capital (EGP)
+    "broker": "other",               # thndr / thndr_trader: their exact fees (order_fee); other: fee_pct_per_side
     "fee_pct_per_side": 0.25,        # commission + exchange/clearing fees + taxes, per buy or sell (%)
     # Risk & sizing
     "risk_per_trade_pct": 1.5,       # max loss per trade if the stop is hit (% of equity)
@@ -47,15 +83,37 @@ DEFAULTS: dict = {
     # The prediction model's 10-session rank decides which BUYs get money first, and its top picks that pass the
     # liquidity and uptrend checks are BUYs too (0 = none). Walk-forward 2016–2026 (its test years only, dividends
     # counted): rules alone 15.3% a year; in the model's order 19.8%; plus its top 3 26.9%, same worst drop (−20%),
-    # better in both halves.
-    "model_picks": 3,
-    # Exits
+    # better in both halves. Oct 2026, with no new buys while fewer than 40% of stocks are above their 50-day average
+    # (breadth.SWITCH_OFF_BELOW), 8 runs: top 2 made 32.0% a year, won 46.4%, worst drop −17.5%; top 3 31.7%, 45.6%,
+    # −18.8%.
+    "model_picks": 2,
+    # Exits. "chart": the stop under the nearest solid support and the target under the first resistance paying at
+    # least target_min_r × the risk (levels.py: swing points, Fibonacci, averages, pivots, volume). "atr": the stop
+    # atr_stop_mult × the daily range below (within stop_min/max_pct) and the target target_r × the risk above.
+    # Walk-forward 2016–2026: the BUY rules made 13.4% a year with chart levels vs 7.8% with ATR, worst drop −20% vs
+    # −22%; with the model's picks 24.4% vs 27.7% (ATR's lead is all in 2021–26; 2016–21 13.4% vs 9.2%), drop −22% vs −26%.
+    "levels_mode": "chart",
+    "target_min_r": 1.5,
+    "target_max_r": 3.0,
     "atr_stop_mult": 2.0,
     "stop_min_pct": 4.0,
     "stop_max_pct": 12.0,
     "target_r": 2.0,
+    # Each evening an open position's stop rises to just under the nearest solid support below the close (never
+    # down). Walk-forward 2016–2026 with the model's picks: 31.8% a year against 22.3%, worst drop −25.2% against
+    # −22.7%; the rules alone 20.4% against 13.4% (engine.py). Also tried: skipping BUYs with no support within
+    # stop_max_pct (28.1%, drop −14.8%, but worse in 2016–21) and stops up to 20% under support (18.0%): not used.
+    "stop_follows_support": True,
+    # Your own positions' stops: "auto" rises as above (and after a 1× gain, below); "mine" stays where it was set
+    # (at the buy, or when you change it) and only you move it. Paper trades and backtests always use "auto".
+    "stop_moves": "auto",
+    # Once a trade has gained 1× its risk, the stop goes no lower than the entry plus this % (enough to cover both
+    # fees): a trade that comes back ends a small win instead of a small loss. Walk-forward 2016–2026 with the model's
+    # picks (4 seeds): 48.0% of trades won against 44.9% with the stop at the entry (higher in every seed), the same
+    # 33.7% a year, worst drop −17.9% against −18.3%. +0.5% (fees only) changed nothing, +0.75–1% and +2% made less.
+    "breakeven_pct": 1.5,
     "review_day": 10,                # ~2 weeks
-    "max_hold_days": 20,             # ~1 month (hard time stop)
+    "max_hold_days": 15,             # ~3 weeks (hard time stop): better than 20 in the 12 Oct 2026 replay
     # Automation
     "auto_paper": True,
     "history_years": 5,
@@ -63,13 +121,15 @@ DEFAULTS: dict = {
     "telegram_token": "",
     "telegram_chat_id": "",
     "telegram_only_action": False,   # True: skip the message on days with nothing to do
+    # The Telegram bot's address (worker/): the Mac's orders then come from the portfolio you keep on the site
+    "telegram_worker_url": "",
 }
 
 
 # Each person's own numbers on the shared website. Everything else is the strategy, which the admin sets for all.
 PERSONAL_KEYS = (
-    "capital", "paper_capital", "fee_pct_per_side", "risk_per_trade_pct", "max_position_pct", "max_positions",
-    "max_open_risk_pct", "max_per_sector", "max_pct_of_adv", "shariah_filter", "auto_paper",
+    "capital", "paper_capital", "broker", "fee_pct_per_side", "risk_per_trade_pct", "max_position_pct", "max_positions",
+    "max_open_risk_pct", "max_per_sector", "max_pct_of_adv", "shariah_filter", "auto_paper", "stop_moves",
     "telegram_chat_id", "telegram_only_action",
 )
 

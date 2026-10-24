@@ -4,6 +4,7 @@
 /config.yaml
 /state/
 /_site/
+/_models/
 *.db
 *.db-journal
 *.log
@@ -19,3 +20,4 @@ __pycache__/
 /Deploy to server.command
 /tests/fixtures/
 /.claude/
+graphify-out/

@@ -2,43 +2,70 @@
 // bottom bar, and page routing.
 import {
   html, render, useState, useEffect, useStore, useRoute, pollStatus, loadStocks, setTheme, fmt, cls, go, stockHref,
-  loadMe, api, toast, setStore, setLang, STATIC,
+  loadMe, api, toast, setStore, setLang, refreshAll, STATIC, store,
 } from './lib.js';
-import { t } from './i18n.js';
+import { t, loadArabic } from './i18n.js';
 import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm, Change, Disclaimer } from './ui.js';
 import { AuthScreen } from './pages/login.js';
 import { UnlockScreen } from './pages/unlock.js';
-import { AdminPage } from './pages/admin.js';
-import { TodayPage, SignalsPage } from './pages/today.js';
-import { MarketPage } from './pages/market.js';
-import { PredictPage } from './pages/predict.js';
-import { StockPage } from './pages/stock.js';
-import { CalcPage } from './pages/calc.js';
-import { ScreenerPage } from './pages/screener.js';
-import { DividendsPage } from './pages/dividends.js';
-import { WatchlistPage } from './pages/watchlist.js';
-import { NewsPage } from './pages/news.js';
-import { PortfolioPage } from './pages/portfolio.js';
-import { PaperPage } from './pages/paper.js';
-import { BacktestPage } from './pages/backtest.js';
-import { SettingsPage } from './pages/settings.js';
+
+// Opened inside Telegram (the bot's "Open the app" button, a mini app): Telegram puts who opened it after the # and the
+// bot's page after ?go=. Both are read once and the address goes back to the page's own #/route.
+const TELEGRAM = (() => {
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const go = new URLSearchParams(location.search).get('go');
+  const initData = hash.get('tgWebAppData');
+  if (initData || go) {
+    history.replaceState(null, '', location.pathname + '#/' + (go && /^[\w/.-]+$/.test(go) ? go : 'today'));
+  }
+  if (!initData) return null;
+  const post = (type, data = {}) => {       // Telegram's own messages to its app (core.telegram.org/api/web-events)
+    try {
+      if (window.TelegramWebviewProxy) window.TelegramWebviewProxy.postEvent(type, JSON.stringify(data));
+      else window.parent.postMessage(JSON.stringify({ eventType: type, eventData: data }), '*');
+    } catch { /* not in Telegram after all */ }
+  };
+  post('web_app_ready');
+  post('web_app_expand');
+  // Telegram's own bar and background in the site's colours, again whenever the light/dark look changes
+  const paint = () => {
+    const css = getComputedStyle(document.documentElement), bg = css.getPropertyValue('--bg').trim();
+    post('web_app_set_header_color', { color: bg });
+    post('web_app_set_background_color', { color: bg });
+    post('web_app_set_bottom_bar_color', { color: css.getPropertyValue('--bg-2').trim() });
+  };
+  paint();
+  new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  return { initData };
+})();
 
 const MAC_ONLY = ['paper', 'backtest'];     // the GitHub Pages site has no paper trading or backtest
+// Each page's code loads when it's first opened, not all of it before the first page shows.
+function lazy(file, name) {
+  let Page = null;
+  return function Lazy(props) {
+    const [, loaded] = useState(0);
+    if (Page) return html`<${Page} ...${props} />`;
+    import(`./pages/${file}.js`).then(m => { Page = m[name]; loaded(1); });
+    return html`<p class="faint" style="padding:24px 4px">${t('Loading…')}</p>`;
+  };
+}
+
 const PAGES = Object.fromEntries(Object.entries({
-  today: TodayPage, signals: SignalsPage, news: NewsPage, market: MarketPage, predict: PredictPage, dividends: DividendsPage,
-  stock: StockPage, screener: ScreenerPage, watchlist: WatchlistPage, portfolio: PortfolioPage, paper: PaperPage,
-  calc: CalcPage, backtest: BacktestPage, settings: SettingsPage, admin: AdminPage,
+  today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
+  stock: lazy('stock', 'StockPage'), rights: lazy('rights', 'RightsListPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
+  calc: lazy('calc', 'CalcPage'), backtest: lazy('backtest', 'BacktestPage'), settings: lazy('settings', 'SettingsPage'), admin: lazy('admin', 'AdminPage'),
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
 
 // The top bar's four sections and their tabs. Every page keeps its own #/address, so links from Telegram and old
-// bookmarks still work. Settings and Admin sit in the ⚙ menu.
+// bookmarks still work (#/signals is Picks, #/predict its Rankings). Settings and Admin sit in the ⚙ menu.
 const SECTIONS = [
-  { id: 'today', label: 'Today', icon: 'activity', tabs: [['today', 'Summary'], ['signals', 'Signals'], ['news', 'News']] },
-  { id: 'market', label: 'Market', icon: 'bars',
-    tabs: [['market', 'Overview'], ['predict', 'Predictions'], ['dividends', 'Dividends & results']] },
-  { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist']] },
+  { id: 'home', label: 'Home', icon: 'home',
+    tabs: [['today', 'Summary'], ['market', 'Market'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['dividends', 'Dividends & results'], ['news', 'News']] },
+  { id: 'picks', label: 'Picks', icon: 'target', tabs: [['signals', 'Picks'], ['predict', 'Rankings'], ['record', 'Track record']] },
+  { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist'], ['rights', 'Rights issues']] },
   { id: 'portfolio', label: 'Portfolio', icon: 'briefcase',
-    tabs: [['portfolio', 'My portfolio'], ['paper', 'Paper'], ['calc', 'Calculator'], ['backtest', 'Backtest']] },
+    tabs: [['portfolio', 'My portfolio'], ['paper', 'Practice'], ['calc', 'Calculator'], ['backtest', 'Rules test']] },
 ].map(s => ({ ...s, tabs: s.tabs.filter(([id]) => id in PAGES) }));
 const sectionOf = page => SECTIONS.find(s => s.tabs.some(([id]) => id === page));
 const pageTitle = page => {
@@ -50,7 +77,7 @@ const pageTitle = page => {
 function useCounts() {
   const status = useStore(s => s.status);
   const m = status && status.market;
-  return { today: (m && m.buys) || 0, signals: (m && m.buys) || 0, portfolio: (status && status.alerts) || 0 };
+  return { picks: (m && m.buys) || 0, signals: (m && m.buys) || 0, portfolio: (status && status.alerts) || 0 };
 }
 function Count({ id, counts }) {
   const n = counts[id];
@@ -83,8 +110,8 @@ function TopBar({ page, onMenu, menuOpen }) {
 function IndexChip() {
   const m = useStore(s => s.status && s.status.market);
   if (!m || m.egx30_close == null) return null;
-  return html`<a class="index-chip" href="#/market" title=${t('Data: {date} close', { date: fmt.date(m.date) })}>
-    <span class=${cls('dot', m.risk_off ? 'warn' : 'up')} title=${t(m.risk_off ? 'Risk-off' : 'Market OK')}></span>
+  return html`<a class="index-chip" href="#/egx30" title=${t('Data: {date} close', { date: fmt.date(m.date) })}>
+    <span class=${cls('dot', m.risk_off ? 'warn' : 'up')} title=${t(m.risk_off ? 'Weak market' : 'Market OK')}></span>
     <span class="faint">EGX30</span><b class="num">${fmt.int(m.egx30_close)}</b><${Change} value=${m.egx30_change} /></a>`;
 }
 
@@ -192,7 +219,7 @@ function AccountDialog({ me, onClose }) {
       </form>
       <div class="actions" style="justify-content:space-between;flex-wrap:wrap">
         <button class="btn ghost" onClick=${() => out('/auth/logout-all')}>Sign out everywhere</button>
-        <div class="row" style="gap:8px"><button class="btn ghost" onClick=${onClose}>Close</button>
+        <div class="row" style="gap:8px"><button class="btn ghost" onClick=${onClose}>${t('Close')}</button>
           <button class="btn" onClick=${() => out('/auth/logout')}><${Icon} name="x" />Sign out</button></div>
       </div>
     </div></div>`;
@@ -209,7 +236,7 @@ function App() {
   useEffect(() => { if (version) loadStocks(); }, [version, tick]);
   const page = PAGES[route.page] ? route.page : 'today';
   useEffect(() => {
-    document.title = `${page === 'stock' && route.arg ? route.arg : t(pageTitle(page))} · EGX Trading Agent`;
+    document.title = `${page === 'stock' && route.arg ? route.arg.replace(/_R1$/i, '_r1') : t(pageTitle(page))} · EGX Trading Agent`;
     setMenu(false);
   }, [page, route.arg, lang]);
   const Page = PAGES[page];
@@ -237,7 +264,13 @@ function Root() {
   const [bootError, setBootError] = useState('');
   useEffect(() => {
     const start = STATIC
-      ? loadMe().then(() => import('./local/site.js')).then(site => site.resume())
+      ? loadMe().then(() => import('./local/site.js'))
+        .then(async site => {
+          if (!(await site.resume())) return TELEGRAM ? site.telegramUnlock(TELEGRAM.initData) : false;
+          // opened before (the key is remembered) but not linked, or unlinked since: the bot links it again
+          if (TELEGRAM && !site.botLinked()) await site.telegramUnlock(TELEGRAM.initData);
+          return true;
+        })
         .then(ok => setStore({ auth: ok ? null : 'unlock' }))
         .catch(e => { setBootError(e.message); setStore({ auth: 'unlock' }); })
       : loadMe().catch(() => setStore({ offline: true }));
@@ -254,4 +287,14 @@ function Root() {
   return html`<${App} />`;
 }
 
+if (store.lang === 'ar') await loadArabic();
 render(html`<${Root} />`, document.getElementById('app'));
+
+// The website keeps an offline copy of itself (sw.js), so it opens at once, even with weak or no signal.
+if (STATIC && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => null);
+
+// Your portfolio came from the Telegram bot: changed on another device, or brought to this one (local/api.js).
+addEventListener('egx-book', () => {
+  toast(t('Your portfolio was updated from your other device.'));
+  refreshAll();
+});

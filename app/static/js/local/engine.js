@@ -5,8 +5,23 @@
 //
 // A "book" is one person's data, shaped like the Mac's database tables:
 //   { trades: [...], fills: [...], dividends: [...], adjustments: [...], next_id: 1 }
-// Bars are { date: 'YYYY-MM-DD', open, high, low, close, atr14, ema50, div } (missing numbers are NaN; div is the
-// cash dividend going ex that day, 0 on other days).
+// Bars are { date: 'YYYY-MM-DD', open, high, low, close, atr14, ema50, div, sup } (missing numbers are NaN; div is
+// the cash dividend going ex that day, 0 on other days; sup the chart's stop under support that day, levels.py).
+
+// ------------------------------------------------------------------ fees (egx_agent/config.py)
+// Thndr's own commission on one order: EGP 2 + 0.1% (none on a Thndr Trader order).
+export const thndrCommission = v => (v > 0 ? 2 + v * 0.001 : 0);
+// What every Egyptian broker passes on, per order: EGX, clearing, investor fund and stamp duty 0.075%, FRA 0.005% (EGP 1–250).
+export const governmentFees = v => (v > 0 ? v * 0.00075 + Math.min(Math.max(v * 0.00005, 1), 250) : 0);
+// What one buy or sell order of this value (EGP) costs with your broker. Thndr Trader: no commission on the plan
+// month's first 50 orders (free_trade false: one after them, or from before you subscribed).
+export function orderFee(v, cfg) {
+  if (cfg.broker === 'thndr') return thndrCommission(v) + governmentFees(v);
+  if (cfg.broker === 'thndr_trader') return governmentFees(v) + (cfg.free_trade === false ? thndrCommission(v) : 0);
+  return v * cfg.fee_pct_per_side / 100;
+}
+// Your fees a side as a %, for estimates where the order's size isn't known.
+export const feePct = cfg => ({ thndr: 0.18, thndr_trader: 0.08 })[cfg.broker] ?? cfg.fee_pct_per_side;
 
 // ------------------------------------------------------------------ small helpers
 export const f2 = v => Number(v).toFixed(2);
@@ -20,13 +35,15 @@ const byId = (a, b) => a.id - b.id;
 const DAY = 86400000;
 const iso = d => d.toISOString().slice(0, 10);
 const weekday = day => new Date(day + 'T00:00:00Z').getUTCDay();   // 0 = Sunday … 6 = Saturday
-const trading = day => weekday(day) <= 4;
+let holidays = {};                // EGX's announced holidays, {date: title} (egx_agent/holidays.py)
+export function setHolidays(h) { holidays = h || {}; }
+const trading = day => weekday(day) <= 4 && !(day in holidays);
 
 export function addDays(day, n) {
   return iso(new Date(Date.parse(day + 'T00:00:00Z') + n * DAY));
 }
 
-// Date n EGX sessions after `day` (public holidays not included), like views.sessions_after.
+// Date n EGX sessions after `day` (the announced holidays skipped), like views.sessions_after.
 export function sessionsAfter(day, n) {
   let d = day;
   for (let k = 0; k < n;) {
@@ -36,18 +53,29 @@ export function sessionsAfter(day, n) {
   return d;
 }
 
-// Most recent EGX session whose closing data should be available by now (scan.expected_session_date).
-export function expectedSessionDate(now = new Date()) {
+// Cairo's date and minutes after midnight at `now`.
+function cairo(now) {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     hourCycle: 'h23',
   }).formatToParts(now).map(x => [x.type, x.value]));
-  let d = `${p.year}-${p.month}-${p.day}`;
-  const minutes = +p.hour * 60 + +p.minute;
+  return { day: `${p.year}-${p.month}-${p.day}`, minutes: +p.hour * 60 + +p.minute };
+}
+
+// Most recent EGX session whose closing data should be available by now (scan.expected_session_date).
+export function expectedSessionDate(now = new Date()) {
+  let { day: d, minutes } = cairo(now);
   if (trading(d) && minutes >= 15 * 60 + 30) return d;
   d = addDays(d, -1);
   while (!trading(d)) d = addDays(d, -1);
   return d;
+}
+
+// The first session a stop you set now counts in: today's if it hasn't opened yet (10:00 Cairo), else the next one,
+// so a price earlier today, from before you set it, can't sell you.
+export function stopFrom(now = new Date()) {
+  const { day, minutes } = cairo(now);
+  return trading(day) && minutes < 10 * 60 ? day : sessionsAfter(day, 1);
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -76,6 +104,7 @@ export function position(o) {
     symbol: o.symbol, entry_date: o.entry_date, entry_price: +o.entry_price, shares: Math.trunc(o.shares),
     initial_stop: +o.initial_stop, stop: +o.stop, target: +o.target, highest_close: +o.highest_close,
     days_held: o.days_held || 0, exit_next_open: o.exit_next_open || null, sector: o.sector || '',
+    ...(o.my_stop ? { my_stop: +o.my_stop, my_stop_from: o.my_stop_from } : {}),
   };
 }
 
@@ -97,7 +126,12 @@ export function exDividend(p, amount) {
 export function processBar(p, bar, cfg) {
   if (p.exit_next_open) return [bar.open, p.exit_next_open];
   p.days_held += 1;
-  if (p.days_held >= 2 && bar.div > 0) exDividend(p, bar.div);   // held at the close before: the dividend is ours
+  if (p.days_held >= 2 && bar.div > 0) {                    // held at the close before: the dividend is ours
+    exDividend(p, bar.div);
+    if (p.my_stop && bar.date >= p.my_stop_from) p.my_stop -= bar.div;   // you chose it on the prices before
+  }
+  // a stop you set yourself (only ever higher) counts from its first session (stopFrom), not on the days before
+  if (p.my_stop > p.stop && bar.date >= p.my_stop_from) p.stop = p.my_stop;
   const { open: o, high: h, low: l } = bar;
   if (o <= p.stop) return [o, `${stopLabel(p)} (gap down)`];
   if (l <= p.stop) return [p.stop, stopLabel(p)];
@@ -112,11 +146,12 @@ export function updateAfterClose(p, bar, cfg) {
   const c = bar.close;
   if (c > p.highest_close) p.highest_close = c;          // Python's max() skips a NaN close the same way
   const r = p.entry_price - p.initial_stop;
-  if (p.highest_close >= p.entry_price + r) {
+  if (p.highest_close >= p.entry_price + r && !cfg.freeze_stops) {   // freeze_stops: stop_moves "mine" (realStatus)
     const trail = p.highest_close - cfg.atr_stop_mult * bar.atr14;
-    p.stop = Math.max(p.stop, p.entry_price);
+    p.stop = Math.max(p.stop, p.entry_price * (1 + (cfg.breakeven_pct || 0) / 100));   // entry + breakeven_pct
     if (trail > p.stop) p.stop = trail;                    // a NaN trail (no ATR yet) is ignored, as in Python
   }
+  if (cfg.stop_follows_support && !cfg.freeze_stops && bar.sup > p.stop) p.stop = bar.sup;   // under the nearest support; NaN: none
   if (c < bar.ema50) p.exit_next_open = 'Trend break (closed below 50-day average)';
   else if (p.days_held >= cfg.max_hold_days) p.exit_next_open = `Max hold reached (${cfg.max_hold_days} trading days)`;
 }
@@ -141,23 +176,51 @@ export function replayStatus(p, bars, cfg) {
         days_held: p.days_held, event_date: bar.date };
     }
   }
+  if (p.my_stop > p.stop) p.stop = p.my_stop;          // set after the last close: it counts from the next session
   const last = bars.length ? bars[bars.length - 1].date : 'None';
   const r = p.entry_price - p.initial_stop;
   if (p.exit_next_open) {
     return { status: 'EXIT', reason: `${p.exit_next_open}: sell at the next open`, stop: p.stop,
       days_held: p.days_held, event_date: last };
   }
+  const close = bars.length ? bars[bars.length - 1].close : null;
+  if (close != null && close <= p.stop) {
+    // no day after the buy was replayed (its date is the last close's or later, e.g. an old buy logged today)
+    return { status: 'EXIT', reason: `Stop-loss: closed at ${f2(close)}, under your stop (${f2(p.stop)}): sell at the next open`,
+      stop: p.stop, days_held: p.days_held, event_date: last };
+  }
   if (p.days_held >= cfg.review_day && p.highest_close < p.entry_price + r) {
     return { status: 'REVIEW',
       reason: `Day ${p.days_held}: no +1R move yet (needs ${f2(p.entry_price + r)}). Consider exiting.`,
       stop: p.stop, days_held: p.days_held, event_date: last };
   }
-  if (p.stop > prevStop + 1e-9) {
+  if (p.stop > prevStop + 1e-9 && p.stop !== p.my_stop) {   // a stop you set yourself needs no reminder
     return { status: 'TIGHTEN STOP', reason: `Raise your stop to ${f2(p.stop)}`, stop: p.stop, prev_stop: prevStop,
       days_held: p.days_held, event_date: last };
   }
   return { status: 'HOLD', reason: `Stop ${f2(p.stop)}, target ${f2(p.target)}`, stop: p.stop,
     days_held: p.days_held, event_date: last };
+}
+
+// The rules say sell a position 30%+ under its average price: sell it on the first bounce instead (portfolio.on_bounce,
+// where the tests behind it are).
+export const BIG_LOSS = 0.30, BOUNCE_DAYS = 20;
+function onBounce(t, bars, st) {
+  const deep = t.entry_price * (1 - BIG_LOSS);
+  const last = bars[bars.length - 1];
+  if (st.status !== 'EXIT' || last.close > deep) return st;
+  const loss = `${((last.close / t.entry_price - 1) * 100).toFixed(1)}%`;
+  // the plan starts at the first close after the buy 30%+ under it (the last close, for an old buy logged later)
+  let start = bars.findIndex(b => b.date > t.entry_date && b.close <= deep);
+  if (start < 0) start = bars.length - 1;
+  const up = bars.slice(start).find(b => b.ema20 != null && b.close > b.ema20);
+  if (up) return { ...st, reason: `Big loss (${loss}): back above its 20-day average on ${up.date}: sell at the next open` };
+  if (bars.length - 1 - start >= BOUNCE_DAYS) {
+    return { ...st, reason: `Big loss (${loss}): no close above its 20-day average in ${BOUNCE_DAYS} sessions: sell at the next open` };
+  }
+  const by = sessionsAfter(bars[start].date, BOUNCE_DAYS);
+  return { ...st, status: 'BOUNCE', bounce_level: last.ema20, bounce_by: by,
+    reason: `Big loss (${loss}): sell at the first close above its 20-day average (${f2(last.ema20)} now), by ${by} at the latest` };
 }
 
 // What the exit rules say about one open real trade today (portfolio.real_status).
@@ -166,7 +229,8 @@ export function realStatus(t, bars, cfg) {
     return { status: 'NO DATA', reason: 'No price data for this symbol', stop: t.stop, days_held: 0, last_close: null };
   }
   const p = position({ ...t, stop: t.initial_stop, highest_close: t.entry_price, days_held: 0, exit_next_open: null });
-  const st = replayStatus(p, bars, cfg);
+  if (cfg.stop_moves === 'mine') cfg = { ...cfg, freeze_stops: true };   // the stop stays where it was set
+  const st = onBounce(t, bars, replayStatus(p, bars, cfg));
   st.last_close = bars[bars.length - 1].close;
   return st;
 }
@@ -183,7 +247,7 @@ export function sizePosition(entry, stop, equity, cash, avgValue20, openRisk, cf
     note = `reduced: total open risk limit (${g(cfg.max_open_risk_pct)}%)`;
   }
   let shares = Math.floor(budget / perShare);
-  const fee = cfg.fee_pct_per_side / 100;
+  const fee = feePct(cfg) / 100;
   const caps = [
     [`max ${g(cfg.max_position_pct)}% of account per stock`, equity * cfg.max_position_pct / 100 / entry],
     [`liquidity: ${g(cfg.max_pct_of_adv)}% of daily traded value`, avgValue20 * cfg.max_pct_of_adv / 100 / entry],
@@ -208,7 +272,7 @@ export function allocate(candidates, equity, cash, positions, cfg, riskOff) {
   for (const p of positions) sectors.set(sectorKey(p.sector), (sectors.get(sectorKey(p.sector)) || 0) + 1);
   const held = new Set(positions.map(p => p.symbol));
   let riskNow = openRisk(positions);
-  const fee = cfg.fee_pct_per_side / 100;
+  const fee = feePct(cfg) / 100;
   const none = { shares: 0, amount: 0, risk_egp: 0 };
   return candidates.map(c => {
     const res = { ...c };
@@ -275,32 +339,133 @@ export function pending(book, events, account = 'real') {
     for (const t of book.trades) {
       if (t.account !== account || !['open', 'pending'].includes(t.status) || t.symbol !== e.symbol) continue;
       if (!((t.entry_date || t.signal_date) < e.ex_date) || done.has(`${e.id}|${t.id}`) || out[t.id]) continue;
-      out[t.id] = { event_id: e.id, symbol: e.symbol, ex_date: e.ex_date, factor: e.factor, describe: describe(e.factor),
-        shares_now: t.shares, shares_expected: expectedShares(t.shares, e.factor) };
+      // a rights issue (corporate.pending): how many new shares you subscribed to is yours to say
+      out[t.id] = { event_id: e.id, symbol: e.symbol, ex_date: e.ex_date, factor: e.factor, rights: !!e.rights,
+        describe: e.rights ? `a rights issue, past prices divided by ${g(+e.factor.toPrecision(4))}` : describe(e.factor),
+        shares_now: t.shares, shares_expected: e.rights ? t.shares : expectedShares(t.shares, e.factor),
+        terms: (e.rights && e.terms) || null };
     }
   }
   return out;
 }
 
-// Update a position to its new share count; prices and levels move by the same ratio, so its cost is unchanged.
-export function applyEvent(book, tradeId, event, newShares, today) {
+// The rights a position bought before its rights issue holds until you subscribe or sell them, as your broker lists
+// them (Thndr: KORA_r1, cost 0). null for anything else (corporate.rights_holding).
+export function rightsHolding(ev, shares) {
+  const t = ev && ev.terms;
+  if (!t) return null;
+  const units = Math.floor(shares * t.ratio + 1e-6), last = t.last || null, price = last ? last.close : t.ref;
+  return { symbol: `${ev.symbol}_r1`, units, price, value: units * price, sub_price: t.price, note: t.note,
+    ratio: t.ratio, schedule: t.schedule || [], last };
+}
+
+// ------------------------------------------------------------------ the real cost after a rights issue
+// Your broker keeps the rights as a holding of their own at no cost, so the cash from selling them never comes off the
+// shares' cost: its average and break-even stay too high. The real cost takes it off (corporate.py real_cost).
+export function breakEven(cost, shares, cfg) {
+  let v = cost;
+  for (let i = 0; i < 30; i++) v = cost + orderFee(v, cfg);     // the fee depends on the sale's value
+  return v / shares;
+}
+
+function listingDay(ev) {
+  const at = Object.fromEntries(((ev && ev.terms && ev.terms.schedule) || []).map(x => [x[2], x[0]]));
+  if (at['New shares listed']) return at['New shares listed'];
+  return at['Subscription closes'] ? addDays(at['Subscription closes'], 92) : null;
+}
+
+export function realCost(fills, shares, avg, fees, last, cfg, rights = null, events = [], symbol = '', today = '') {
+  const rf = fills.filter(f => f.side === 'bonus' && (f.note || '').startsWith('Rights issue'));
+  if (!rights && !rf.length) return null;
+  let cost = 0, n = 0;
+  for (const f of fills) {
+    const s = f.shares || 0;
+    if (f.side === 'buy') { cost += s * f.price + (f.fees || 0); n += s; }
+    else if (f.side === 'sell' && n) { cost *= 1 - s / n; n -= s; }
+    else if (f.side === 'bonus') { cost += s * (f.price || 0); n += s; }
+  }
+  const sold = rf.some(f => f.note.startsWith('Rights issue: sold the rights'));
+  const net = avg * shares + fees, unsold = rights ? rights.value : 0;
+  const be = breakEven(net, shares, cfg), pnl = last * shares + unsold - net;
+  const ev = f => events.find(e => e.symbol === symbol && e.ex_date === f.date) || null;
+  return { app_avg: sold && Math.round(n) === shares ? cost / n : null, real_cost: net, real_avg: net / shares,
+    break_even: be, to_break_even: last ? be / last - 1 : null, pnl, pnl_pct: pnl / net, unsold,
+    unlisted: rf.filter(f => f.shares > 0 && (listingDay(ev(f)) || '') > today).reduce((a, f) => a + f.shares, 0) };
+}
+
+// What unsold rights could do for the position at today's prices: A sell them and buy the share with that cash (and
+// the wallet's), B sell them and buy buyN shares, C subscribe (corporate.py rights_options).
+export function rightsOptions(shares, cost, units, rightPrice, sharePrice, subPrice, cfg, wallet = 0, buyN = null, buyPrice = null) {
+  const fee = v => orderFee(v, cfg);
+  const got = units * rightPrice - fee(units * rightPrice);
+  const pay = n => (buyPrice ? n * buyPrice : n * sharePrice + fee(n * sharePrice));
+  let nA = Math.floor((got + wallet) / (buyPrice || sharePrice));
+  while (nA > 0 && pay(nA) > got + wallet) nA -= 1;
+  const subFee = cfg.broker === 'thndr' ? 60 : 0;          // Thndr's subscription fee (none on Thndr Trader)
+  const option = (n, paid, cashIn) => {
+    const total = shares + n, net = cost - cashIn + paid;
+    return { shares: total, new: n, pay: paid, extra_cash: Math.max(0, paid - cashIn - wallet), app_avg: (cost + paid) / total,
+      real_avg: net / total, real_cost: net, break_even: breakEven(net, total, cfg), pnl: total * sharePrice - net };
+  };
+  const nB = buyN == null ? units : Math.trunc(buyN);
+  return { got, A: option(nA, pay(nA), got), B: option(nB, pay(nB), got), C: option(units, units * subPrice + subFee, 0) };
+}
+
+// The average price on the new prices (corporate.new_average). Bonus shares or a split: the same cost over more
+// shares. A rights issue: the new shares add what they cost (paid each); kept the old count (sold the rights): what
+// you got for them comes off the cost (got; without it, as old records did, the cost ÷ factor).
+export function newAverage(avg, old, n, factor, rights, paid = 0, got = null) {
+  if (rights && n === old) return got != null ? (avg * old - got) / old : avg / factor;
+  return (avg * old + Math.max(n - old, 0) * paid) / n;
+}
+
+// Update a position to its new share count; its levels (your own stop too) move with the prices (÷ the event's factor).
+export function applyEvent(book, tradeId, event, newShares, today, paid = 0, got = null) {
   const t = book.trades.find(x => x.id === tradeId && ['open', 'pending'].includes(x.status));
   if (!t || !event || event.symbol !== t.symbol) throw new Error('This position or event no longer exists. Refresh the page.');
   newShares = Math.trunc(newShares);
   if (newShares < 1) throw new Error('Enter how many shares you hold now.');
   const old = Math.trunc(t.shares);
   const ratio = newShares / old;
-  const avg = t.entry_price;
+  const f = +event.factor, rights = !!event.rights;
+  if (!rights) paid = 0;
+  if (!rights || newShares > old) got = null;
+  const avg = t.entry_price ? newAverage(t.entry_price, old, newShares, f, rights, paid, got) : null;
   t.shares = newShares;
-  for (const k of ['entry_price', 'initial_stop', 'stop', 'target', 'highest_close', 'entry_limit']) {
-    if (t[k] !== null && t[k] !== undefined) t[k] /= ratio;
+  t.entry_price = avg;
+  for (const k of ['initial_stop', 'stop', 'target', 'highest_close', 'entry_limit', 'my_stop']) {
+    if (t[k] !== null && t[k] !== undefined) t[k] /= f;
   }
   if (t.account === 'real') {
-    addFill(book, t.id, t.symbol, event.ex_date, 'bonus', newShares - old, 0, 0,
-      `${describe(event.factor)}: ${int(old)} → ${int(newShares)} shares`);
+    const note = !rights ? `${describe(f)}: ${int(old)} → ${int(newShares)} shares`
+      : newShares > old ? `Rights issue: ${int(newShares - old)} new shares at ${g(paid)}, ${int(old)} → ${int(newShares)} shares`
+        : got != null ? `Rights issue: sold the rights for ${int(got)} EGP, kept ${int(old)} shares`
+        : `Rights issue: kept ${int(old)} shares, prices ÷ ${g(+f.toPrecision(4))}`;
+    addFill(book, t.id, t.symbol, event.ex_date, 'bonus', newShares - old, paid, 0, note);
+    if (rights) Object.assign(book.fills.at(-1), { factor: f }, got != null ? { got } : {});   // for rebuildTrade
   }
   setAdjustment(book, event.id, t.id, 'applied', ratio, today);
-  return { symbol: t.symbol, old, new: newShares, ratio, avg: avg ? avg / ratio : null };
+  return { symbol: t.symbol, old, new: newShares, ratio, avg };
+}
+
+// Takes an update back (a wrong share count, or rights recorded as sold that you still hold): the position as it was
+// before applyEvent, waiting for its update again. Only the position's last transaction can be taken back.
+export function undoEvent(book, fillId) {
+  const f = book.fills.find(x => x.id === fillId && x.side === 'bonus');
+  const t = f && book.trades.find(x => x.id === f.trade_id && x.status === 'open');
+  if (!t || fillsOf(book, t.id).at(-1) !== f) throw new Error('Only the last transaction of an open position can be taken back.');
+  const n = Math.trunc(t.shares), old = n - f.shares, r = f.factor || n / old;
+  if (t.entry_price) {
+    t.entry_price = f.factor && !f.shares ? (f.got != null ? t.entry_price + f.got / old : t.entry_price * r)
+      : (t.entry_price * n - f.shares * (f.price || 0)) / old;
+  }
+  t.shares = old;
+  for (const k of ['initial_stop', 'stop', 'target', 'highest_close', 'entry_limit', 'my_stop']) {
+    if (t[k] !== null && t[k] !== undefined) t[k] *= r;
+  }
+  book.fills = book.fills.filter(x => x !== f);
+  book.adjustments = book.adjustments.filter(a => !(a.trade_id === t.id && a.event_id === `${t.symbol}:${f.date}`));
+  return { symbol: t.symbol, shares: old, avg: t.entry_price };
 }
 
 export function ignoreEvent(book, tradeId, eventId, today) {
@@ -339,9 +504,9 @@ export function nextId(book) {
 export const trades = (book, account, statuses) => book.trades
   .filter(t => t.account === account && (!statuses || statuses.includes(t.status))).sort(byId);
 
-function addFill(book, tradeId, symbol, date, side, shares, price, fees, note = '') {
+function addFill(book, tradeId, symbol, date, side, shares, price, fees, note = '', feesIn = false) {
   book.fills.push({ id: nextId(book), trade_id: tradeId, symbol, date, side, shares: Math.trunc(shares), price: +price,
-    fees: +fees, note });
+    fees: +fees, note, ...(feesIn ? { fees_in: true } : {}) });
 }
 
 export const fillsOf = (book, tradeId) => book.fills.filter(f => f.trade_id === tradeId)
@@ -352,40 +517,50 @@ export function openPosition(book, account, symbol) {
     .sort((a, b) => (a.entry_date < b.entry_date ? -1 : a.entry_date > b.entry_date ? 1 : a.id - b.id))[0] || null;
 }
 
-// Stop (typed by you, or the ATR rule) and the matching target for an entry/average price.
-function levels(price, atr, cfg, stop) {
-  const s = stop ? +stop : initialStop(price, atr, cfg);
-  return [s, price + cfg.target_r * (price - s)];
+// Stop and target for an entry/average price (portfolio._levels): the stop you typed, else the chart's support when
+// it's between stop_min_pct and stop_max_pct below, else the ATR rule; the chart's target when it pays at least the
+// risk, else target_r × the risk. chart: { stop, target } on the buy date, stop NaN when no support was in reach.
+// Also where each came from (stop_src: yours / chart / formula, target_src: chart / formula), for the stock page.
+function levels(price, atr, cfg, stop, chart = null) {
+  const gap = chart ? 1 - chart.stop / price : NaN;
+  const fromChart = !stop && !!chart && gap >= cfg.stop_min_pct / 100 && gap <= cfg.stop_max_pct / 100;
+  const s = stop ? +stop : fromChart ? chart.stop : initialStop(price, atr, cfg);
+  const risk = price - s;
+  const chartTarget = !!chart && chart.target >= price + risk;
+  return [s, chartTarget ? chart.target : price + cfg.target_r * risk,
+    { stop_src: stop ? 'yours' : fromChart ? 'chart' : 'formula', target_src: chartTarget ? 'chart' : 'formula' }];
 }
 
-// Log a buy. If you already hold this stock, the shares join that position at the average price.
-export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector = '', stop = null, notes = '') {
-  const fee = price * shares * cfg.fee_pct_per_side / 100;
+// Log a buy. If you already hold this stock, the shares join that position at the average price. feesIn: the price
+// is your broker's average cost, which already has the fees in it (Thndr's does), so none are added.
+export function addRealBuy(book, cfg, symbol, date, price, shares, atr, sector = '', stop = null, notes = '', chart = null,
+  feesIn = false) {
+  const fee = feesIn ? 0 : orderFee(price * shares, cfg);
   const pos = openPosition(book, 'real', symbol);
   let id;
   if (!pos) {
-    const [s, target] = levels(price, atr, cfg, stop);
+    const [s, target, src] = levels(price, atr, cfg, stop, chart);
     id = nextId(book);
     book.trades.push({ id, account: 'real', status: 'open', symbol, sector, signal_date: null, entry_date: date,
       entry_price: price, shares, initial_stop: s, stop: s, target, entry_limit: null, highest_close: price,
       days_held: 0, exit_next_open: null, last_bar_date: null, exit_date: null, exit_price: null, exit_reason: null,
-      fees: fee, notes });
+      fees: fee, notes, ...src });
   } else {
     id = pos.id;
     const total = pos.shares + shares;
     const avg = (pos.entry_price * pos.shares + price * shares) / total;
-    const [s, target] = levels(avg, atr, cfg, stop);
+    const [s, target, src] = levels(avg, atr, cfg, stop, chart);
     Object.assign(pos, { entry_date: pos.entry_date < date ? pos.entry_date : date, entry_price: avg, shares: total,
       initial_stop: s, stop: s, target, highest_close: avg, fees: (pos.fees || 0) + fee,
-      notes: [pos.notes, notes].filter(Boolean).join('; ') });
+      notes: [pos.notes, notes].filter(Boolean).join('; '), ...src });
   }
-  addFill(book, id, symbol, date, 'buy', shares, price, fee, notes);
+  addFill(book, id, symbol, date, 'buy', shares, price, fee, notes, feesIn);
   return id;
 }
 
 export function closeTrade(book, cfg, tradeId, date, price, reason) {
   const t = book.trades.find(x => x.id === tradeId);
-  t.fees = (t.fees || 0) + price * t.shares * cfg.fee_pct_per_side / 100;
+  t.fees = (t.fees || 0) + orderFee(price * t.shares, cfg);
   Object.assign(t, { status: 'closed', exit_date: date, exit_price: price, exit_reason: reason });
 }
 
@@ -395,7 +570,7 @@ export function sellReal(book, cfg, tradeId, date, price, shares, reason) {
   if (!pos) throw new Error('This position is not open.');
   shares = Math.trunc(shares);
   if (!(shares > 0 && shares <= pos.shares)) throw new Error(`You can sell between 1 and ${int(pos.shares)} shares.`);
-  const sellFee = price * shares * cfg.fee_pct_per_side / 100;
+  const sellFee = orderFee(price * shares, cfg);
   addFill(book, tradeId, pos.symbol, date, 'sell', shares, price, sellFee, reason);
   if (shares === pos.shares) {
     closeTrade(book, cfg, tradeId, date, price, reason);
@@ -410,6 +585,66 @@ export function sellReal(book, cfg, tradeId, date, price, shares, reason) {
 }
 
 // Remove a position logged by mistake, with its transaction history.
+// After you edit, delete or add a transaction: the position rebuilt from its transactions in date order, as if each
+// had been logged on its day. Its partial sales become closed trades again, a sale of every share closes it, and
+// removing that sale opens it again. The stop and target are worked out again only when the buys changed; at(day)
+// gives { atr, chart } on a day for that. Returns the trade, or null when no buy is left (then it's all deleted).
+export function rebuildTrade(book, cfg, tradeId, at) {
+  const t = book.trades.find(x => x.id === tradeId && x.account === 'real');
+  if (!t) throw new Error('This trade no longer exists. Refresh the page.');
+  const tag = `partial sale from position #${tradeId}`;
+  const fills = fillsOf(book, tradeId);
+  if (!fills.some(f => f.side === 'buy')) {
+    book.trades = book.trades.filter(x => !(x.status === 'closed' && x.notes === tag));
+    deleteTrade(book, tradeId);
+    return null;
+  }
+  let shares = 0, avg = 0, fees = 0, first = null, lastBuy = null, avgAtBuy = 0, scale = 1, end = null;
+  const sales = [];
+  for (const f of fills) {
+    if (end) throw new Error(`All its shares were sold on ${end.date}, so nothing can come after that. Log a later buy as a new position.`);
+    if (f.side === 'buy') {
+      avg = (avg * shares + f.price * f.shares) / (shares + f.shares);
+      shares += f.shares; fees += f.fees || 0;
+      first = first || f.date; lastBuy = f; avgAtBuy = avg; scale = 1;
+    } else if (f.side === 'bonus' && shares) {
+      // bonus shares or a split: prices ÷ the share ratio; a rights issue carries its own factor (applyEvent)
+      const r = f.factor || (shares + f.shares) / shares;
+      avg = newAverage(avg, shares, shares + f.shares, r, !!f.factor, f.price || 0, f.got ?? null);
+      shares += f.shares; scale *= r;
+    } else if (f.side === 'sell') {
+      if (f.shares > shares) {
+        throw new Error(`On ${f.date} you'd sell ${int(f.shares)} shares, but you held ${int(shares)} then.`);
+      }
+      if (f.shares === shares) { end = f; fees += f.fees || 0; continue; }
+      const part = fees * f.shares / shares;
+      sales.push({ shares: f.shares, entry_price: avg, exit_date: f.date, exit_price: f.price,
+        exit_reason: f.note || 'Other / my decision', fees: part + (f.fees || 0) });
+      fees -= part; shares -= f.shares;
+    }
+  }
+  if (!end && book.trades.some(x => x.id !== tradeId && x.account === 'real' && x.status === 'open' && x.symbol === t.symbol)) {
+    throw new Error(`You have another open ${t.symbol} position, so this one can't open again. Sell or delete that one first.`);
+  }
+  // The stop and target: as they were unless the buys changed; then from the last buy, like logging it again.
+  let lv = {};
+  if (Math.abs(avg - t.entry_price) > 1e-9 || first !== t.entry_date) {
+    const m = at(lastBuy.date);
+    const yours = t.stop_src === 'yours' ? t.initial_stop * scale : null;
+    if (Number.isFinite(m.atr) || yours) {
+      const [s, target, src] = levels(avgAtBuy, m.atr, cfg, yours, m.chart);
+      lv = { initial_stop: s / scale, stop: s / scale, target: target / scale, highest_close: avg, ...src };
+    }
+  }
+  const base = { ...t, ...lv, entry_price: avg, entry_date: first };
+  book.trades = book.trades.filter(x => !(x.status === 'closed' && x.notes === tag));
+  for (const s of sales) book.trades.push({ ...base, ...s, id: nextId(book), status: 'closed', notes: tag });
+  Object.assign(t, base, end
+    ? { status: 'closed', shares, fees, exit_date: end.date, exit_price: end.price, exit_reason: end.note || 'Other / my decision' }
+    : { status: 'open', shares, fees, exit_date: null, exit_price: null, exit_reason: null });
+  return t;
+}
+
 export function deleteTrade(book, tradeId) {
   book.fills = book.fills.filter(f => f.trade_id !== tradeId);
   book.dividends = book.dividends.filter(d => d.trade_id !== tradeId);
@@ -417,21 +652,97 @@ export function deleteTrade(book, tradeId) {
   book.trades = book.trades.filter(t => t.id !== tradeId);
 }
 
+// Your broker wallet (book.cash, the real account): money you topped up or withdrew, and money in or out beside the
+// orders (settlement fees, a commission kickback). A fix sets the balance to what your broker shows.
+export const walletEffect = m => (m.kind === 'deposit' ? m.amount - (m.fee || 0) : m.kind === 'withdraw'
+  ? -m.amount - (m.fee || 0) : m.kind === 'fee' ? -m.amount : m.kind === 'settle' ? -(m.fee || 0) : m.amount);
+export const walletFlow = m => (m.kind === 'deposit' ? m.amount : m.kind === 'withdraw' ? -m.amount : 0);   // put in / took out
+
+// Thndr Trader (book.plan: { since, kind: 'monthly' | 'yearly', price, added, paid_to, used_at }). Thndr takes its commission
+// on every order and gives it back to your wallet at the end of the day ("Commission kickback") on the first 50 buys
+// and sales of each plan month, which starts on the day of the month you subscribed; the price comes out of your
+// wallet when the plan renews (support.thndr.app, Oct 2026). A renewal before you added the plan here is already in
+// the balance you had then (paid_to: the last one taken). used_at { month, n }: the orders Thndr counted that plan
+// month that you didn't log here (you typed Thndr's count), added to the ones you log.
+export const PLAN_FREE = 50;
+export const PLAN_PRICE = { monthly: 245, yearly: 2646 };
+
+// The date n months after `day`, on its day of the month (the 31st is a shorter month's last day).
+export function monthsAfter(day, n) {
+  const [y, m, d] = day.split('-').map(Number);
+  const k = y * 12 + m - 1 + n, Y = Math.floor(k / 12), M = k - Y * 12;
+  return iso(new Date(Date.UTC(Y, M, Math.min(d, new Date(Date.UTC(Y, M + 1, 0)).getUTCDate()))));
+}
+
+// The plan month `day` is in, [its first day, the next one's]; null before you subscribed.
+export function planMonth(plan, day) {
+  if (!plan || day < plan.since) return null;
+  let n = (+day.slice(0, 4) - +plan.since.slice(0, 4)) * 12 + (+day.slice(5, 7) - +plan.since.slice(5, 7));
+  if (monthsAfter(plan.since, n) > day) n -= 1;
+  return [monthsAfter(plan.since, n), monthsAfter(plan.since, n + 1)];
+}
+
+// Your buys and sales in that plan month up to `day` (not counting the transaction `skip`, one being changed).
+export function planTrades(book, plan, day, skip = null) {
+  const m = planMonth(plan, day);
+  if (!m) return 0;
+  const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
+  const extra = plan.used_at && plan.used_at.month === m[0] ? plan.used_at.n : 0;
+  return extra + book.fills.filter(f => f.id !== skip && real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')
+    && f.date >= m[0] && f.date <= day).length;
+}
+export const planFree = (book, plan, day, skip = null) => !!planMonth(plan, day) && planTrades(book, plan, day, skip) < PLAN_FREE;
+
+// The renewals from `from` on: the next one after today (from = today), or the ones due up to today not taken yet.
+export function planRenewals(plan, from, to) {
+  const step = plan.kind === 'yearly' ? 12 : 1, out = [];
+  for (let n = step, d; (d = monthsAfter(plan.since, n)) <= to; n += step) if (d > from) out.push(d);
+  return out;
+}
+export const planNext = (plan, today) => planRenewals(plan, today, monthsAfter(today, 13))[0];
+
+// A sale's money can buy at once, but can be withdrawn only once it settles, 2 sessions later, or at once with
+// your broker's Settle now (a 'settle' wallet move: that much of the money still settling then, oldest sale first).
+export const SETTLE_DAYS = 2;
+export function unsettled(book, today) {
+  const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
+  const sales = book.fills.filter(f => f.side === 'sell' && real.has(f.trade_id))
+    .map(f => ({ date: f.date, until: sessionsAfter(f.date, SETTLE_DAYS), left: f.shares * f.price - (f.fees || 0) }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  for (const m of (book.cash || []).filter(x => x.kind === 'settle' && x.date <= today)) {
+    let a = m.amount;
+    for (const s of sales) {
+      if (a <= 0) break;
+      if (s.date <= m.date && s.until > m.date) { const k = Math.min(a, s.left); s.left -= k; a -= k; }
+    }
+  }
+  return sum(sales.filter(s => s.until > today).map(s => s.left));
+}
+
 export function accountSummary(book, account, cfg, lastClose, events = []) {
-  const start = +(account === 'real' ? cfg.capital : cfg.paper_capital);
+  const capital = +(account === 'real' ? cfg.capital : cfg.paper_capital);
+  const moves = account === 'real' ? book.cash || [] : [];
+  const added = sum(moves.map(walletFlow));
+  const start = capital + added;                  // the money you put in: returns don't count top-ups as profit
   const closed = trades(book, account, ['closed']);
   const open = trades(book, account, ['open']);
   const dividends = sum(Object.values(dividendsByTrade(book, account)));
   const realized = sum(closed.map(t => (t.exit_price - t.entry_price) * t.shares - (t.fees || 0))) + dividends;
   const cost = sum(open.map(t => t.entry_price * t.shares + (t.fees || 0)));
-  const cash = start + realized - cost;
-  // A position still waiting for its bonus-share update holds the old share count at old prices.
-  const factor = Object.fromEntries(Object.entries(pending(book, events, account)).map(([id, e]) => [id, e.factor]));
-  const market = sum(open.map(t => (lastClose[t.symbol] ?? t.entry_price) * t.shares * (factor[t.id] ?? 1)));
+  const cash = capital + sum(moves.map(walletEffect)) + realized - cost;
+  // A position still waiting for its bonus-share update holds the old share count at old prices; one waiting after
+  // a rights issue holds its shares at the new price and the rights beside them (rightsHolding).
+  const pend = pending(book, events, account);
+  const worth = t => {
+    const e = pend[t.id], last = lastClose[t.symbol] ?? t.entry_price, r = rightsHolding(e, t.shares);
+    return r ? last * t.shares + r.value : last * t.shares * (e ? e.factor : 1);
+  };
+  const market = sum(open.map(worth));
   const equity = cash + market;
   return {
-    start, cash, equity, realized, dividends, unrealized: market - cost, open_count: open.length,
-    open_risk: sum(open.map(t => Math.max(0, t.entry_price - t.stop) * t.shares)), return_pct: equity / start - 1,
+    start, capital, added, cash, equity, realized, dividends, unrealized: market - cost, open_count: open.length,
+    open_risk: sum(open.map(t => Math.max(0, t.entry_price - t.stop) * t.shares)),
+    return_pct: start > 0 ? equity / start - 1 : null,
   };
 }
 

@@ -84,7 +84,7 @@ class FakeFetcher:
         self.asked.append((url, params))
         for key, body in self.routes.items():
             if key in url:
-                return Resp(body(params) if callable(body) else body)
+                return body if isinstance(body, Resp) else Resp(body(params) if callable(body) else body)
         raise ConnectionError(url)
 
 
@@ -150,7 +150,7 @@ def test_update_reads_every_source_and_one_down_doesnt_stop_the_others(tmp_path)
         # the RSS feeds and Mubasher's latest-news pages are down
     })
     res = news.update(conn, first=["MHOT"], budget_s=60, fetcher=f)
-    assert res["actions"] == 5 and res["stocks"] == 3
+    assert res["actions"] == 5 + len(news.KNOWN_ACTIONS) and res["stocks"] == 3
     assert set(res["failed"]) == {"Al Borsa News", "Daily News Egypt", "Mubasher latest news"}
     kinds = {(r["symbol"], r["kind"], r["announced"], r["effective"]) for r in news.actions(conn)}
     assert ("ABUK", "bonus", "2026-02-24", "2026-10-07") in kinds
@@ -164,6 +164,50 @@ def test_update_reads_every_source_and_one_down_doesnt_stop_the_others(tmp_path)
     f.asked.clear()
     assert news.update(conn, budget_s=60, fetcher=f)["actions"] == 0
     assert not [p for u, p in f.asked if p and "symbol" in p]
+
+
+def _page(ids):
+    return "".join(f'<span class="mi-article-media-block__date">24 September 2026 11:25 AM</span> '
+                   f'<a class="mi-article-media-block__title" href="/news/{i}/x">Headline {i}</a>' for i in ids)
+
+
+def test_a_stock_going_ex_soon_comes_early_and_a_new_stocks_older_pages_are_read(tmp_path):
+    conn = _market(tmp_path)
+    soon = (date.today() + timedelta(days=5)).isoformat()
+    news.save_corporate_actions(conn, [{"symbol": "MHOT", "kind": "rights", "type": "Capital Increase - Rights Issue",
+                                        "announced": "2026-09-01", "effective": soon, "note": ""}])
+    f = FakeFetcher({"corporate-actions": {"rows": [], "numberOfPages": 1}, "news-headlines": _tv([]),
+                     "english.mubasher.info/markets": "<html>no news</html>",
+                     "MHOT/news/2": _page(range(100, 105)), "MHOT/news": _page(range(25)),
+                     "www.mubasher.info/markets": MUBASHER_PAGE})
+    news.update(conn, first=["COMI"], budget_s=60, fetcher=f)
+    pages = [u.split("/stocks/")[1] for u, _ in f.asked if "www.mubasher.info/markets" in u]
+    assert pages == ["COMI/news", "MHOT/news", "MHOT/news/2", "ABUK/news"]     # the signal, then the one going ex
+    assert len(news.stock_news(conn, "MHOT")) == 30
+    f.asked.clear()
+    news.update(conn, first=["COMI"], budget_s=60, fetcher=f)
+    assert not [u for u, _ in f.asked if u.endswith("/news/2")]            # page 1 had nothing new: no need
+
+
+def test_a_stock_page_mubasher_cant_show_goes_to_the_back_instead_of_stopping_the_run(tmp_path):
+    """From 29 Sep 2026 three never-read stocks whose pages are always a 500 came first and stopped every run."""
+    conn = _market(tmp_path)
+    broken = Resp("<html>error</html>", 500)
+    f = FakeFetcher({"corporate-actions": {"rows": [], "numberOfPages": 1}, "news-headlines": _tv([]),
+                     "ABUK/news": broken, "COMI/news": broken,
+                     "english.mubasher.info/markets": "<html>no news</html>", "www.mubasher.info/markets": MUBASHER_PAGE})
+    res = news.update(conn, budget_s=60, fetcher=f)
+    assert "Mubasher stock pages" not in res["failed"] and res["stocks"] == 1           # MHOT was read
+    checked = json.loads(db.get_meta(conn, "news_checked"))
+    assert all("mubasher" in checked[s] for s in ("ABUK", "COMI", "MHOT"))            # all to the back of the queue
+    monkey = FakeFetcher({"corporate-actions": {"rows": [], "numberOfPages": 1}, "news-headlines": _tv([]),
+                          "/markets/EGX/stocks/": broken, "english.mubasher.info": "<html>no news</html>",
+                          "www.mubasher.info": "<html>no news</html>"})
+    news.BROKEN_RUN, before = 2, news.BROKEN_RUN
+    try:                                                                                # every page an error: down
+        assert "Mubasher stock pages" in news.update(conn, budget_s=60, fetcher=monkey)["failed"]
+    finally:
+        news.BROKEN_RUN = before
 
 
 def test_cautions_for_a_buyer(tmp_path):
@@ -209,7 +253,8 @@ def test_pages_messages_and_the_site_show_the_news(tmp_path, cfg):
     rows = [_ca("MHOT", "Cash Dividends", day(-11), day(15)), _ca("ABUK", "Bonus Shares Distribution", day(-200), day(9))]
     news.save_corporate_actions(conn, news.fetch_corporate_actions(
         FakeFetcher({"corporate-actions": {"rows": rows, "numberOfPages": 1}}), 1))
-    news.save_news(conn, news.parse_mubasher(MUBASHER_PAGE, "ar", datetime.now()), "COMI")
+    today = MUBASHER_PAGE.replace("24 سبتمبر 11:25 ص", datetime.now().strftime("%d %B %I:%M %p"))   # stays recent
+    news.save_news(conn, news.parse_mubasher(today, "ar", datetime.now()), "COMI")
     news.save_news(conn, [{"id": "m:1", "source": "alborsa", "lang": "ar", "published": news._iso(datetime.now()),
                            "title": "البورصة تربح 10 مليارات جنيه", "url": "https://alborsa/1"}])
     d = views.Data(conn, cfg, views.Cache())
@@ -223,3 +268,35 @@ def test_pages_messages_and_the_site_show_the_news(tmp_path, cfg):
     assert files["core"]["cautions"]["MHOT"][0]["kind"] == "ex_dividend"
     assert files["news"]["items"] and "held" not in files["news"]
     assert sorted(a["kind"] for a in files["dividends"]["coming"]) == ["bonus", "dividend"]
+
+
+@pytest.mark.parametrize("title, deal", [
+    ('الرئيس التنفيذي لـ"قرة" يواصل خفض حصته بصفقة بيع جديدة بـ548.67 مليون جنيه', ("sell", 548.67e6, "insider")),
+    ('مساهم بـ"كوبّر للاستثمار" يرفع حصته إلى 15.2% بصفقة قيمتها 6.89 مليون جنيه', ("buy", 6.89e6, "shareholder")),
+    ('بقيمة 937.6 مليون جنيه.. صندوق يبيع أسهماً من رأسمال "فوري" ويخفض حصته لـ4.4%', ("sell", 937.6e6, "fund")),
+    ('"Black Sparrow" تخفض حصتها في "فوري" بصفقة تجاوزت 72.6 مليون جنيه', ("sell", 72.6e6, "company")),
+    ("تنفيذ صفقة على أسهم البنك التجاري الدولي بقيمة 2.45 مليار جنيه", (None, 2.45e9, None)),
+    ("CIB Egypt's 18.5 Mln Shares Block Traded For EGP 2.46 Bln - EGX", (None, 2.46e9, None)),
+    ('بـ 172.4 مليون جنيه.. تنفيذ صفقة "إثابة وتحفيز" على أسهم "إي فاينانس"', (None, 172.4e6, "staff")),
+    ('إعمار مصر تختار "BDO كيز" لتحديد القيمة العادلة بصفقة الاستحواذ على "سكاي تاور"', None),   # a business deal
+    ('البورصة المصرية تنظم فعالية "قرع الجرس" احتفالاً بصفقة "إيجيترانس نوسكو"', None),
+    ("EGYTRANS Says Nafith Egypt Signs Deal With SCZONE To Develop, Operate Truck Yard At Sokhna Port", None),
+])
+def test_big_deals_are_read_from_headlines(title, deal):
+    d = news.deal_of(title)
+    assert (d and (d["side"], pytest.approx(d["value"]) if d["value"] else None, d["who"])) == (
+        deal and (deal[0], pytest.approx(deal[1]), deal[2]))
+
+
+def test_big_deals_keep_one_per_deal(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    news.save_news(conn, [
+        {"id": "r1", "source": "reuters", "lang": "en", "published": "2026-08-17T10:09",
+         "title": "CIB Egypt's 18.5 Mln Shares Block Traded For EGP 2.46 Bln - EGX", "url": "u1"},
+        {"id": "m1", "source": "mubasher", "lang": "ar", "published": "2026-08-18T10:41",
+         "title": "صندوق يرفع حصته في التجاري الدولي بصفقة قيمتها 2.45 مليار جنيه", "url": "u2"},
+        {"id": "m2", "source": "mubasher", "lang": "ar", "published": "2026-08-17T11:00",
+         "title": "أرباح التجاري الدولي ترتفع 20%", "url": "u3"},
+    ], "COMI")
+    got = news.big_deals(conn, "COMI", "2026-01-01")
+    assert [(d["side"], d["who"], d["url"]) for d in got] == [("buy", "fund", "u2")]

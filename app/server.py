@@ -33,7 +33,8 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from egx_agent import config, corporate, db, portfolio
+from egx_agent import config, corporate, db, levels, portfolio
+from egx_agent.data import prices
 
 from . import accounts, alerts, auth, jobs, schedule, views
 from .accounts import LOCAL, Person
@@ -41,8 +42,8 @@ from .accounts import LOCAL, Person
 STATIC = Path(__file__).with_name("static")
 APP_ID = "egx-trading-agent"
 COOKIE = "egx_session"
-KEEP_ON_RESET = ("capital", "paper_capital", "fee_pct_per_side",  # your own numbers and connections, not rules
-                 "telegram_token", "telegram_chat_id", "telegram_only_action")
+KEEP_ON_RESET = ("capital", "paper_capital", "broker", "fee_pct_per_side",  # your own numbers and connections, not rules
+                 "telegram_token", "telegram_chat_id", "telegram_only_action", "telegram_worker_url")
 PUBLIC_API = {"/api/health", "/api/auth/login", "/api/auth/invite", "/api/auth/join", "/api/auth/reset"}
 BEFORE_TERMS = {"/api/me", "/api/auth/accept-terms", "/api/auth/logout"}
 
@@ -66,6 +67,7 @@ class BuyIn(BaseModel):
     shares: int = Field(ge=1)
     stop: float | None = Field(default=None, ge=0)
     notes: str = Field(default="", max_length=500)
+    fees_in: bool = False          # the price is your broker's average cost, fees already in it
 
 
 class SellIn(BaseModel):
@@ -88,6 +90,8 @@ class ScanIn(BaseModel):
 class AdjustIn(BaseModel):
     event_id: int
     shares: int | None = Field(default=None, ge=1)
+    paid: float = Field(default=0.0, ge=0)        # a rights issue: what each new share cost
+    got: float | None = Field(default=None, ge=0)  # or what you got for the rights you sold
     ignore: bool = False
 
 
@@ -435,6 +439,18 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def stocks(d: views.Data = Depends(get_data)):
         return JSON(views.stocks_list(d))
 
+    @app.get("/api/rights")
+    def rights(d: views.Data = Depends(get_data)):
+        return JSON(views.rights_list(d))
+
+    @app.get("/api/rights/past")
+    def rights_past(d: views.Data = Depends(get_data)):
+        return JSON(views.rights_past(d))
+
+    @app.get("/api/rights/history")
+    def rights_history(d: views.Data = Depends(get_data)):
+        return JSON(corporate.rights_study(d.conn))
+
     @app.get("/api/today")
     def today(d: views.Data = Depends(get_data)):
         return JSON(views.today(d))
@@ -442,6 +458,23 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     @app.get("/api/stock/{symbol}")
     def stock(symbol: str, d: views.Data = Depends(get_data)):
         return JSON(views.stock_detail(d, symbol))
+
+    @app.get("/api/stock/{symbol}/intraday")
+    def stock_intraday(symbol: str, d: views.Data = Depends(get_data)):
+        try:        # a stock opened before the next scan downloads its hourly bars: fetch them now
+            prices.refresh_intraday(d.conn, symbol.upper(), aliases=d.cfg.get("symbol_aliases"))
+        except Exception:  # offline or TradingView busy: the chart shows what's stored
+            pass
+        return JSON(views.stock_intraday(d, symbol))
+
+    @app.get("/api/quotes")
+    def quotes(s: str = "", d: views.Data = Depends(get_data)):
+        """Live prices for the page's positions (prices.live_quotes, about 15 minutes late): {} when offline."""
+        syms = [x for x in dict.fromkeys(s.upper().split(",")) if re.fullmatch(r"[A-Z0-9]{1,12}", x)][:40]
+        try:
+            return JSON(prices.live_quotes(syms, d.cfg.get("symbol_aliases")))
+        except Exception:
+            return JSON({})
 
     @app.get("/api/watchlist")
     def watchlist(d: views.Data = Depends(get_data)):
@@ -498,6 +531,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def market(d: views.Data = Depends(get_data)):
         return JSON(views.market_view(d))
 
+    @app.get("/api/egx30")
+    def egx30(d: views.Data = Depends(get_data)):
+        return JSON(views.index_view(d))
+
     @app.put("/api/orders/check")
     def order_check(body: CheckIn, conn=Depends(get_conn)):
         if body.done:
@@ -521,13 +558,14 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
         if len(ind):
             hist = ind.loc[:pd.Timestamp(body.date)]
             atr = float((hist if len(hist) else ind)["atr14"].iloc[-1])
+        chart = levels.plan_at(ind, d.cfg, body.date) if len(ind) and d.cfg.get("levels_mode") == "chart" else None
         if (atr is None or not math.isfinite(atr)) and not body.stop:
             fail(400, "There's no price history for this stock, so the automatic stop can't be calculated. "
                       "Enter a stop-loss.")
         had = portfolio.open_position(d.conn, "real", sym) is not None
         portfolio.add_real_buy(d.conn, d.cfg, sym, str(body.date), body.price, body.shares, atr,
                                sector=d.info(sym).get("sector") or "", stop=body.stop or None,
-                               notes=body.notes.strip())
+                               notes=body.notes.strip(), chart=chart, fees_in=body.fees_in)
         pos = portfolio.open_position(d.conn, "real", sym)
         if had:
             msg = (f"Added {body.shares:,} {sym} to your position: now {pos['shares']:,} shares at an average of "
@@ -544,9 +582,8 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
             fail(404, "This position is no longer open. Refresh the page.")
         if body.shares > pos["shares"]:
             fail(400, f"You hold {pos['shares']:,} shares, so you can't sell {body.shares:,}.")
-        fee = d.cfg["fee_pct_per_side"] / 100
         pnl = ((body.price - pos["entry_price"]) * body.shares - (pos["fees"] or 0) * body.shares / pos["shares"]
-               - body.price * body.shares * fee)
+               - config.order_fee(body.price * body.shares, d.cfg))
         try:
             result = portfolio.sell_real(d.conn, d.cfg, body.trade_id, str(body.date), body.price, body.shares,
                                          body.reason)
@@ -570,13 +607,11 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
             return JSON({"message": f"Kept your {pos['symbol']} position as it is ({pos['shares']:,} shares)."})
         if not body.shares:
             fail(400, "Enter how many shares you hold now.")
-        expected = pos["shares"] * ev["factor"]
-        if not 0.75 * expected <= body.shares <= 1.25 * expected:
-            fail(400, f"{body.shares:,} shares is far from the expected {ev['shares_expected']:,}. Check the number "
-                      "at your broker. If your shares didn't change, choose 'My shares didn't change'.")
-        res = corporate.apply(conn, trade_id, body.event_id, body.shares)
+        if problem := corporate.adjust_problem(pos["shares"], ev, body.shares, body.paid):
+            fail(400, problem)
+        res = corporate.apply(conn, trade_id, body.event_id, body.shares, body.paid, body.got)
         return JSON({"message": f"Updated {res['symbol']}: {res['old']:,} → {res['new']:,} shares at an average of "
-                               f"{res['avg']:.3f}. The stop and target moved by the same ratio."})
+                               f"{res['avg']:.3f}. The stop and target moved with the prices."})
 
     @app.post("/api/portfolio/{trade_id}/dividend")
     def dividend(trade_id: int, body: DividendIn, conn=Depends(get_conn)):
@@ -641,7 +676,8 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
         conn.commit()
         if person.is_admin:
             current = config.load_config()
-            config.save_config({**config.DEFAULTS, "telegram_token": current.get("telegram_token", "")})
+            config.save_config({**config.DEFAULTS, "telegram_token": current.get("telegram_token", ""),
+                                "telegram_worker_url": current.get("telegram_worker_url", "")})
         cache.clear()
         return JSON({"message": ("Default rules restored for everyone" if person.is_admin else "Your settings are back "
                                  "to the defaults") + " (your capital and fees were kept)."})

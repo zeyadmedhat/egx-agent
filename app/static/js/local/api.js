@@ -2,16 +2,16 @@
 // shapes app/views.py and app/server.py give on your Mac. The shared parts come from the scan's published files;
 // your portfolio and settings come from this browser (site.js). Paper trading and the backtest are only on the Mac.
 import * as E from './engine.js';
-import { load, loadBook, saveBook } from './site.js';
+import { load, loadBook, saveBook, validBook, emptyBook } from './site.js';
 
 export class LocalError extends Error {
   constructor(message, status = 400, detail = null) { super(message); this.status = status; this.detail = detail ?? { message }; }
 }
 const fail = (status, message, extra) => { throw new LocalError(message, status, { message, ...extra }); };
 
-const STATUS_ORDER = { ADJUST: 0, EXIT: 1, REVIEW: 2, 'TIGHTEN STOP': 3, HOLD: 4, 'NO DATA': 5 };
-const ACTION_STATUSES = ['ADJUST', 'EXIT', 'REVIEW', 'TIGHTEN STOP'];
-const KEEP_ON_RESET = ['capital', 'fee_pct_per_side'];
+const STATUS_ORDER = { ADJUST: 0, EXIT: 1, BOUNCE: 2, REVIEW: 3, 'TIGHTEN STOP': 4, HOLD: 5, 'NO DATA': 6 };
+const ACTION_STATUSES = ['ADJUST', 'EXIT', 'BOUNCE', 'REVIEW', 'TIGHTEN STOP'];
+const KEEP_ON_RESET = ['capital', 'broker', 'fee_pct_per_side'];
 
 const localToday = () => {
   const d = new Date();
@@ -21,11 +21,27 @@ const localToday = () => {
 // ------------------------------------------------------------------ one request's context
 async function context() {
   const core = await load('core');
+  E.setHolidays(core.holidays);
   const book = loadBook();
   const cfg = { ...core.strategy, ...core.personal_defaults };
   for (const [k, v] of Object.entries(book.settings || {})) if (k in core.personal_defaults) cfg[k] = v;
+  // set your own fee % before the broker choice came: keep it
+  if (book.settings && 'fee_pct_per_side' in book.settings && !('broker' in book.settings)) cfg.broker = 'other';
+  const plan = cfg.broker === 'thndr_trader' && book.plan;
+  const due = plan ? E.planRenewals(plan, plan.paid_to || plan.added, localToday()) : [];
+  if (due.length) {          // Thndr Trader renewed since you last looked: its price came out of your wallet
+    book.cash = [...(book.cash || []), ...due.map(date => ({ id: E.nextId(book), date, kind: 'fee', amount: plan.price,
+      fee: 0, note: 'Thndr Trader plan' }))];
+    plan.paid_to = due.at(-1);
+    saveBook(book);
+  }
   return { core, book, cfg, stocks: new Map(core.stocks.map(s => [s.symbol, s])), bars: {} };
 }
+
+// Your fees on an order that day: with Thndr Trader, Thndr's commission stays on one after the plan month's 50 free
+// ones (engine.js planFree). skip: the transaction being changed, which doesn't count against itself.
+const feeCfg = (c, day, skip = null) => (c.cfg.broker === 'thndr_trader' && c.book.plan
+  ? { ...c.cfg, free_trade: E.planFree(c.book, c.book.plan, day, skip) } : c.cfg);
 
 const info = (c, sym) => c.stocks.get(sym)
   || { symbol: sym, egx33_manual: false, kashif_url: `${c.core.kashif_url}${encodeURIComponent(sym)}` };
@@ -41,7 +57,8 @@ async function barsFor(c, symbols) {
     const divs = s.divs || {};            // cash dividend per share by ex-date
     for (let i = 0; i < s.time.length; i++) {
       bars.push({ date: s.time[i], open: E.num(s.open[i]), high: E.num(s.high[i]), low: E.num(s.low[i]),
-        close: E.num(s.close[i]), atr14: E.num(s.atr14[i]), ema50: E.num(s.ema50[i]), div: divs[s.time[i]] || 0 });
+        close: E.num(s.close[i]), atr14: E.num(s.atr14[i]), ema20: E.num(s.ema20[i]), ema50: E.num(s.ema50[i]), div: divs[s.time[i]] || 0,
+        sup: E.num((s.sup || [])[i]), ptgt: E.num((s.ptgt || [])[i]) });   // the chart's stop and target that day
     }
     c.bars[sym] = bars;
   }));
@@ -81,31 +98,42 @@ function signals(c) {
 
 async function openPositions(c, symbol = null) {
   const { book, cfg, core } = c;
-  const fee = cfg.fee_pct_per_side / 100;
   const pend = E.pending(book, core.events, 'real');
   const divs = E.dividendsByTrade(book, 'real');
   const open = E.trades(book, 'real', ['open']).filter(t => !symbol || t.symbol === symbol);
   const bars = await barsFor(c, open.map(t => t.symbol));
+  // a big loss's averaging-down rule: only when the stock earns a buy on its own (a BUY signal or a top-10% rating)
+  const buys = new Set(signals(c)[1].filter(x => x.action === 'BUY').map(x => x.symbol));
+  const preds = (core.predictions && core.predictions.by_symbol) || {};
   const out = open.map(r => {
     const b = bars[r.symbol] || [];
     const ev = pend[r.id];
+    const rights = E.rightsHolding(ev, r.shares);
     let factor = 1, stt, last;
     if (ev) {
       // Past prices were re-based after this buy, so the exit rules can't be checked until the share count is
-      // updated. Value the old share count at the new price × the ratio meanwhile.
-      factor = ev.factor;
-      last = b.length ? b[b.length - 1].close : r.entry_price / factor;
+      // updated. Value the old share count at the new price × the ratio meanwhile, or after a rights issue, the
+      // shares at the new price and the rights beside them, as your broker does.
+      factor = rights ? 1 : ev.factor;
+      last = b.length ? b[b.length - 1].close : r.entry_price / ev.factor;
       stt = { status: 'ADJUST', stop: null, days_held: b.filter(x => x.date >= r.entry_date).length,
-        reason: `Bonus shares or split from ${E.niceDate(ev.ex_date)}: ${ev.describe}. `
-          + 'Enter the shares you hold now so the stop and P&L stay right.' };
+        reason: rights   // views.adjust_reason
+          ? `Rights issue from ${E.niceDate(ev.ex_date)}: you also hold ${E.int(rights.units)} rights (${rights.symbol}). `
+            + "Once you've subscribed or sold them, record it here so the stop and P&L stay right."
+          : ev.rights
+          ? `Rights issue from ${E.niceDate(ev.ex_date)}: past prices ÷ ${E.g(+ev.factor.toPrecision(4))}. Once you've `
+            + 'subscribed or sold your rights, enter the shares you hold now so the stop and P&L stay right.'
+          : `Bonus shares or split from ${E.niceDate(ev.ex_date)}: ${ev.describe}. `
+            + 'Enter the shares you hold now so the stop and P&L stay right.' };
     } else {
       stt = E.realStatus(r, b, cfg);
       last = stt.last_close || r.entry_price;
     }
     const fees = r.fees || 0;
     const div = divs[r.id] || 0;
-    const fills = E.fillsOf(book, r.id).map(f => ({ id: f.id, date: f.date, side: f.side, shares: f.shares,
-      price: f.price, fees: f.fees, note: f.note }));
+    const own = E.fillsOf(book, r.id);
+    const fills = own.map(f => ({ id: f.id, date: f.date, side: f.side, shares: f.shares,
+      price: f.price, fees: f.fees, note: f.note, fees_in: !!f.fees_in, undo: f.side === 'bonus' && f === own.at(-1) }));
     for (const x of book.dividends.filter(d => d.trade_id === r.id).sort((a, b2) => (a.date < b2.date ? -1 : 1))) {
       fills.push({ id: null, dividend_id: x.id, date: x.date, side: 'dividend', shares: x.shares,
         price: x.shares ? x.amount / x.shares : null, fees: 0, amount: x.amount, note: x.note || '' });
@@ -115,11 +143,18 @@ async function openPositions(c, symbol = null) {
     return {
       id: r.id, symbol: r.symbol, info: info(c, r.symbol), status: stt.status, reason: stt.reason,
       first_buy: r.entry_date, avg_price: r.entry_price, shares: r.shares, last, value: worth * r.shares,
-      pnl_pct: worth / r.entry_price - 1,
-      pnl: (worth - r.entry_price) * r.shares - fees - worth * r.shares * fee + div,
-      stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target,
-      day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
-      notes: r.notes || '', fills, adjust: ev || null, n_buys: fills.filter(f => f.side === 'buy').length || 1,
+      // like your broker: against what you paid with the buy fees; selling fees count once you sell
+      pnl_pct: ((worth - r.entry_price) * r.shares - fees) / (r.entry_price * r.shares + fees),
+      pnl: (worth - r.entry_price) * r.shares - fees + div,
+      stop: stt.stop, prev_stop: stt.prev_stop ?? null, initial_stop: r.initial_stop, target: r.target, my_stop: r.my_stop ?? null,
+      stops_mine: cfg.stop_moves === 'mine',
+      bounce_level: stt.bounce_level ?? null, bounce_by: stt.bounce_by ?? null,
+      buy_signal: buys.has(r.symbol), top_pick: !!(preds[r.symbol] && preds[r.symbol].top10),
+      // how far under its 3-month high: after a 50%+ fall even the model's top ratings did worse (2026-10)
+      from_high: b.length ? last / Math.max(...b.slice(-60).map(x => x.close)) - 1 : null,
+      stop_src: r.stop_src || null, target_src: r.target_src || null, day: stt.days_held, sell_by: E.sessionsAfter(r.entry_date, cfg.max_hold_days - 1), fees, dividends: div,
+      notes: r.notes || '', fills, adjust: ev || null, rights, n_buys: fills.filter(f => f.side === 'buy').length || 1,
+      real: E.realCost(fills, r.shares, r.entry_price, fees, worth, cfg, rights, core.events, r.symbol, localToday()),
     };
   });
   out.sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || (a.symbol < b.symbol ? -1 : 1));
@@ -137,10 +172,11 @@ function status(c, positions) {
     positions: positions.length,
     job: null,
     scan_url: c.core.scan_url || null,
+    holidays: Object.fromEntries(Object.entries(c.core.holidays || {}).filter(([d]) => d >= localToday())),
   };
 }
 
-function orders(c, positions) {
+export function orders(c, positions) {     // also tests/js/parity.mjs: the same list as views.orders
   const [scanDate, rows] = signals(c);
   if (!scanDate) return null;
   const m = c.core.market || {};
@@ -149,14 +185,23 @@ function orders(c, positions) {
   for (const p of positions) {
     const sym = p.symbol, st = p.status;
     const base = { symbol: sym, trade_id: p.id, shares: p.shares };
-    if (st === 'ADJUST') {
+    if (st === 'ADJUST' && p.rights) {
+      const r = p.rights;
+      items.push({ ...base, key: `adjust:${sym}`, kind: 'adjust', rights: r.units, title: `Record what you do with your ${sym} rights`,
+        detail: `You hold ${E.int(r.units)} rights (${r.symbol}) from ${E.niceDate(p.adjust.ex_date)}: ${r.note} `
+          + "Once you subscribe or sell them, record it on My Portfolio. Its stop can't be checked until then." });
+    } else if (st === 'ADJUST') {
       const d = p.adjust.describe;
-      items.push({ ...base, key: `adjust:${sym}`, kind: 'adjust', title: `Update ${sym} for its bonus shares`,
+      items.push({ ...base, key: `adjust:${sym}`, kind: 'adjust',
+        title: `Update ${sym} for its ${p.adjust.rights ? 'rights issue' : 'bonus shares'}`,
         detail: `${d.charAt(0).toUpperCase()}${d.slice(1)}, from ${E.niceDate(p.adjust.ex_date)}. `
           + "On My Portfolio, enter the shares you hold now. Its stop can't be checked until then." });
     } else if (st === 'EXIT') {
       items.push({ ...base, key: `sell:${sym}`, kind: 'sell', title: `Sell all ${E.int(p.shares)} ${sym} at the open`,
         detail: p.reason });
+    } else if (st === 'BOUNCE') {        // a big loss: sold on the first bounce (engine.js onBounce)
+      items.push({ ...base, key: `bounce:${sym}`, kind: 'review', level: p.bounce_level,
+        title: `Sell ${sym} on a bounce: at its first close above ${E.px(p.bounce_level)}`, detail: p.reason });
     } else if (st === 'TIGHTEN STOP') {
       items.push({ ...base, key: `stop:${sym}`, kind: 'stop', from: p.prev_stop, to: p.stop,
         title: `Move your ${sym} stop up to ${E.px(p.stop)}`,
@@ -210,12 +255,13 @@ async function today(c) {
   const buys = [], watch = [];
   const warn = core.cautions || {};
   for (const x of rows) {
-    const r = { ...x, info: info(c, x.symbol), pred: preds.by_symbol[x.symbol] ?? null, cautions: warn[x.symbol] || [] };
+    const r = { ...x, info: info(c, x.symbol), pred: preds.by_symbol[x.symbol] ?? null, cautions: warn[x.symbol] || [],
+      co: (core.company || {})[x.symbol] || null };
     if (r.action === 'BUY') {
       delete r.trigger; delete r.to_trigger;
       r.sell_by = E.sessionsAfter(scanDate, cfg.max_hold_days);
       buys.push(r);
-    } else watch.push(r);
+    } else if (E.passesFilter(r.info, cfg.shariah_filter)) watch.push(r);   // close to a BUY: only what your filter allows
   }
   const positions = (await openPositions(c)).map(p => ({ ...p, cautions: warn[p.symbol] || [] }));
   const early = core.final === false
@@ -223,10 +269,14 @@ async function today(c) {
   return {
     market: core.market ? { ...core.market, buys: buys.length, warnings: [...early, ...(core.market.warnings || [])] } : null,
     scan_date: scanDate, buys, watch, positions,
-    spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today, paper: null,
+    spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today, mood: core.mood_today || null, paper: null,
+    changes: core.changes ? { since: core.changes.since, by_symbol: Object.fromEntries(positions
+      .filter(p => core.changes.by_symbol[p.symbol]).map(p => [p.symbol, core.changes.by_symbol[p.symbol]])) } : null,
     model: Object.keys(preds.by_symbol).length ? { base: preds.base, count: preds.count, date: preds.date } : null,
-    cfg: Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
-      'shariah_filter'].map(k => [k, cfg[k]])),
+    cfg: { ...Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
+      'shariah_filter'].map(k => [k, cfg[k]])), fee_pct_per_side: E.feePct(cfg) },
+    record: core.record || null, odds: core.odds || null,
+    telegram: core.telegram || null,      // Picks' bell: the site's bot (/watch SYMBOL)
   };
 }
 
@@ -241,7 +291,8 @@ async function stockDetail(c, symbol) {
   if (!out.has_data) return out;
   const [, rows] = signals(c);
   const row = rows.find(r => r.symbol === sym);
-  let levels = [];
+  const ch = out.chart;
+  let levels = ch ? [{ label: 'Stop', price: ch.stop, kind: 'stop' }, { label: 'Target', price: ch.target, kind: 'target' }] : [];
   if (row) {
     out.signal = row;
     delete out.checklist;
@@ -253,10 +304,12 @@ async function stockDetail(c, symbol) {
   const pos = await openPositions(c, sym);
   if (pos.length) {
     out.position = pos[0];
+    out.fee_pct = E.feePct(c.cfg);
     levels = [{ label: 'Avg price', price: pos[0].avg_price, kind: 'entry' },
       { label: 'Stop', price: pos[0].stop, kind: 'stop' }, { label: 'Target', price: pos[0].target, kind: 'target' }];
   }
   out.levels = levels;
+  out.telegram = c.core.telegram || null;     // the site's bot: /watch SYMBOL levels (app/alerts.py)
   const real = new Set(c.book.trades.filter(t => t.account === 'real').map(t => t.id));
   const groups = new Map();
   for (const f of c.book.fills) {
@@ -282,30 +335,42 @@ async function portfolioView(c) {
   });
   if (closed.length) {
     closed.sort((a, b) => (a.exit_date < b.exit_date ? 1 : a.exit_date > b.exit_date ? -1 : b.id - a.id));
-    rows = closed.map(t => Object.fromEntries(['id', 'symbol', 'entry_date', 'entry_price', 'exit_date', 'exit_price',
-      'shares', 'pnl', 'return_pct', 'exit_reason', 'notes'].map(k => [k, t[k] ?? null])));
+    rows = closed.map(t => {
+      const src = sourceOf(t), main = book.trades.find(x => x.id === src);
+      return { ...Object.fromEntries(['id', 'symbol', 'entry_date', 'entry_price', 'exit_date', 'exit_price',
+        'shares', 'pnl', 'return_pct', 'exit_reason', 'notes'].map(k => [k, t[k] ?? null])),
+      source_id: src, source_open: !!main && main.status === 'open',
+      fills: E.fillsOf(book, src).map(f => ({ id: f.id, date: f.date, side: f.side, shares: f.shares, price: f.price,
+        fees: f.fees, note: f.note })) };
+    });
     stats = { count: closed.length, win_rate: closed.filter(t => t.pnl > 0).length / closed.length,
       total: closed.reduce((a, t) => a + t.pnl, 0) };
   }
   const [, sig] = signals(c);
   return {
-    summary: s, positions: await openPositions(c), closed: rows, closed_stats: stats,
+    summary: s, wallet: walletView(c, s), positions: await openPositions(c), closed: rows, closed_stats: stats,
     signals: sig.filter(r => r.action === 'BUY').map(r => ({ symbol: r.symbol, entry_high: r.entry_high, shares: r.shares })),
-    fee_pct: cfg.fee_pct_per_side, sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
+    fee_pct: E.feePct(cfg), fee_cfg: { broker: cfg.broker, fee_pct_per_side: cfg.fee_pct_per_side,
+      free_trade: feeCfg(c, localToday()).free_trade },
+    sell_reasons: c.core.sell_reasons, max_hold_days: cfg.max_hold_days,
     review_day: cfg.review_day, max_open_risk_pct: cfg.max_open_risk_pct,
+    limits: Object.fromEntries(['max_position_pct', 'max_positions', 'max_per_sector', 'max_open_risk_pct'].map(k => [k, cfg[k]])),
     nothing_saved: !book.trades.some(t => t.account === 'real'),
   };
 }
 
+// The model's ranking, with only the stocks your Shariah filter allows (their rank stays the model's).
 async function predictView(c) {
   const out = await load('predict');
   if (out && out.model) {
     const [, rows] = signals(c);
     const action = Object.fromEntries(rows.map(r => [r.symbol, r.action]));
     const held = new Set(E.trades(c.book, 'real', ['open']).map(t => t.symbol));
-    return { ...out, rows: out.rows.map(r => ({ ...r, action: action[r.symbol] ?? null, held: held.has(r.symbol) })) };
+    return { ...out, shariah_filter: c.cfg.shariah_filter,
+      rows: out.rows.filter(r => E.passesFilter(r.info || info(c, r.symbol), c.cfg.shariah_filter))
+        .map(r => ({ ...r, action: action[r.symbol] ?? null, held: held.has(r.symbol) })) };
   }
-  return out;
+  return out && { ...out, shariah_filter: c.cfg.shariah_filter };
 }
 
 // The dividend calendar (views.dividends_view): everyone's dividends, plus which of them you hold.
@@ -340,6 +405,7 @@ async function historyView(c) {
   const fills = c.book.fills.filter(f => real.has(f.trade_id))
     .map(f => ({ date: f.date, symbol: f.symbol, side: f.side, shares: f.shares, price: f.price, fees: f.fees || 0 }));
   const dividends = c.book.dividends.filter(x => real.has(x.trade_id)).map(x => ({ date: x.date, amount: x.amount }));
+  const moves = (c.book.cash || []).map(m => ({ date: m.date, cash: E.walletEffect(m), flow: E.walletFlow(m) }));
   const symbols = [...new Set(fills.map(f => f.symbol))];
   const pages = await Promise.all(symbols.map(s => load(`stock/${s}`).catch(() => null)));
   const series = {};
@@ -347,7 +413,7 @@ async function historyView(c) {
   const shared = (await load('history').catch(() => null)) || { buys: [], inflation: [] };
   const pending = Object.values(E.pending(c.book, c.core.events, 'real'))
     .map(e => ({ symbol: e.symbol, ex_date: e.ex_date, factor: e.factor }));
-  return { start: +c.cfg.capital, fills, dividends, pending, events: c.core.events.filter(e => symbols.includes(e.symbol)),
+  return { start: +c.cfg.capital, fills, dividends, moves, pending, events: c.core.events.filter(e => symbols.includes(e.symbol)),
     series, index: fills.length ? c.core.index : null, ...shared };
 }
 
@@ -362,14 +428,22 @@ function saveWatchlist(c, body) {
 
 // The size calculator's side (views.calc_view): your account, your limits and the market's state.
 const CALC_KEYS = ['capital', 'risk_per_trade_pct', 'max_position_pct', 'max_open_risk_pct', 'max_positions',
-  'max_per_sector', 'max_pct_of_adv', 'fee_pct_per_side', 'target_r', 'stop_min_pct', 'stop_max_pct'];
+  'max_per_sector', 'max_pct_of_adv', 'broker', 'fee_pct_per_side', 'target_r', 'stop_min_pct', 'stop_max_pct'];
+// Your buy and sell orders in the last 30 days: how many and their value (for Calculator → Thndr fees).
+function orders30(book) {
+  const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
+  const f = book.fills.filter(x => real.has(x.trade_id) && (x.side === 'buy' || x.side === 'sell') && x.date >= since);
+  return { n: f.length, value: f.reduce((a, x) => a + x.shares * x.price, 0) };
+}
 function calcView(c) {
   const real = E.accountSummary(c.book, 'real', c.cfg, closes(c), c.core.events);
   const b = c.core.breadth_today;
   return {
-    equity: real.equity, cash: real.cash, positions: E.positionsForAllocation(c.book, 'real', ['open']),
+    equity: real.equity, cash: real.cash, orders_30d: orders30(c.book), positions: E.positionsForAllocation(c.book, 'real', ['open']),
     cfg: Object.fromEntries(CALC_KEYS.map(k => [k, c.cfg[k]])),
     risk_off: !!(c.core.market && c.core.market.risk_off), switch: (b && b.switch) || null,
+    money: c.core.money || null, shares_value: real.equity - real.cash,
   };
 }
 
@@ -401,7 +475,10 @@ export function parseSettings(values, current, sections) {
     } else if (f.kind === 'select') {
       if (!f.options.some(o => o.value === v)) errors[f.key] = 'Pick one of the options.';
       else next[f.key] = v;
-    } else if (f.kind === 'toggle' || f.kind === 'choice') next[f.key] = !!v;
+    } else if (f.kind === 'choice') {                 // one of the options as it is: true/false, or a word like 'mine'
+      if (!f.options.some(o => o.value === v)) errors[f.key] = 'Pick one of the options.';
+      else next[f.key] = v;
+    } else if (f.kind === 'toggle') next[f.key] = !!v;
   }
   return [next, errors];
 }
@@ -425,6 +502,14 @@ function atrOn(bars, day) {
   return use.length ? use[use.length - 1].atr14 : NaN;
 }
 
+// The ATR and the chart's stop (under support) and target on a day, or the last session before it: what a buy's
+// stop and target come from.
+const marketAt = (bars, cfg) => day => {
+  const d = bars.filter(b => b.date <= day).at(-1);
+  return { atr: bars.length ? atrOn(bars, day) : NaN,
+    chart: cfg.levels_mode === 'chart' && d && Number.isFinite(d.ptgt) ? { stop: d.sup, target: d.ptgt } : null };
+};
+
 async function buy(c, body) {
   const sym = String(body.symbol || '').trim().toUpperCase();
   if (!sym || sym.length > 20) fail(422, 'symbol: enter a symbol.');
@@ -440,8 +525,9 @@ async function buy(c, body) {
     fail(400, "There's no price history for this stock, so the automatic stop can't be calculated. Enter a stop-loss.");
   }
   const had = !!E.openPosition(c.book, 'real', sym);
-  E.addRealBuy(c.book, c.cfg, sym, date, price, shares, atr, info(c, sym).sector || '', stop || null,
-    String(body.notes || '').trim().slice(0, 500));
+  const { chart } = marketAt(bars, c.cfg)(date);
+  E.addRealBuy(c.book, feeCfg(c, date), sym, date, price, shares, atr, info(c, sym).sector || '', stop || null,
+    String(body.notes || '').trim().slice(0, 500), chart, !!body.fees_in);
   saveBook(c.book);
   const pos = E.openPosition(c.book, 'real', sym);
   const message = had
@@ -460,12 +546,12 @@ function sell(c, body) {
   const pos = c.book.trades.find(t => t.id === id && t.account === 'real' && t.status === 'open');
   if (!pos) fail(404, 'This position is no longer open. Refresh the page.');
   if (shares > pos.shares) fail(400, `You hold ${E.int(pos.shares)} shares, so you can't sell ${E.int(shares)}.`);
-  const fee = c.cfg.fee_pct_per_side / 100;
-  const pnl = (price - pos.entry_price) * shares - (pos.fees || 0) * shares / pos.shares - price * shares * fee;
+  const cfg = feeCfg(c, date);
+  const pnl = (price - pos.entry_price) * shares - (pos.fees || 0) * shares / pos.shares - E.orderFee(price * shares, cfg);
   const before = { symbol: pos.symbol, shares: pos.shares, avg: pos.entry_price };
   let result;
   try {
-    result = E.sellReal(c.book, c.cfg, id, date, price, shares, reason);
+    result = E.sellReal(c.book, cfg, id, date, price, shares, reason);
   } catch (e) {
     fail(400, e.message);
   }
@@ -486,17 +572,67 @@ function adjust(c, id, body) {
     saveBook(c.book);
     return { message: `Kept your ${pos.symbol} position as it is (${E.int(pos.shares)} shares).` };
   }
-  const shares = Number(body.shares);
+  const shares = Number(body.shares), paid = Number(body.paid) || 0;
+  const got = body.got === null || body.got === undefined || body.got === '' ? null : Number(body.got);
   if (!shares) fail(400, 'Enter how many shares you hold now.');
-  const expected = pos.shares * ev.factor;
-  if (!(shares >= 0.75 * expected && shares <= 1.25 * expected)) {
+  if (got !== null && !(got >= 0)) fail(400, 'Enter what you got for your rights (0 if they lapsed).');
+  // corporate.adjust_problem
+  if (ev.rights) {
+    if (shares < pos.shares) {
+      fail(400, `You held ${E.int(pos.shares)} before the rights issue: enter those plus the new shares you subscribed `
+        + 'to. Sold some? Log that sale first.');
+    }
+    if (shares > pos.shares && !(paid > 0)) fail(400, 'Enter what each new share cost you (the subscription price).');
+  } else if (!(shares >= 0.75 * pos.shares * ev.factor && shares <= 1.25 * pos.shares * ev.factor)) {
     fail(400, `${E.int(shares)} shares is far from the expected ${E.int(ev.shares_expected)}. Check the number at your `
       + "broker. If your shares didn't change, choose 'My shares didn't change'.");
   }
-  const res = E.applyEvent(c.book, id, c.core.events.find(e => e.id === ev.event_id), shares, localToday());
+  const res = E.applyEvent(c.book, id, c.core.events.find(e => e.id === ev.event_id), shares, localToday(), paid, got);
   saveBook(c.book);
   return { message: `Updated ${res.symbol}: ${E.int(res.old)} → ${E.int(res.new)} shares at an average of `
-    + `${res.avg.toFixed(3)}. The stop and target moved by the same ratio.` };
+    + `${res.avg.toFixed(3)}. The stop and target moved with the prices.` };
+}
+
+function undoAdjust(c, fid) {
+  let res;
+  try { res = E.undoEvent(c.book, fid); } catch (e) { fail(400, e.message); }
+  saveBook(c.book);
+  return { message: `Took the update back: ${E.int(res.shares)} ${res.symbol} at an average of ${res.avg.toFixed(3)}, as before.` };
+}
+
+// A stop you choose for an open position (e.g. right on a support), counted from the next session (today's before
+// the open); null, or the automatic stop's own price: back to the automatic one. It must not be under the automatic
+// stop, which never goes down, and must be under the last close.
+async function setStop(c, id, body) {
+  const pos = c.book.trades.find(t => t.id === id && t.account === 'real' && t.status === 'open');
+  if (!pos) fail(404, 'This position is no longer open. Refresh the page.');
+  if (body.stop === null) {
+    delete pos.my_stop;
+    delete pos.my_stop_from;
+    saveBook(c.book);
+    return { message: `${pos.symbol} is back on the automatic stop.` };
+  }
+  const stop = toNum(body.stop, 'stop');
+  const bars = (await barsFor(c, [pos.symbol]))[pos.symbol];
+  const auto = E.realStatus({ ...pos, my_stop: null }, bars, c.cfg);
+  if (auto.stop != null && (stop <= auto.stop || E.px(stop) === E.px(auto.stop))) {
+    if (E.px(stop) !== E.px(auto.stop)) {
+      fail(400, `The automatic stop is ${E.px(auto.stop)} and a stop can't go under it. To go back to it, type `
+        + `${E.px(auto.stop)} or choose Back to the automatic stop.`);
+    }
+    delete pos.my_stop;
+    delete pos.my_stop_from;
+    saveBook(c.book);
+    return { message: `${pos.symbol} is back on the automatic stop, ${E.px(auto.stop)}. Move your stop order at your broker too.` };
+  }
+  if (auto.last_close != null && stop >= auto.last_close) {
+    fail(400, `${pos.symbol} closed at ${E.f2(auto.last_close)}: the stop must be under that.`);
+  }
+  const from = E.stopFrom();
+  Object.assign(pos, { my_stop: stop, my_stop_from: from });
+  saveBook(c.book);
+  return { message: `${pos.symbol} stop set to ${E.px(stop)}, from the ${E.niceDate(from, true)} session. `
+    + 'Move your stop order at your broker too.' };
 }
 
 const money2 = v => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -521,6 +657,206 @@ function deleteDividend(c, id) {
   c.book.dividends = c.book.dividends.filter(d => d.id !== id);
   saveBook(c.book);
   return { message: `Removed the ${money2(row.amount)} EGP ${row.symbol} dividend.` };
+}
+
+// ------------------------------------------------------------------ your wallet (engine.js walletEffect)
+const THNDR_WITHDRAW_FEE = 2.5;     // EGP a bank transfer out of Thndr (Oct 2026)
+const THNDR_SETTLE = { pct: 0.003, min_fee: 5, min_amount: 300 };   // Thndr's Settle now (support.thndr.app, Oct 2026)
+const WALLET_KINDS = ['deposit', 'withdraw', 'fee', 'refund', 'fix', 'settle'];
+
+// Like your broker's wallet: the balance, what can be withdrawn now, and every pound in or out, newest first.
+function walletView(c, s) {
+  const { book } = c;
+  const real = new Set(book.trades.filter(t => t.account === 'real').map(t => t.id));
+  const today = localToday();
+  const wait = E.unsettled(book, today);
+  const plan = c.cfg.broker === 'thndr_trader' && book.plan;
+  // With Thndr Trader, an order whose fees have no commission was one of the month's free ones: like Thndr's wallet,
+  // the commission shows taken with the order and given back the same day (the balance is the same either way).
+  const back = f => (plan && !f.fees_in && f.date >= plan.since && (f.fees || 0) < E.governmentFees(f.shares * f.price) + 0.005
+    ? E.thndrCommission(f.shares * f.price) : 0);
+  const rows = [
+    ...(book.cash || []).map(m => ({ id: m.id, date: m.date, kind: m.kind, amount: E.walletEffect(m), fee: m.fee || 0,
+      note: m.note || '', settled: m.kind === 'settle' ? m.amount : undefined })),
+    ...book.fills.filter(f => real.has(f.trade_id) && (f.side === 'buy' || f.side === 'sell')).flatMap(f => {
+      const k = back(f), fee = (f.fees || 0) + k, v = f.shares * f.price;
+      return [...(k ? [{ date: f.date, kind: 'kickback', symbol: f.symbol, amount: k }] : []),
+        { date: f.date, kind: f.side, symbol: f.symbol, shares: f.shares, fee, amount: f.side === 'buy' ? -(v + fee) : v - fee }];
+    }),
+    ...book.dividends.filter(d => real.has(d.trade_id)).map(d => ({ date: d.date, kind: 'dividend', symbol: d.symbol,
+      amount: d.amount })),
+  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || 0) - (a.id || 0)));
+  return { balance: s.cash, unsettled: wait, available: Math.max(0, s.cash - wait), moves: rows,
+    withdraw_fee: String(c.cfg.broker).startsWith('thndr') ? THNDR_WITHDRAW_FEE : 0, settle_days: E.SETTLE_DAYS,
+    settle: String(c.cfg.broker).startsWith('thndr') ? THNDR_SETTLE : null, thndr: String(c.cfg.broker).startsWith('thndr'),
+    plan: plan ? { ...plan, free: E.PLAN_FREE, used: E.planTrades(book, plan, today), month: E.planMonth(plan, today),
+      next: E.planNext(plan, today) } : null, prices: E.PLAN_PRICE, plan_free: E.PLAN_FREE };
+}
+
+// Your Thndr Trader plan, from its page in Thndr's app (Account → Subscriptions): saving it also sets your fees to
+// Thndr Trader's, and removing it to Thndr's own. Renewals from today on come out of your wallet (context()).
+function savePlan(c, body) {
+  const since = toDay(body.since, 'Member since');
+  const today = localToday();
+  if (since > today) fail(422, "Member since: that's in the future.");
+  const kind = body.kind === 'yearly' ? 'yearly' : 'monthly';
+  const price = toNum(body.price, 'Plan price', { strict: false });
+  const had = c.book.plan;
+  const plan = { since, kind, price, added: had ? had.added : today,
+    paid_to: had && had.since === since && had.kind === kind ? had.paid_to : E.planRenewals({ since, kind }, '', today).at(-1) };
+  // Thndr's count this plan month: what you didn't log here is kept beside the ones you log (engine.js planTrades)
+  const month = E.planMonth(plan, today)[0];
+  if (body.used !== undefined && body.used !== null && body.used !== '') {
+    const used = toNum(body.used, 'Free trades used', { strict: false, integer: true });
+    plan.used_at = { month, n: Math.max(0, used - E.planTrades(c.book, plan, today)) };
+  } else if (had && had.used_at && had.used_at.month === month) plan.used_at = had.used_at;
+  c.book.plan = plan;
+  c.book.settings = { ...c.book.settings, broker: 'thndr_trader' };
+  saveBook(c.book);
+  return { message: had ? 'Your Thndr Trader plan is updated.'
+    : `Saved your Thndr Trader plan: ${E.PLAN_FREE} orders a month without Thndr's commission, and ${money2(price)} EGP out of your wallet on each renewal.` };
+}
+
+function deletePlan(c) {
+  if (!c.book.plan) fail(404, 'No plan saved.');
+  delete c.book.plan;
+  c.book.settings = { ...c.book.settings, broker: 'thndr' };
+  saveBook(c.book);
+  return { message: "Removed your Thndr Trader plan: your orders count Thndr's commission again." };
+}
+
+function walletMove(c, body) {
+  const kind = String(body.kind || '');
+  if (!WALLET_KINDS.includes(kind)) fail(422, 'Choose top up, withdraw, settle now, a fee or money back.');
+  const date = toDay(body.date || localToday());
+  const note = String(body.note || '').trim().slice(0, 100);
+  const s = E.accountSummary(c.book, 'real', c.cfg, closes(c), c.core.events);
+  let amount, fee = 0, message;
+  if (kind === 'fix') {             // what your broker's wallet shows: the difference is set right
+    const balance = toNum(body.balance, 'Balance', { strict: false });
+    amount = Math.round((balance - s.cash) * 100) / 100;
+    if (!amount) return { message: 'Your wallet already shows that.' };
+    message = `Your wallet now shows ${money2(balance)} EGP (${amount > 0 ? '+' : '−'}${money2(Math.abs(amount))} set right).`;
+  } else if (kind === 'settle') {   // money from a sale made withdrawable at once, for a fee
+    amount = toNum(body.amount, 'Amount');
+    fee = toNum(body.fee || 0, 'Fee', { strict: false });
+    const wait = E.unsettled(c.book, date);
+    if (amount > wait + 0.005) fail(422, `Only ${money2(wait)} EGP was still settling on that day.`);
+    if (String(c.cfg.broker).startsWith('thndr') && amount < THNDR_SETTLE.min_amount) {
+      fail(422, `Thndr settles ${THNDR_SETTLE.min_amount} EGP or more at a time.`);
+    }
+    message = `Settled ${money2(amount)} EGP now${fee ? ` for a ${money2(fee)} EGP fee` : ''}: you can withdraw it at once.`;
+  } else {
+    amount = toNum(body.amount, 'Amount');
+    if (kind === 'deposit' || kind === 'withdraw') fee = toNum(body.fee || 0, 'Fee', { strict: false });
+    if (kind === 'deposit' && fee >= amount) fail(422, 'The fee is more than the amount.');
+    if (kind === 'withdraw') {
+      const free = s.cash - E.unsettled(c.book, localToday());
+      if (amount + fee > free + 0.005) {
+        fail(422, `You can withdraw up to ${money2(Math.max(0, free - fee))} EGP now. Money from a sale can buy at once `
+          + `but can be withdrawn only after ${E.SETTLE_DAYS} working days, or at once with "Settle now" for a fee. If your `
+          + 'broker shows a different balance, use "Match my broker" first.');
+      }
+    }
+    message = {
+      deposit: `Added ${money2(amount - fee)} EGP to your wallet.`,
+      withdraw: `Took ${money2(amount)} EGP out of your wallet${fee ? ` (+ ${money2(fee)} EGP fee)` : ''}.`,
+      fee: `Recorded a ${money2(amount)} EGP fee.`,
+      refund: `Recorded ${money2(amount)} EGP back.`,
+    }[kind];
+  }
+  c.book.cash = [...(c.book.cash || []), { id: E.nextId(c.book), date, kind, amount, fee, note }];
+  saveBook(c.book);
+  return { message };
+}
+
+function deleteWalletMove(c, id) {
+  if (!(c.book.cash || []).some(m => m.id === id)) fail(404, 'Not found.');
+  c.book.cash = c.book.cash.filter(m => m.id !== id);
+  saveBook(c.book);
+  return { message: 'Removed from your wallet.' };
+}
+
+// ------------------------------------------------------------------ editing a trade's transactions
+// The trade a closed row came from: a partial sale's position, or itself.
+const sourceOf = t => { const m = /^partial sale from position #(\d+)$/.exec(t.notes || ''); return m ? +m[1] : t.id; };
+
+// Change the transactions of trade id with change(), then rebuild it (engine.rebuildTrade). First checks that its
+// transactions add up to what it holds now: one saved by an older version may not, and rebuilding it would change it.
+async function changeTrade(c, id, change) {
+  const t = c.book.trades.find(x => x.id === id && x.account === 'real');
+  if (!t) fail(404, 'This trade no longer exists. Refresh the page.');
+  const bars = (await barsFor(c, [t.symbol]))[t.symbol];
+  const at = marketAt(bars, c.cfg);
+  const copy = structuredClone(c.book);
+  let check;
+  try { check = E.rebuildTrade(copy, c.cfg, id, at); } catch { check = null; }
+  if (!check || check.shares !== t.shares || Math.abs(check.entry_price - t.entry_price) > 1e-6 || check.status !== t.status) {
+    fail(400, `The ${t.symbol} transactions don't add up to what the trade holds (it was saved by an older version), `
+      + 'so they can\'t be edited. Delete it and log it again instead.');
+  }
+  change();
+  let res;
+  try { res = E.rebuildTrade(c.book, c.cfg, id, at); } catch (e) { fail(400, e.message); }
+  saveBook(c.book);
+  return { symbol: t.symbol, trade: res };
+}
+
+function fillBody(body, side) {
+  const date = toDay(body.date);
+  if (date > localToday()) fail(422, "date: that's in the future.");
+  return { date, price: toNum(body.price, 'price'), shares: toNum(body.shares, 'shares', { min: 1, strict: false, integer: true }),
+    note: String(body.note ?? (side === 'sell' ? 'Other / my decision' : '')).trim().slice(0, 200) };
+}
+
+const changedMsg = (sym, res) => (!res ? `Deleted ${sym}: no buy was left.`
+  : res.status === 'closed' ? `Updated ${sym}. The trade is closed.`
+    : `Updated ${sym}: ${E.int(res.shares)} shares at an average of ${res.entry_price.toFixed(3)}. Stop ${E.f2(res.stop)}, target ${E.f2(res.target)}.`);
+
+async function editFill(c, fid, body) {
+  const f = c.book.fills.find(x => x.id === fid);
+  if (!f || !['buy', 'sell'].includes(f.side)) fail(404, 'This transaction no longer exists. Refresh the page.');
+  const v = fillBody({ note: f.note, ...body }, f.side);
+  const feesIn = f.side === 'buy' && (body.fees_in ?? !!f.fees_in);   // the price already has the fees in it
+  const { symbol, trade } = await changeTrade(c, f.trade_id, () => {
+    Object.assign(f, v, { fees: feesIn ? 0 : E.orderFee(v.price * v.shares, feeCfg(c, v.date, f.id)) });
+    if (feesIn) f.fees_in = true; else delete f.fees_in;
+  });
+  return { message: changedMsg(symbol, trade) };
+}
+
+async function deleteFill(c, fid) {
+  const f = c.book.fills.find(x => x.id === fid);
+  if (!f || !['buy', 'sell'].includes(f.side)) fail(404, 'This transaction no longer exists. Refresh the page.');
+  const { symbol, trade } = await changeTrade(c, f.trade_id, () => { c.book.fills = c.book.fills.filter(x => x.id !== fid); });
+  return { message: changedMsg(symbol, trade) };
+}
+
+async function addFillTo(c, id, body) {
+  const side = body.side === 'sell' ? 'sell' : 'buy';
+  const v = fillBody(body, side);
+  const t = c.book.trades.find(x => x.id === id && x.account === 'real');
+  if (!t) fail(404, 'This trade no longer exists. Refresh the page.');
+  const feesIn = side === 'buy' && !!body.fees_in;
+  const { symbol, trade } = await changeTrade(c, id, () => c.book.fills.push({ id: E.nextId(c.book), trade_id: id,
+    symbol: t.symbol, side, ...v, fees: feesIn ? 0 : E.orderFee(v.price * v.shares, feeCfg(c, v.date)), ...(feesIn ? { fees_in: true } : {}) }));
+  return { message: changedMsg(symbol, trade) };
+}
+
+// A closed trade, with everything it came from: its position's transactions, partial sales and dividends.
+function deleteClosed(c, id) {
+  const row = c.book.trades.find(t => t.id === id && t.account === 'real' && t.status === 'closed');
+  if (!row) fail(404, 'This trade no longer exists. Refresh the page.');
+  const src = sourceOf(row);
+  const main = c.book.trades.find(t => t.id === src);
+  if (main && main.status === 'open') {
+    fail(400, `Part of this ${row.symbol} position is still open. Delete this sale from its transactions instead.`);
+  }
+  const tag = `partial sale from position #${src}`;
+  c.book.trades = c.book.trades.filter(t => !(t.status === 'closed' && t.notes === tag));
+  E.deleteTrade(c.book, src);
+  saveBook(c.book);
+  return { message: `Deleted the ${row.symbol} trade and its transactions.` };
 }
 
 function deletePosition(c, id) {
@@ -567,7 +903,211 @@ export const ME = {
   user: { id: 0, username: 'you', display_name: 'You', is_admin: false, accepted_terms: true },
 };
 
-export async function localApi(path, { method = 'GET', body } = {}) {
+// ------------------------------------------------------------------ your portfolio in Telegram (worker/bot.js)
+// Once linked (the Connect Telegram button, a /link code typed in Settings, or opening the site inside Telegram), this
+// browser sends the bot a copy of your portfolio after every change and once a day when the site opens: a summary for
+// /portfolio, and the whole record, which the site's run checks with the exit rules after each close and your other
+// devices bring back. The newest change wins: a device holding an older copy takes the newer one. The link is kept
+// only in this browser.
+const BOT_LINK = 'egx-bot-link';
+const WAIT_DAYS = 2;        // a Connect link that nobody pressed Start on in Telegram by then is dropped
+
+export function botLink() {
+  try { return JSON.parse(localStorage.getItem(BOT_LINK) || 'null'); } catch { return null; }
+}
+function setLink(v) {
+  try { if (v) localStorage.setItem(BOT_LINK, JSON.stringify(v)); else localStorage.removeItem(BOT_LINK); } catch { /* */ }
+}
+// 'linked', 'waiting' (Connect pressed, Start not yet), or null
+export function botStatus() {
+  const link = botLink();
+  return !link ? null : link.pending ? 'waiting' : 'linked';
+}
+
+async function botPost(url, path, body) {
+  const res = await fetch(url.replace(/\/$/, '') + path, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(out.error || `The bot didn't answer (${res.status}).`), { status: res.status });
+  return out;
+}
+
+const changedOf = book => (book.meta && book.meta.changed) || '';
+const hasAnything = book => book.trades.length > 0 || (book.watchlist || []).length > 0;
+
+// The bot's copy, brought here when it's newer than this browser's (or this browser has nothing yet). True if it was.
+async function pullBook(link, force = false) {
+  const got = await botPost(link.url, '/restore', { token: link.token });
+  if (!got.book || !validBook(got.book)) return false;
+  const local = loadBook();
+  if (!force && hasAnything(local) && changedOf(local) >= (got.changed || '')) return false;
+  if (hasAnything(local) && JSON.stringify(local.trades) !== JSON.stringify(got.book.trades || [])) {
+    try { localStorage.setItem(PREV, JSON.stringify({ at: new Date().toISOString(), book: local })); } catch { /* full */ }
+  }
+  saveBook({ ...emptyBook(), ...got.book, meta: { ...(got.book.meta || {}), changed: got.changed || '' } }, true);
+  window.dispatchEvent(new CustomEvent('egx-book'));        // the page shows the new portfolio (main.js)
+  return true;
+}
+
+async function sendBook(c) {
+  const link = botLink();
+  if (!link) return;
+  try {
+    if (!link.synced) {                       // newly linked: a portfolio on another device comes here first,
+      if (await pullBook(link, !!link.mini)) c = await context();   // and always to the Telegram app (the website's)
+    }
+    const pv = await portfolioView(c);
+    const book = { date: c.core.scan_date, start: Math.max(0, pv.summary.start), cash: pv.summary.cash, closed: pv.closed_stats,
+      watchlist: c.book.watchlist || [],
+      positions: pv.positions.map(p => ({ symbol: p.symbol, shares: p.shares, avg: p.avg_price, fees: p.fees, last: p.last,
+        stop: p.stop, target: p.target, status: p.status, reason: p.reason || '',
+        rights: p.rights && { symbol: p.rights.symbol, units: p.rights.units, price: p.rights.price } })) };
+    await botPost(link.url, '/book', { token: link.token, book, full: c.book, changed: changedOf(c.book) });
+    setLink({ url: link.url, token: link.token, synced: true, sent: c.core.scan_date });
+  } catch (err) {
+    if (err.status === 409) {                 // another device changed it since: take that one
+      await pullBook(link, true).catch(() => null);
+      setLink({ url: link.url, token: link.token, synced: true, sent: c.core.scan_date });
+    } else if (err.status === 401 && !(link.pending && Date.now() - link.pending < WAIT_DAYS * 86400000)) {
+      setLink(null);                          // unlinked in Telegram (or Start never pressed)
+    }
+  }
+}
+
+// The Connect Telegram button: its link carries a one-time code for this browser after the site's own code, so
+// pressing Start in Telegram connects the messages and links this portfolio in one go. arm() on the tap.
+export function connectLink(telegram) {
+  const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+  return { href: telegram.link + (telegram.worker ? nonce : ''),
+    arm: () => { if (telegram.worker) setLink({ url: telegram.worker, token: nonce, pending: Date.now() }); } };
+}
+
+export async function linkBot(code) {
+  const c = await context();
+  const url = c.core.telegram && c.core.telegram.worker;
+  if (!url) throw new Error("The site's bot can't answer about portfolios yet.");
+  const { token } = await botPost(url, '/pair', { code });
+  setLink({ url, token });
+  await sendBook(c);
+}
+
+export async function unlinkBot() {
+  const link = botLink();
+  setLink(null);
+  if (link) await botPost(link.url, '/unpair', { token: link.token }).catch(() => null);
+}
+
+// The portfolio this browser had before a copy from the bot replaced it (pullBook), so a wrong copy can be undone:
+// {at, open} or null.
+const PREV = 'egx-book-before-sync';
+function prevBook() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREV) || 'null');
+    return p && validBook(p.book) ? p : null;
+  } catch { return null; }
+}
+export function previousBook() {
+  const p = prevBook();
+  return p && { at: p.at, open: p.book.trades.filter(t => t.status === 'open').length };
+}
+
+// "Send this browser's portfolio to Telegram" (or put back the one from before the last sync, first): stamped as the
+// newest change, so the bot keeps it and your other linked devices take it when they next open.
+export async function sendThisBook(previous = false) {
+  const link = botLink();
+  if (!link || link.pending) throw new Error('Link this browser to the bot first.');
+  const p = previous && prevBook();
+  if (previous && !p) throw new Error('There is no earlier portfolio to put back.');
+  saveBook(p ? { ...emptyBook(), ...p.book } : loadBook());
+  const c = await context();
+  const have = await botPost(link.url, '/restore', { token: link.token });
+  if ((have.changed || '') >= changedOf(c.book)) {   // another device's clock runs ahead: stamp this one just after it
+    c.book.meta = { ...c.book.meta, changed: new Date(Date.parse(have.changed) + 1000).toISOString() };
+    saveBook(c.book, true);
+  }
+  setLink({ ...link, synced: true });
+  await sendBook(c);
+  try { localStorage.removeItem(PREV); } catch { /* blocked */ }
+}
+
+// "Bring my portfolio from Telegram": replaces this browser's with the bot's copy. False if the bot has none.
+export async function restoreFromBot() {
+  const link = botLink();
+  if (!link || link.pending) throw new Error('Link this browser to the bot first.');
+  const done = await pullBook(link, true);
+  if (done) setLink({ ...link, synced: true });
+  return done;
+}
+
+export const syncNow = () => context().then(sendBook);
+
+// The bells on Picks (worker/bot.js bell): the stocks whose BUY signal you get on Telegram, and turning one on or off
+// from here. null when this browser isn't linked to the bot (the bell then opens Telegram instead).
+export async function bells() {
+  const link = botLink();
+  if (!link || link.pending) return null;
+  try {
+    return (await botPost(link.url, '/bells', { token: link.token })).bells;
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) return null;
+    throw err;
+  }
+}
+export async function setBell(symbol, on) {
+  const link = botLink();
+  if (!link || link.pending) throw new Error('Connect Telegram first: Settings → Connect Telegram.');
+  return (await botPost(link.url, '/bell', { token: link.token, symbol, on })).bells;
+}
+
+// "Add from a screenshot": the bot's free AI reads the holdings off a picture of your broker's portfolio screen
+// (worker/bot.js read). {holdings: [{symbol, name, shares, avg_price, last}]}; the picture isn't kept.
+export async function readScreenshot(image) {
+  const link = botLink();
+  if (!link || link.pending) throw new Error('Connect Telegram first (Settings → Connect Telegram): the bot reads the picture.');
+  return botPost(link.url, '/read', { token: link.token, image });
+}
+
+let syncing = null, again = false, checkedAt = 0;
+const CHECK_MS = 30000;      // a newer copy from another device is looked for at most this often
+
+// In the background, so the page doesn't wait: after a change (force), when the site has a newer close, and when the
+// site opens or comes back on screen (a newer copy from another device comes here). Telegram keeps its app running
+// when it's closed, and a tab can stay open for days, so "opens" alone isn't enough.
+function syncBot(force) {
+  const link = botLink();
+  if (!link) return;
+  if (syncing) { again = again || force; return; }
+  const check = link.synced && Date.now() - checkedAt > CHECK_MS;
+  if (check) checkedAt = Date.now();
+  syncing = context().then(async c => {
+    if (check && await pullBook(link)) return;
+    if (force || link.pending || c.core.scan_date !== link.sent) await sendBook(c);
+  }).catch(() => null).finally(() => { syncing = null; if (again) { again = false; syncBot(true); } });
+}
+
+// Live prices for your positions: the site's bot asks TradingView's screener (worker/bot.js /quotes), about 15 minutes
+// late. {} when the site has no bot or it can't be reached: the page then shows the last close.
+async function quotes(c, path) {
+  const url = c.core.telegram && c.core.telegram.worker;
+  const s = new URLSearchParams(path.split('?')[1] || '').get('s');
+  if (!url || !s) return {};
+  const res = await fetch(`${url.replace(/\/$/, '')}/quotes?s=${encodeURIComponent(s)}`).catch(() => null);
+  return res && res.ok ? res.json().catch(() => ({})) : {};
+}
+
+if (typeof document !== 'undefined') {       // not in the tests (tests/js/parity.mjs runs this in Node)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { checkedAt = 0; syncBot(false); }
+  });
+}
+
+export async function localApi(path, opts = {}) {
+  const out = await route(path, opts);
+  syncBot((opts.method || 'GET') !== 'GET');
+  return out;
+}
+
+async function route(path, { method = 'GET', body } = {}) {
   const [route] = path.split('?');
   const [a, b, x] = route.split('/').filter(Boolean);
   if (method === 'GET' && a === 'me') return ME;
@@ -578,8 +1118,10 @@ export async function localApi(path, { method = 'GET', body } = {}) {
     switch (a) {
       case 'status': return status(c, await openPositions(c));
       case 'stocks': return c.core.stocks;
+      case 'rights': return b === 'history' ? load('rights').catch(() => null) : b === 'past' ? c.core.rights_past || [] : c.core.rights || [];
       case 'today': return today(c);
-      case 'stock': return stockDetail(c, decodeURIComponent(b || ''));
+      case 'stock': return x === 'intraday' ? load(`intraday/${decodeURIComponent(b || '').toUpperCase()}`).catch(() => ({}))
+        : stockDetail(c, decodeURIComponent(b || ''));
       case 'portfolio': return b === 'history' ? historyView(c) : portfolioView(c);
       case 'calc': return calcView(c);
       case 'screener': return screenerView(c);
@@ -587,7 +1129,9 @@ export async function localApi(path, { method = 'GET', body } = {}) {
       case 'news': return newsView(c);
       case 'watchlist': return { symbols: c.book.watchlist || [] };
       case 'market': return load('market');
+      case 'egx30': return load('egx30');
       case 'predict': return predictView(c);
+      case 'quotes': return quotes(c, path);
       case 'settings': return settingsView(c);
       case 'alerts': return { telegram: { connected: false, token_set: false, can_set_bot: false }, static: true };
       default: break;
@@ -599,8 +1143,18 @@ export async function localApi(path, { method = 'GET', body } = {}) {
   if (method === 'POST' && a === 'portfolio' && b === 'sell') return sell(c, body || {});
   if (method === 'POST' && a === 'portfolio' && x === 'adjust') return adjust(c, id, body || {});
   if (method === 'POST' && a === 'portfolio' && x === 'dividend') return dividend(c, id, body || {});
+  if (method === 'POST' && a === 'portfolio' && x === 'stop') return setStop(c, id, body || {});
+  if (method === 'POST' && a === 'portfolio' && x === 'fills') return addFillTo(c, id, body || {});
+  if (method === 'PUT' && a === 'portfolio' && b === 'fills') return editFill(c, Number(x), body || {});
+  if (method === 'DELETE' && a === 'portfolio' && b === 'fills') return deleteFill(c, Number(x));
+  if (method === 'DELETE' && a === 'portfolio' && b === 'closed') return deleteClosed(c, Number(x));
+  if (method === 'DELETE' && a === 'portfolio' && b === 'undo') return undoAdjust(c, Number(x));
+  if (method === 'POST' && a === 'portfolio' && b === 'plan') return savePlan(c, body || {});
+  if (method === 'DELETE' && a === 'portfolio' && b === 'plan') return deletePlan(c);
   if (method === 'DELETE' && a === 'portfolio' && b && !x) return deletePosition(c, id);
   if (method === 'DELETE' && a === 'dividends') return deleteDividend(c, id);
+  if (method === 'POST' && a === 'portfolio' && b === 'wallet') return walletMove(c, body || {});
+  if (method === 'DELETE' && a === 'wallet') return deleteWalletMove(c, id);
   if (method === 'PUT' && a === 'settings') return saveSettings(c, body);
   if (method === 'PUT' && a === 'watchlist') return saveWatchlist(c, body || {});
   if (method === 'POST' && a === 'settings' && b === 'defaults') return resetSettings(c);

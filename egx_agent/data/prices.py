@@ -57,19 +57,37 @@ class TvProvider:
     def fetch(self, symbol: str, n_bars: int, exchange: str = "EGX") -> pd.DataFrame | None:
         from tvDatafeed import Interval
 
+        raw = self._hist(symbol, n_bars, Interval.in_daily, exchange)
+        if raw is not None:
+            df = raw.reset_index()[["datetime", "open", "high", "low", "close", "volume"]]
+            df["date"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d")
+            df = df.drop(columns="datetime").drop_duplicates("date", keep="last")
+            return df[["date", "open", "high", "low", "close", "volume"]].dropna()
+        return None
+
+    def fetch_hourly(self, symbol: str, n_bars: int) -> pd.DataFrame | None:
+        """Hourly bars: columns ts (YYYY-MM-DD HH:MM, the bar's start in the machine's time zone, Cairo on the
+        Mac and on the website's runs), open, high, low, close, volume; oldest first."""
+        from tvDatafeed import Interval
+
+        raw = self._hist(symbol, n_bars, Interval.in_1_hour)
+        if raw is None:
+            return None
+        df = raw.reset_index()[["datetime", "open", "high", "low", "close", "volume"]]
+        df["ts"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d %H:%M")
+        df = df.drop(columns="datetime").drop_duplicates("ts", keep="last")
+        return df[["ts", "open", "high", "low", "close", "volume"]].dropna()
+
+    def _hist(self, symbol: str, n_bars: int, interval, exchange: str = "EGX"):
         tv_symbol = self.aliases.get(symbol, symbol) if exchange == "EGX" else symbol
         for attempt in range(self.retries):
             try:
-                raw = self._client().get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily,
-                                              n_bars=n_bars)
+                raw = self._client().get_hist(symbol=tv_symbol, exchange=exchange, interval=interval, n_bars=n_bars)
             except Exception as exc:  # network errors inside the library
                 log.debug("fetch %s failed: %s", symbol, exc)
                 raw = None
             if raw is not None and len(raw):
-                df = raw.reset_index()[["datetime", "open", "high", "low", "close", "volume"]]
-                df["date"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d")
-                df = df.drop(columns="datetime").drop_duplicates("date", keep="last")
-                return df[["date", "open", "high", "low", "close", "volume"]].dropna()
+                return raw
             time.sleep(self.pause * (attempt + 1))
         return None
 
@@ -123,6 +141,47 @@ def rebase_info(conn: sqlite3.Connection, symbol: str, fresh: pd.DataFrame) -> d
     moved |= (ratio / factor - 1).abs() < 0.015
     later = fresh.loc[fresh["date"] > merged.loc[moved, "date"].max(), "date"]
     return {"factor": snap_factor(factor), "ex_date": later.min() if len(later) else None}
+
+
+def fix_double_rebase(conn: sqlite3.Connection, symbols=None) -> list[str]:
+    """TradingView sometimes divides a stock's last sessions before an ex-date twice (KORA's rights issue, ex 14 Oct
+    2026: 11–13 Oct ÷ 1.8333², 7 Oct and before ÷ 1.8333), so the chart drops by the event's own factor between two
+    sessions, a fall EGX's daily limit (±20%) never allows. Those sessions are multiplied back. Returns the fixed."""
+    fixed = []
+    for sym, ex_date, f in conn.execute("SELECT symbol, ex_date, factor FROM price_events WHERE factor > 1.3").fetchall():
+        if symbols is not None and sym not in symbols:
+            continue
+        rows = conn.execute("SELECT date, open, close FROM prices WHERE symbol=? AND date < ? ORDER BY date DESC LIMIT 30",
+                            (sym, ex_date)).fetchall()[::-1]
+        start = next((b[0] for a, b in zip(rows, rows[1:]) if b[1] > 0 and abs(a[2] / b[1] / f - 1) < 0.03), None)
+        if start:
+            conn.execute("UPDATE prices SET open=open*?, high=high*?, low=low*?, close=close*? "
+                         "WHERE symbol=? AND date>=? AND date<?", (f, f, f, f, sym, start, ex_date))
+            fixed.append(sym)
+    conn.commit()
+    return fixed
+
+
+def update_rights(conn: sqlite3.Connection, provider: PriceProvider | None = None, today: str | None = None) -> int:
+    """The daily prices of the rights issues trading now (their dates: news.KNOWN_ACTIONS schedule), kept as
+    rights_prices "KORA_r1" for their chart: TradingView (EGX:KORAR1) drops them once the issue is over."""
+    from .news import KNOWN_ACTIONS
+    today = today or date.today().isoformat()
+    n = 0
+    for k in KNOWN_ACTIONS:
+        at = {s[2]: s[0] for s in k.get("schedule", [])}
+        start, end = at.get("Rights trading starts"), at.get("Rights trading ends")
+        if not start or not start <= today <= (date.fromisoformat(end) + timedelta(days=7)).isoformat():
+            continue
+        df = (provider or TvProvider()).fetch(f"{k['symbol']}R1", 40)
+        if df is None:
+            continue
+        df = df[(df["date"] >= start) & (df["date"] <= end)]
+        conn.executemany("INSERT OR REPLACE INTO rights_prices VALUES (?,?,?,?,?,?,?)",
+                         [(f"{k['symbol']}_r1", *r) for r in df[["date", "open", "high", "low", "close", "volume"]].itertuples(index=False)])
+        n += len(df)
+    conn.commit()
+    return n
 
 
 def update_prices(
@@ -179,6 +238,7 @@ def update_prices(
             events.append({"symbol": sym, "ex_date": ex_date, "factor": info["factor"]})
         else:
             failed.append(sym)
+    fix_double_rebase(conn, set(updated))
 
     notes = {s: KNOWN_STATUS.get(s, NOTE_NOT_FOUND) for s in failed if plan[s] is None}
     notes.update({s: NOTE_NEVER_TRADED for s in not_traded})
@@ -192,6 +252,65 @@ def update_prices(
     conn.commit()
     return {"updated": len(updated), "failed": sorted(failed), "readjusted": sorted(readjusted),
             "not_traded": sorted(not_traded), "events": events}
+
+
+HOURLY_BARS = 1000   # about 8 months of hourly bars (EGX trades 5 a day), so about 400 four-hour bars
+
+
+def update_intraday(conn: sqlite3.Connection, symbols: list[str], provider=None, workers: int = 4,
+                    aliases: dict[str, str] | None = None) -> dict:
+    """Download each stock's hourly bars for the 1-hour and 4-hour charts, replacing the stored ones. Only a chart
+    needs them, so a stock that fails keeps what it had."""
+    provider = provider or TvProvider(aliases=aliases)
+    got, failed = 0, []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(provider.fetch_hourly, s, HOURLY_BARS): s for s in symbols}
+        for fut in as_completed(futures):
+            df = fut.result()
+            if df is None or df.empty:
+                failed.append(futures[fut])
+            else:
+                db.replace_intraday(conn, futures[fut], df)
+                got += 1
+    return {"updated": got, "failed": sorted(failed)}
+
+
+def intraday_behind(conn: sqlite3.Connection, symbol: str | None = None) -> bool:
+    """True when the hourly bars (one stock's, or the newest of all) end before the last daily close stored."""
+    where, args = ("WHERE symbol=?", (symbol,)) if symbol else ("", ())
+    hourly = conn.execute(f"SELECT MAX(ts) FROM intraday {where}", args).fetchone()[0]
+    daily = conn.execute(f"SELECT MAX(date) FROM prices {where}", args).fetchone()[0]
+    return bool(daily) and (not hourly or hourly[:10] < daily)
+
+
+_refreshing = threading.Lock()
+
+
+def refresh_intraday(conn: sqlite3.Connection, symbol: str, provider=None, aliases: dict[str, str] | None = None) -> bool:
+    """On your Mac, when a stock's 1-hour or 4-hour chart is opened: download its hourly bars first if they are
+    missing or older than its last close. Returns whether new bars were stored."""
+    if not intraday_behind(conn, symbol):
+        return False
+    with _refreshing:
+        if not intraday_behind(conn, symbol):
+            return False
+        df = (provider or TvProvider(aliases=aliases)).fetch_hourly(symbol, HOURLY_BARS)
+        if df is None or df.empty:
+            return False
+        db.replace_intraday(conn, symbol, df)
+        return True
+
+
+def four_hour(hourly: pd.DataFrame, session_start: int = 10) -> pd.DataFrame:
+    """4-hour bars from hourly ones, as TradingView makes them for EGX: one from the 10:00 open to 14:00, then
+    14:00 to the close."""
+    if hourly.empty:
+        return hourly
+    ts = hourly.index
+    start = ts.normalize() + pd.to_timedelta(session_start + (ts.hour - session_start) // 4 * 4, unit="h")
+    g = hourly.groupby(start)
+    return pd.DataFrame({"open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
+                         "close": g["close"].last(), "volume": g["volume"].sum()})
 
 
 DEEP_YEARS = 10  # the prediction model learns from this much history
@@ -237,6 +356,7 @@ def extend_history(
                 db.upsert_prices(conn, sym, df)   # also fixes any stored bar TradingView has since corrected
             if progress:
                 progress(done, len(todo), sym)
+    fix_double_rebase(conn, set(todo) - set(failed))
     if len(failed) < max(1, len(todo) // 2):
         db.set_meta(conn, "history_years_loaded", str(years))
     return {"symbols": len(todo), "bars_added": added, "failed": sorted(failed), "events": events}
@@ -267,3 +387,26 @@ def sanity_flags(df: pd.DataFrame, index_last: pd.Timestamp | None = None) -> li
     if index_last is not None and df.index[-1] < index_last - timedelta(days=10):
         flags.append(f"stale data (last bar {df.index[-1].date()})")
     return flags
+
+
+SCREENER = "https://scanner.tradingview.com/egypt/scan"
+
+
+def live_quotes(symbols: list[str], aliases: dict[str, str] | None = None) -> dict[str, dict]:
+    """The latest price of a few stocks from TradingView's screener, about 15 minutes late during the session (the
+    same as its own price boxes): {symbol: {price, change}}, change against the last close. Stocks it doesn't know
+    are left out."""
+    import requests
+
+    names = {**TV_ALIASES, **{k.upper(): v.upper() for k, v in (aliases or {}).items()}}
+    tv = {f"EGX:{names.get(s, s)}": s for s in symbols}
+    if not tv:
+        return {}
+    r = requests.post(SCREENER, json={"symbols": {"tickers": list(tv)}, "columns": ["close", "change"]}, timeout=10)
+    r.raise_for_status()
+    out = {}
+    for row in r.json().get("data") or []:
+        price, change = (row.get("d") or [None, None])[:2]
+        if row.get("s") in tv and price and price > 0:
+            out[tv[row["s"]]] = {"price": float(price), "change": None if change is None else float(change) / 100}
+    return out

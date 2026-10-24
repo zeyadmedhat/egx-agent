@@ -2,151 +2,410 @@
 // transactions), log a buy, closed trades. Health: sectors, money at risk, how your stocks move together, your
 // account against EGX30. Journal: how your closed trades did, including after inflation.
 import {
-  html, useApi, useState, useEffect, useStore, api, toast, refreshAll, fmt, tone, cls, go, todayISO,
+  html, useApi, useState, useEffect, useStore, api, toast, refreshAll, fmt, tone, cls, go, todayISO, STATIC,
 } from '../lib.js';
 import {
-  Icon, StatusChip, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, DayBar, Field,
-  StockPicker, Confirm, Callout, Seg, Empty, LiveQuotes, LIVE_NOTE, Fold, More,
+  Icon, Kpi, PageHead, SectionHead, PageLoading, DataTable, StockCell, Field,
+  StockPicker, Confirm, Callout, Seg, Empty, useQuotes, quoteSymbols, livePosition, PositionCard, RightsCard, More, DateInput, lastSession,
 } from '../ui.js';
-import { t } from '../i18n.js';
+import { t, tn, tp } from '../i18n.js';
 import { LineChart } from '../charts.js';
-import { equityCurve, correlations, sectorMix, stopRisk, journal } from '../insights.js';
+import { orderFee, newAverage } from '../local/engine.js';
+import { equityCurve, correlations, sectorMix, stopRisk, journal, inMoney, checkup } from '../insights.js';
 
-const TABS = [{ value: 'positions', label: 'Positions' }, { value: 'health', label: 'Health' },
-  { value: 'journal', label: 'Journal' }];
+const TABS = [{ value: 'positions', label: 'My stocks' }, { value: 'health', label: 'Checkup' },
+  { value: 'journal', label: 'Past trades' }];
+// Two ways to add a buy: type it in, or (on the website) read it from a screenshot of your broker's app.
+const ADD = [{ value: 'type', label: 'Type it in' }, { value: 'shot', label: 'From a screenshot' }];
+const scrollTo = (id, block = 'start') => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block });
 
 export function PortfolioPage({ route }) {
   const { data, error } = useApi('/portfolio');
   const [openId, setOpenId] = useState(route.query.open ? Number(route.query.open) : null);
+  const [add, setAdd] = useState(route.query.buy ? 'type' : null);   // the buy box, open only when asked for
+  const [closedId, setClosedId] = useState(null);
   useEffect(() => { if (route.query.open) setOpenId(Number(route.query.open)); }, [route.query.open]);
+  useEffect(() => { if (route.query.buy) setAdd('type'); }, [route.query.buy]);
+  useEffect(() => { if (data && route.query.open) setTimeout(() => scrollTo(`pos-${route.query.open}`), 50); }, [!!data, route.query.open]);
+  const q = useQuotes(data ? quoteSymbols(data.positions) : []);
   if (!data) return html`<${PageLoading} error=${error} />`;
   const s = data.summary;
-  const scrollToBuy = () => document.getElementById('buy-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  const posColumns = [
-    { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} info=${r.info}
-        sub=${r.n_buys > 1 ? `${r.n_buys} buys combined` : r.info.name_ar} />` },
-    { key: 'status', label: 'Status', sortValue: r => ['ADJUST', 'EXIT', 'REVIEW', 'TIGHTEN STOP', 'HOLD'].indexOf(r.status),
-      render: r => html`<${StatusChip} status=${r.status} />` },
-    { key: 'reason', label: 'What to do', sortable: false, render: r => html`<span class="muted" style="font-size:12.5px">${r.reason}</span>` },
-    { key: 'shares', label: 'Shares', align: 'r', fmt: v => fmt.int(v) },
-    { key: 'avg_price', label: 'Avg price', align: 'r', fmt: v => fmt.price(v) },
-    { key: 'last', label: 'Last', align: 'r', fmt: v => fmt.price(v) },
-    { key: 'pnl', label: 'P&L after fees', align: 'r', render: r => html`<div class=${tone(r.pnl)}><b>${fmt.signed(r.pnl)}</b>
-        <div class="sub" style="color:inherit;opacity:.85">${fmt.pct(r.pnl_pct)}</div></div>` },
-    { key: 'stop', label: 'Stop now', align: 'r', fmt: v => html`<span class="down">${fmt.price(v)}</span>` },
-    { key: 'target', label: 'Target', align: 'r', fmt: v => html`<span class="up">${fmt.price(v)}</span>` },
-    { key: 'day', label: 'Held', width: '140px', render: r => html`<${DayBar} day=${r.day} max=${data.max_hold_days} review=${data.review_day} />` },
-    { key: 'open', label: '', sortable: false, render: r => html`<span class="faint"><${Icon} name=${openId === r.id ? 'down' : 'chevron'} size=${16} /></span>` },
-  ];
+  const openClosed = data.closed.find(r => r.id === closedId) || null;
+  const list = data.positions.map(p => livePosition(p, q));
+  const live = list.some(p => p.live);
+  const openPnl = list.reduce((a, p) => a + p.pnl + (p.rights ? p.rights.value : 0), 0);
+  const equity = s.equity + list.reduce((a, p) => a + (p.price - p.last) * p.shares + (p.rights_gain || 0), 0);
+  const startAdd = mode => { setAdd(mode); setTimeout(() => scrollTo('buy-form'), 0); };
+  const closeCard = id => { setOpenId(null); setTimeout(() => scrollTo(`pos-${id}`, 'nearest'), 0); };
   const closedColumns = [
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} sub=${false} />` },
-    { key: 'entry_date', label: 'First buy', fmt: v => fmt.date(v) },
-    { key: 'entry_price', label: 'Avg cost', align: 'r', fmt: v => fmt.price(v) },
+    { key: 'entry_date', label: 'Bought', fmt: v => fmt.date(v) },
     { key: 'exit_date', label: 'Sold', fmt: v => fmt.date(v) },
-    { key: 'exit_price', label: 'Sell price', align: 'r', fmt: v => fmt.price(v) },
-    { key: 'shares', label: 'Shares', align: 'r', fmt: v => fmt.int(v) },
     { key: 'return_pct', label: 'Return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v)}</span>` },
-    { key: 'pnl', label: 'P&L (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
-    { key: 'exit_reason', label: 'Reason', render: r => html`<span class="muted">${r.exit_reason || '–'}</span>` },
+    { key: 'pnl', label: 'Profit / loss (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'exit_reason', label: 'Why sold', render: r => html`<span class="muted">${tn(r.exit_reason) || '–'}</span>` },
   ];
   const cs = data.closed_stats;
-  const tab = TABS.some(x => x.value === route.query.tab) ? route.query.tab : 'positions';
+  // Past trades: every closed trade (tap one to edit or delete it on the website), then the journal
+  const closedSection = data.closed.length > 0 && html`    <section class="section">
+      <${SectionHead} title="Closed trades" count=${cs.count}
+        hint=${cs.count ? t('Won {pct} · total {v} EGP', { pct: fmt.pct(cs.win_rate, 0, false), v: fmt.signed(cs.total) }) : ''} />
+      <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
+        empty="Nothing closed yet." onRowClick=${STATIC ? r => setClosedId(id => (id === r.id ? null : r.id)) : undefined}
+        expandedKey=${closedId} /></div>
+      ${STATIC && data.closed.length > 0 && !openClosed && html`<p class="faint" style="font-size:12.5px;margin-top:8px">${t('Tap a closed trade to edit or delete it.')}</p>`}
+      ${openClosed && html`<${ClosedDetail} r=${openClosed} data=${data} onClose=${() => setClosedId(null)} />`}
+    </section>`;
+  const tabs = data.wallet ? [TABS[0], { value: 'wallet', label: 'Wallet' }, ...TABS.slice(1)] : TABS;
+  const tab = tabs.some(x => x.value === route.query.tab) ? route.query.tab : 'positions';
+  const ret = s.start > 0 ? equity / s.start - 1 : null;
   const pickTab = v => go(v === 'positions' ? '#/portfolio' : `#/portfolio?tab=${v}`);
   return html`
-    <${PageHead} title="My Portfolio"
-      sub="Log the trades you place with your broker. After each close the agent checks every position against the exit rules.">
-      <button class="btn primary" onClick=${scrollToBuy}><${Icon} name="plus" />${t('Log a buy')}</button><//>
-    ${data.nothing_saved && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>Nothing is saved in this
-      browser yet.</b> Your portfolio is kept only in the browser where you entered it, and links opened from Telegram
-      or another app can open a different browser. Open the site there, or bring your portfolio here with${' '}
-      <a href="#/settings">Settings → Restore from a backup</a>.<//></div>`}
+    <${PageHead} title="My Portfolio" sub="The trades you placed with your broker, checked against the exit rules after each close.">
+      <button class="btn primary" onClick=${() => startAdd('type')}><${Icon} name="plus" />${t('Log a buy')}</button>
+      ${STATIC && html`<button class="btn" onClick=${() => startAdd('shot')}><${Icon} name="camera" />${t('From a screenshot')}</button>`}<//>
+    ${data.nothing_saved && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>${t('Nothing is saved in this browser yet.')}</b>${' '}
+      ${tp('Your portfolio is kept only in the browser where you entered it, and links opened from Telegram or another app can open a different browser. Open the site there, or bring your portfolio here with {link}.',
+        { link: html`<a href="#/settings">${t('Settings → Restore from a backup')}</a>` })}<//></div>`}
+    ${add && html`<section class="section" id="buy-form" style="margin-top:0;margin-bottom:24px;scroll-margin-top:80px">
+      <${SectionHead} title="Log a buy" hint=${add === 'shot'
+        ? "A picture of your broker's portfolio screen (Thndr or another): the holdings fill in by themselves."
+        : 'Record a buy you placed at your broker.'}>
+        ${STATIC && html`<${Seg} options=${ADD} value=${add} onChange=${setAdd} />`}
+        <button class="btn sm ghost" onClick=${() => setAdd(null)}><${Icon} name="x" size=${14} />${t('Close')}</button><//>
+      ${STATIC && add === 'shot' ? html`<div class="card"><${ImportPanel} data=${data} /></div>`
+        : html`<${BuyForm} data=${data} query=${route.query} onDone=${() => setAdd(null)} />`}
+    </section>`}
     <div class="kpis">
-      <${Kpi} label="Account value" value=${fmt.short(s.equity)}
-        sub=${`${fmt.pct(s.return_pct)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
-        subClass=${s.cash < 0 ? 'warn' : tone(s.return_pct)} />
-      <${Kpi} label="Open P&L" value=${fmt.signed(s.unrealized)} valueClass=${tone(s.unrealized)} sub="EGP, before selling fees" />
-      <${Kpi} label="Realized P&L" value=${fmt.signed(s.realized)} valueClass=${tone(s.realized)}
-        sub=${s.dividends ? `EGP, after fees · incl. ${fmt.int(s.dividends)} dividends` : 'EGP, after fees'} />
+      <${Kpi} label="Account value" value=${fmt.short(equity)}
+        sub=${`${fmt.pct(ret)} ${t('since start')} · ${t('cash {value}', { value: fmt.short(s.cash) })}`}
+        subClass=${s.cash < 0 ? 'warn' : tone(ret)} />
+      <${Kpi} label="Open profit / loss" value=${fmt.signed(openPnl)} valueClass=${tone(openPnl)}
+        sub=${live ? 'EGP after buy fees, live (~15 min late)' : 'EGP after buy fees, at the last close'} />
+      <${Kpi} label="Closed profit / loss" value=${fmt.signed(s.realized)} valueClass=${tone(s.realized)}
+        sub=${s.dividends ? t('EGP after fees · incl. {n} dividends', { n: fmt.int(s.dividends) }) : 'EGP after fees'} />
       <${Kpi} label="Loss if all stops hit" value=${fmt.short(s.open_risk)}
-        sub=${s.equity ? `from your buy prices: ${fmt.pct(s.open_risk / s.equity, 1, false)} of your account` : ''} />
+        sub=${s.equity ? t('{pct} of your account', { pct: fmt.pct(s.open_risk / s.equity, 1, false) }) : ''} />
     </div>
-    <p class="faint" style="font-size:12.5px;margin-top:10px">Starting capital ${fmt.egp(s.start)}${' '}
-      (<a href="#/settings">change it in Settings</a>). P&L includes ${data.fee_pct}% fees per side.</p>
-    <div style="margin-top:16px"><${Seg} options=${TABS} value=${tab} onChange=${pickTab} /></div>
-    ${tab === 'health' ? html`<${HealthTab} data=${data} />` : tab === 'journal' ? html`<${JournalTab} data=${data} />` : html`
+    <div style="margin-top:16px"><${Seg} options=${tabs} value=${tab} onChange=${pickTab} /></div>
+    ${tab === 'wallet' ? html`<${WalletTab} data=${data} />` : tab === 'health' ? html`<${HealthTab} data=${data} />` : tab === 'journal' ? html`${closedSection}<${JournalTab} data=${data} />` : html`
     <section class="section">
       <${SectionHead} title="Open positions" count=${data.positions.length}
-        hint="Click a position to sell some or all of it, see its transactions or delete it." />
-      <div class="card flush"><${DataTable} columns=${posColumns} rows=${data.positions} rowKey=${r => r.id}
-        expandedKey=${openId} onRowClick=${r => setOpenId(id => (id === r.id ? null : r.id))}
-        renderExpanded=${r => html`<${PositionDetail} p=${r} data=${data} onDone=${() => setOpenId(null)} />`}
-        empty="No open positions. After you buy at your broker, log it below." /></div>
-      <${More} label="What the statuses mean"><p>EXIT: sell at the next open · REVIEW: 2 weeks without progress,
-        consider exiting · TIGHTEN STOP: move your stop order up · HOLD: nothing to do · UPDATE SHARES: the company
-        gave bonus shares or split its shares, so enter your new share count</p><//>
-      ${data.positions.length > 0 && html`<${Fold} title="Live prices" hint="TradingView, about 15 minutes late">
-        <div class="live-list"><${LiveQuotes} symbols=${data.positions.map(p => p.symbol)} title="Your stocks now" /></div>
-        <p class="faint note">${t(LIVE_NOTE)}</p><//>`}
-    </section>
-
-    <section class="section" id="buy-form" style="scroll-margin-top:80px">
-      <${SectionHead} title="Log a buy" hint="Record a buy you placed at your broker." />
-      <${BuyForm} data=${data} query=${route.query} />
+        hint=${data.positions.length ? 'Sell or edit opens the sale form and the position\'s history.' : ''} />
+      ${list.length ? html`<div class="pos-grid">${list.map(p => html`<${PositionCard} p=${p} key=${p.id}
+          hold=${{ max: data.max_hold_days, review: data.review_day }} open=${openId === p.id}
+          onOpen=${() => (openId === p.id ? closeCard(p.id) : setOpenId(p.id))}>
+          ${openId === p.id && html`<${PositionDetail} p=${p} data=${data} onDone=${() => setOpenId(null)}
+            onClose=${() => closeCard(p.id)} />`}<//>${p.rights && html`<${RightsCard} p=${p} key=${`r${p.id}`} />`}`)}</div>`
+        : html`<div class="card"><${Empty} icon="briefcase" title="No open positions"
+          text="After you buy at your broker, press Log a buy above." /></div>`}
     </section>
 
     <section class="section">
-      <${SectionHead} title="Closed trades" count=${cs.count}
-        hint=${cs.count ? `Win rate ${fmt.pct(cs.win_rate, 0, false)} · total ${fmt.signed(cs.total)} EGP` : ''} />
-      <div class="card flush"><${DataTable} columns=${closedColumns} rows=${data.closed} rowKey=${r => r.id}
-        empty="Nothing closed yet." /></div>
+      <p class="faint" style="font-size:12.5px;margin-top:10px">${t('Starting capital {v}', { v: fmt.egp(s.capital ?? s.start) })}${s.added ? ` · ${t('added since {v}', { v: fmt.signed(s.added) })}` : ''}${' '}
+        (<a href="#/settings">${t('change it in Settings')}</a>). ${data.fee_cfg.broker === 'other' ? t('Profit and loss include {fee}% fees each way.', { fee: data.fee_pct })
+          : t("Profit and loss include Thndr's fees each way.")} ${t('Open positions count the buy fees only, like your broker: the selling fees count once you sell.')}</p>
     </section>`}`;
+}
+
+// ------------------------------------------------------------------ Wallet tab (the website)
+// Like your broker's wallet: the balance, what can be withdrawn now and what's still settling, top up, withdraw,
+// money back beside the orders, matching your broker's balance, your Thndr Trader plan, and every pound in or out
+// (local/api.js walletView).
+const WALLET_FORMS = {
+  deposit: { title: 'Top up', icon: 'plus' },
+  withdraw: { title: 'Withdraw', icon: 'sell' },
+  settle: { title: 'Settle now', icon: 'history' },
+  refund: { title: 'Money back', icon: 'coins', notes: ['Commission kickback', 'Other'] },
+  fix: { title: 'Match my broker', icon: 'refresh' },
+  plan: { title: 'Thndr Trader plan', icon: 'percent' },
+};
+// the buttons: Settle now while money is settling, the plan with Thndr until you've saved one
+const showForm = (k, w) => (k !== 'settle' || w.unsettled > 0.005) && (k !== 'plan' || (w.thndr && !w.plan));
+const MOVE_NAME = { deposit: 'Top up', withdraw: 'Withdrawal', fee: 'Fee', refund: 'Money back', fix: 'Set to match my broker' };
+const settleFee = (w, a) => (w.settle && a > 0 ? Math.max(w.settle.min_fee, Math.round(a * w.settle.pct * 100) / 100) : 0);
+
+function WalletTab({ data }) {
+  const w = data.wallet, thndr = String(data.fee_cfg.broker).startsWith('thndr');
+  const [form, setForm] = useState(null);
+  const [gone, setGone] = useState(null);           // the row you asked to remove
+  const what = m => (m.kind === 'buy' || m.kind === 'sell'
+    ? t(m.kind === 'buy' ? 'Bought {n} {sym}' : 'Sold {n} {sym}', { n: fmt.int(m.shares), sym: m.symbol })
+    : m.kind === 'dividend' ? t('Dividend from {sym}', { sym: m.symbol })
+      : m.kind === 'kickback' ? t('Commission kickback on {sym}', { sym: m.symbol })
+        : m.kind === 'settle' ? t('Settled {v} early', { v: fmt.num(m.settled, 2) }) : tn(m.note) || t(MOVE_NAME[m.kind]));
+  const columns = [
+    { key: 'date', label: 'Date', fmt: v => fmt.date(v) },
+    { key: 'kind', label: 'What', sortable: false, render: m => html`<b>${what(m)}</b>${m.fee > 0
+      ? html` <span class="faint">${t('incl. {v} fees', { v: fmt.num(m.fee, 2) })}</span>` : ''}` },
+    { key: 'amount', label: 'EGP', align: 'r', render: m => html`<b class=${tone(m.amount)}>${fmt.signed(m.amount, 2)}</b>` },
+    { key: 'id', label: '', sortable: false, render: m => m.id != null && html`<button class="btn sm ghost"
+      title=${t('Remove')} aria-label=${t('Remove')} onClick=${() => setGone(m)}><${Icon} name="trash" size=${14} /></button>` },
+  ];
+  const remove = async () => {
+    try {
+      toast((await api(`/wallet/${gone.id}`, { method: 'DELETE' })).message);
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
+  return html`
+    <div class="kpis" style="margin-top:16px">
+      <${Kpi} label="Wallet" value=${fmt.egp(w.balance, 2)} valueClass=${w.balance < 0 ? 'down' : ''}
+        sub=${t('your stocks {v}', { v: fmt.egp(data.summary.equity - w.balance) })} />
+      <${Kpi} label="Available to withdraw" value=${fmt.egp(w.available, 2)} />
+      <${Kpi} label="Unsettled" value=${fmt.egp(w.unsettled, 2)}
+        sub=${t('can buy now, withdraw in {n} working days', { n: w.settle_days })}
+        title=${t('Money from sales in the last {n} working days: you can buy with it now, but withdraw it only once it settles.', { n: w.settle_days })} />
+    </div>
+    ${w.plan && html`<${PlanCard} p=${w.plan} onEdit=${() => setForm(x => (x === 'plan' ? null : 'plan'))} />`}
+    <div class="row" style="margin-top:14px;flex-wrap:wrap;gap:8px">
+      ${Object.entries(WALLET_FORMS).filter(([k]) => showForm(k, w)).map(([k, f]) => html`<button class=${cls('btn', k === 'deposit' ? 'primary' : '', k !== 'deposit' && k !== 'withdraw' && 'sm ghost')}
+        aria-pressed=${form === k} onClick=${() => setForm(x => (x === k ? null : k))}><${Icon} name=${f.icon} size=${16} />${t(f.title)}</button>`)}
+    </div>
+    ${form === 'plan' ? html`<${PlanForm} w=${w} onClose=${() => setForm(null)} />`
+      : form && html`<${WalletForm} key=${form} kind=${form} w=${w} thndr=${thndr} onClose=${() => setForm(null)} />`}
+    <section class="section">
+      <${SectionHead} title="Money in and out" count=${w.moves.length}
+        hint="Top-ups, withdrawals, fees and money back, with every buy, sale and dividend you logged. Newest first." />
+      <div class="card flush"><${DataTable} columns=${columns} rows=${w.moves} rowKey=${(m, i) => m.id ?? `${m.kind}${m.date}${i}`}
+        limit=${15} empty="Nothing yet. Press Top up when you add money at your broker." /></div>
+      <p class="faint" style="font-size:12.5px;margin-top:8px">${t("Your wallet is your starting capital plus top-ups, minus withdrawals, after your trades and fees. If it doesn't match your broker's app, press Match my broker.")}</p>
+    </section>
+    ${gone && html`<${Confirm} title="Remove this from your wallet?" text=${`${what(gone)}: ${fmt.signed(gone.amount, 2)} EGP`}
+      confirmLabel="Remove" danger onConfirm=${remove} onClose=${() => setGone(null)} />`}`;
+}
+
+function WalletForm({ kind, w, thndr, onClose }) {
+  const spec = WALLET_FORMS[kind];
+  const all = Math.floor(w.unsettled * 100) / 100;       // Settle now: all that's settling, unless you say less
+  const [form, setForm] = useState({ date: todayISO(), amount: kind === 'settle' ? String(all) : '', note: w.plan ? '' : (spec.notes || [''])[0],
+    fee: kind === 'withdraw' && w.withdraw_fee ? String(w.withdraw_fee) : kind === 'settle' && w.settle ? String(settleFee(w, all)) : '',
+    balance: '' });
+  const [busy, setBusy] = useState(false);
+  const [feeSet, setFeeSet] = useState(false);            // you typed the fee: the amount no longer changes it
+  const set = k => e => {
+    const v = e.target.value;
+    if (k === 'fee') setFeeSet(true);
+    setForm(f => ({ ...f, [k]: v, ...(k === 'amount' && kind === 'settle' && w.settle && !feeSet ? { fee: String(settleFee(w, parseFloat(v))) } : {}) }));
+  };
+  const amount = parseFloat(kind === 'fix' ? form.balance : form.amount), fee = parseFloat(form.fee) || 0;
+  const valid = kind === 'fix' ? amount >= 0 : amount > 0;
+  const total = kind === 'withdraw' ? amount + fee : kind === 'deposit' ? amount - fee : null;
+  const short = kind === 'settle' && w.settle && amount > 0 && amount < w.settle.min_amount;
+  const submit = async e => {
+    e.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    try {
+      toast((await api('/portfolio/wallet', { method: 'POST',
+        body: { kind, date: form.date, amount, fee, note: form.note, balance: amount } })).message);
+      onClose();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const feeHelp = kind === 'settle'
+    ? (w.settle ? 'Thndr takes 0.3% of the amount, at least 5 EGP.' : "Your broker's fee, if any.")
+    : kind === 'withdraw'
+    ? (thndr ? t('Thndr takes {v} EGP a bank transfer.', { v: fmt.num(w.withdraw_fee, 1) }) : "Your broker's fee, if any.")
+    : (thndr ? 'At Thndr an e-wallet top-up has a fee; InstaPay and bank transfers are free.' : "Your broker's fee, if any.");
+  return html`<form class="preview-box" style="margin-top:14px;gap:10px" onSubmit=${submit}>
+    <b>${t(spec.title)}</b>
+    <div class="form-grid">
+      ${kind === 'fix'
+        ? html`<${Field} label="Your broker's wallet balance (EGP)" help="The balance your broker's app shows. Record your top-ups and withdrawals first: what's left of the difference counts as a gain or a loss.">
+            <input class="input" type="number" min="0" step="0.01" value=${form.balance} onInput=${set('balance')} required /><//>`
+        : html`<${Field} label=${kind === 'settle' ? 'Amount to settle (EGP)' : 'Amount (EGP)'}
+            help=${kind === 'withdraw' ? t('Up to {v} now', { v: fmt.egp(Math.max(0, w.available - fee), 2) })
+              : kind === 'settle' ? t('{v} is still settling', { v: fmt.egp(w.unsettled, 2) }) + (w.settle ? ` · ${t('Thndr settles 300 EGP or more')}` : '') : ''}>
+            <input class="input" type="number" min="0.01" step="0.01" value=${form.amount} onInput=${set('amount')} required /><//>`}
+      ${(kind === 'deposit' || kind === 'withdraw' || kind === 'settle') && html`<${Field} label="Fee (EGP)" help=${feeHelp}>
+        <input class="input" type="number" min="0" step="0.01" value=${form.fee} onInput=${set('fee')} /><//>`}
+      ${spec.notes && !w.plan && html`<${Field} label="What it is"><select class="input" value=${form.note} onChange=${set('note')}>
+        ${spec.notes.map(n => html`<option value=${n}>${t(n)}</option>`)}</select><//>`}
+      ${kind !== 'fix' && html`<${Field} label="Date"><${DateInput} weekends value=${form.date} onInput=${set('date')} /><//>`}
+    </div>
+    ${kind === 'refund' && w.plan && html`<p class="faint" style="font-size:12.5px;margin:0">${t("Your Thndr Trader commission kickbacks are added for you, the day of each of the month's first 50 orders. Add money back here only if it's something else.")}</p>`}
+    <div class="row">
+      <span style="flex:1">${total != null && amount > 0 ? t(kind === 'withdraw' ? 'Total out of your wallet: {v}' : 'Reaches your wallet: {v}', { v: fmt.egp(total, 2) })
+        : kind === 'settle' && amount > 0 ? t('You can withdraw {v} more at once; the fee comes out of your wallet.', { v: fmt.egp(amount, 2) }) : ''}</span>
+      <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
+      <button class="btn primary sm" type="submit" disabled=${busy || !valid || short}><${Icon} name="check" />${t('Save')}</button>
+    </div>
+  </form>`;
+}
+
+// Your Thndr Trader plan, like its page in Thndr's app: the plan month's free orders left (42/50: 8 used), its dates and price.
+function PlanCard({ p, onEdit }) {
+  const used = Math.min(p.used, p.free), left = p.free - used, next = fmt.date(p.month[1], false);
+  const [match, setMatch] = useState(null);         // Thndr's count, while you type it
+  const save = async e => {
+    e.preventDefault();
+    try {
+      await api('/portfolio/plan', { method: 'POST', body: { since: p.since, kind: p.kind, price: p.price, used: p.free - parseInt(match, 10) } });
+      toast(t('Free trades now match Thndr: {n}/{f}.', { n: match, f: p.free }));
+      setMatch(null);
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
+  return html`<div class="card plan-card" style="margin-top:14px">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
+      <div><span class="k-label">${t('Your plan')}</span>
+        <h3>Thndr Trader <small class="faint">${t(p.kind === 'yearly' ? 'Yearly' : 'Monthly')}</small></h3></div>
+      <button class="btn sm ghost" onClick=${onEdit}><${Icon} name="pencil" size=${14} />${t('Edit')}</button>
+    </div>
+    ${match === null
+      ? html`<div class="row plan-used" style="gap:10px;flex-wrap:wrap"><span><b>${left}</b>/${p.free} ${t('free trades')}</span>
+          <button class="btn sm ghost" onClick=${() => setMatch(String(left))}><${Icon} name="refresh" size=${14} />${t('Match Thndr')}</button></div>`
+      : html`<form class="row plan-used" style="gap:8px;flex-wrap:wrap" onSubmit=${save}>
+          <input class="input" style="width:90px" type="number" min="0" max=${p.free} step="1" value=${match} autofocus
+            aria-label=${t('Free trades left at Thndr')} onInput=${e => setMatch(e.target.value)} required />
+          <span>/${p.free} ${t('free trades')}</span>
+          <button class="btn sm primary" type="submit"><${Icon} name="check" size=${14} />${t('Save')}</button>
+          <button class="btn sm ghost" type="button" onClick=${() => setMatch(null)}>${t('Cancel')}</button></form>`}
+    <div class="pbar" role="progressbar" aria-valuemin="0" aria-valuemax=${p.free} aria-valuenow=${left}>
+      <span style=${`width:${(100 * left) / p.free}%`}></span></div>
+    <p class="faint">${match !== null ? t("Type the free trades left on Thndr's plan page (Account → Subscriptions). Each order you log from now on takes one.")
+      : left ? t('{n} free trades left until your next billing date, {date} ({u} used). Each buy and each sale takes one: Thndr takes its commission and gives it back to your wallet the same day.', { n: left, date: next, u: used })
+        : t("All used: Thndr's commission stays on your orders until your next billing date, {date}.", { date: next })}</p>
+    <h4 class="plan-head">${t('Membership details')}</h4>
+    <div class="plan-facts">
+      <div><span class="k-label">${t('Member since')}</span><b>${fmt.date(p.since)}</b></div>
+      <div><span class="k-label">${t('Next billing date')}</span><b>${fmt.date(p.next)}</b></div>
+      <div><span class="k-label">${t('Plan price')}</span><b>${fmt.egp(p.price)}</b></div>
+      <div><span class="k-label">${t('Payment method')}</span><b>${t('Your wallet')}</b></div>
+    </div>
+  </div>`;
+}
+
+function PlanForm({ w, onClose }) {
+  const p = w.plan;
+  const [form, setForm] = useState({ since: p ? p.since : '', kind: p ? p.kind : 'monthly', price: String(p ? p.price : w.prices.monthly),
+    left: p ? String(Math.max(0, p.free - p.used)) : '' });
+  const [busy, setBusy] = useState(false);
+  const [gone, setGone] = useState(false);
+  const set = k => e => {
+    const v = e.target.value;
+    setForm(f => ({ ...f, [k]: v, ...(k === 'kind' ? { price: String(w.prices[v]) } : {}) }));
+  };
+  const send = async (method, body) => {
+    setBusy(true);
+    try {
+      toast((await api('/portfolio/plan', { method, body })).message);
+      onClose();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const submit = e => {
+    e.preventDefault();
+    send('POST', { since: form.since, kind: form.kind, price: parseFloat(form.price),
+      used: form.left === '' ? null : w.plan_free - parseInt(form.left, 10) });
+  };
+  return html`<form class="preview-box" style="margin-top:14px;gap:10px" onSubmit=${submit}>
+    <b>${t('Thndr Trader plan')}</b>
+    <p class="faint" style="font-size:12.5px;margin:0">${t("Copy it from the plan's page in Thndr's app (Account → Subscriptions). Thndr takes its commission on every order and gives it back to your wallet the same day on the first 50 buys and sales of each plan month, which starts on the day of the month you subscribed. The app counts the ones you log here, and the plan's price comes out of this wallet on each renewal from now on.")}</p>
+    <div class="form-grid">
+      <${Field} label="Member since"><${DateInput} weekends value=${form.since} onInput=${set('since')} /><//>
+      <${Field} label="Plan"><select class="input" value=${form.kind} onChange=${set('kind')}>
+        <option value="monthly">${t('Monthly')}</option><option value="yearly">${t('Yearly')}</option></select><//>
+      <${Field} label="Plan price (EGP)"><input class="input" type="number" min="0" step="0.01" value=${form.price}
+        onInput=${set('price')} required /><//>
+      <${Field} label="Free trades left at Thndr" help="The number on Thndr's plan page now (42 in 42/50). Each order you log from now on takes one; all 50 come back at the next billing date.">
+        <input class="input" type="number" min="0" max=${w.plan_free} step="1" value=${form.left} onInput=${set('left')} /><//>
+    </div>
+    <div class="row">
+      ${p && html`<button class="btn sm danger-ghost" type="button" onClick=${() => setGone(true)}>${t('Remove the plan')}</button>`}
+      <span style="flex:1"></span>
+      <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
+      <button class="btn primary sm" type="submit" disabled=${busy || !form.since}><${Icon} name="check" />${t('Save')}</button>
+    </div>
+    ${gone && html`<${Confirm} title="Remove your Thndr Trader plan?"
+      text="Your orders from now on count Thndr's commission, and nothing more comes out of your wallet for the plan. What's in your wallet already stays."
+      confirmLabel="Remove" danger onConfirm=${() => send('DELETE')} onClose=${() => setGone(false)} />`}
+  </form>`;
 }
 
 // ------------------------------------------------------------------ Health tab
 const togetherWords = r => (r >= 0.7 ? 'move closely together' : r >= 0.4 ? 'often move together' : r >= 0.1
   ? 'move a little together' : 'move independently');
 
+const UNITS = [{ value: 'egp', label: 'In pounds' }, { value: 'usd', label: 'In dollars' }, { value: 'gold', label: 'In gold' }];
+const UNIT_HINT = {
+  egp: 'Its value after every session since your first buy (cash plus your shares at each close), next to EGX30 and a bank deposit as if you had put the same money in them.',
+  usd: "The same, in dollars at each day's rate: a rise in pounds can be a fall in dollars when the pound weakens.",
+  gold: "The same, in grams of 24-carat gold at each day's price: how many grams your account would buy.",
+};
+
 function HealthTab({ data }) {
   const { data: h, error } = useApi('/portfolio/history');
+  const [unit, setUnit] = useState('egp');
   const s = data.summary;
   const mix = sectorMix(data.positions, s.cash);
   const risk = stopRisk(data.positions, s.equity);
   const held = data.positions.map(p => p.symbol);
   const corr = h ? correlations(h.series, held) : null;
-  const curve = h ? equityCurve(h) : null;
+  const base = h ? equityCurve(h) : null;
+  const units = UNITS.filter(u => u.value === 'egp' || (base && inMoney(base, h.money, u.value)));
+  const curve = base && (inMoney(base, h.money, unit) || inMoney(base, h.money, 'egp'));
   const top = Math.max(...mix.map(m => m.pct), 0.01);
+  const issues = data.limits ? checkup({ positions: data.positions, summary: s, limits: data.limits, mix, corr }) : [];
+  const series = key => curve.time.map((d, i) => ({ time: d, value: curve[key][i] }));
   const lines = curve && [
-    { title: 'Your account', data: curve.time.map((d, i) => ({ time: d, value: curve.value[i] })), area: true },
-    { title: 'EGX30, same start', color: '--text-3', dashed: true, width: 1.5,
-      data: curve.time.map((d, i) => ({ time: d, value: curve.index[i] })) },
+    { title: t('Your account'), data: series('value'), area: true },
+    { title: t('EGX30, same start'), color: '--text-3', dashed: true, width: 1.5, data: series('index') },
+    ...(curve.deposit ? [{ title: t('Bank deposit, same start'), color: '--info', dashed: true, width: 1.5, data: series('deposit') }] : []),
   ];
   return html`
+    ${data.positions.length > 0 && html`<section class="section">
+      <${SectionHead} title="Checkup" hint="Your portfolio against your own limits in Settings, and what to do about anything out of line." />
+      <div class="card">${issues.length ? html`<ul class="checkup">${issues.map(x => html`<li class=${x.level}>
+          <${Icon} name=${x.level === 'bad' ? 'xCircle' : 'alert'} />
+          <div><b>${t(x.title[0], { ...x.title[1], sector: x.title[1].sector && tn(x.title[1].sector) })}</b>
+            <span>${t(x.todo[0], { ...x.todo[1], sector: x.todo[1].sector && tn(x.todo[1].sector) })}</span></div></li>`)}</ul>`
+        : html`<div class="checkup-ok"><${Icon} name="checkCircle" /><span>${t('Nothing to fix: no stock or sector is too big, and your risk is inside your limits.')}</span></div>`}
+      </div>
+    </section>`}
     <section class="section">
-      <${SectionHead} title="Your account against EGX30"
-        hint="Its value after every session since your first buy (cash plus your shares at each close), next to EGX30 as if you had put the same money in it." />
+      <${SectionHead} title="Your account against EGX30" hint=${UNIT_HINT[unit]}>
+        ${units.length > 1 && html`<${Seg} options=${units} value=${unit} onChange=${setUnit} />`}<//>
       ${!h ? html`<${PageLoading} error=${error} />` : !curve ? html`<div class="card"><${Empty} icon="chart"
         title="No buys yet" text="Once you log a buy, your account's value is drawn here after every session." /></div>` : html`
         <div class="kpis">
           <${Kpi} label="Your account" value=${fmt.pct(curve.ret, 1)} valueClass=${tone(curve.ret)}
-            sub=${`since ${fmt.date(curve.time[0])}`} />
+            sub=${t('since {date}', { date: fmt.date(curve.time[0]) })} />
           <${Kpi} label="EGX30 over the same time" value=${fmt.pct(curve.index_ret, 1)} valueClass=${tone(curve.index_ret)}
             sub=${curve.ret >= curve.index_ret ? 'you did better' : 'EGX30 did better'} />
+          ${curve.deposit_ret != null && html`<${Kpi} label="A bank deposit" value=${fmt.pct(curve.deposit_ret, 1)}
+            valueClass=${tone(curve.deposit_ret)} sub=${curve.ret >= curve.deposit_ret ? 'you did better' : 'the deposit did better'} />`}
           <${Kpi} label="Worst drop from a high" value=${fmt.pct(curve.max_drawdown, 1)}
             valueClass=${curve.max_drawdown < -0.1 ? 'down' : ''} sub="your account's biggest fall" />
         </div>
-        <div class="card flush" style="margin-top:14px"><${LineChart} lines=${lines} height=${300} /></div>`}
+        <div class="card flush" style="margin-top:14px"><${LineChart} key=${unit} lines=${lines} height=${300}
+          format=${unit === 'gold' ? 'grams' : unit === 'usd' ? 'usd' : 'egp'} /></div>
+        ${curve.deposit && html`<p class="faint" style="font-size:12px;margin-top:8px">${t('The bank deposit earns the interbank rate of each day, added daily: close to what a bank certificate paid over the same time.')}</p>`}`}
     </section>
 
     <div class="grid grid-2" style="margin-top:4px;align-items:start">
       <section class="section">
         <${SectionHead} title="Where your money is" hint="Each sector's share of your account, at the last close." />
         <div class="card">${mix.map(m => html`<div class="mix-row">
-          <div class="mix-label"><b>${m.sector}</b><span class="faint">${m.symbols.join(', ')}</span></div>
+          <div class="mix-label"><b>${tn(m.sector)}</b><span class="faint">${m.symbols.join(', ')}</span></div>
           <div class="gauge"><b class="gauge-v">${fmt.pct(m.pct, 0, false)}</b>
             <div class=${cls('bar', m.sector === 'Cash' ? '' : m.pct > 0.4 ? 'warn' : 'up')}><span style=${`width:${(m.pct / top) * 100}%`}></span></div></div>
           <span class="faint mix-value">${fmt.short(m.value)}</span></div>`)}
           ${mix.some(m => m.sector !== 'Cash' && m.pct > 0.4) && html`<p class="faint" style="font-size:12px;margin-top:10px">
-            More than 40% in one sector: news about that sector moves much of your account at once.</p>`}
+            ${t('More than 40% in one sector: news about that sector moves much of your account at once.')}</p>`}
         </div>
       </section>
 
@@ -155,14 +414,15 @@ function HealthTab({ data }) {
         <div class="card">
           ${data.positions.length ? html`
             <div class="calc-shares down" style="font-size:26px">${fmt.egp(risk.total ? -risk.total : 0)}${' '}
-              <span>${fmt.pct(risk.pct, 1, false)} of your account</span></div>
+              <span>${t('{pct} of your account', { pct: fmt.pct(risk.pct, 1, false) })}</span></div>
             <div class="stat-list" style="margin-top:10px">${risk.rows.map(r => html`
-              <span class="k">${r.symbol}${r.locked ? html` <span class="tag">stop above your price</span>` : ''}</span>
-              <span class="v">${r.loss ? fmt.egp(-r.loss) : '0 EGP'}<span class="faint" style="font-weight:500"> ${fmt.pct(-r.pct, 1)}</span></span>`)}</div>
-            <p class="faint" style="font-size:12px;margin-top:10px">Your limit of ${data.max_open_risk_pct}% counts the risk
-              from your buy prices: ${fmt.pct(s.equity ? s.open_risk / s.equity : 0, 1, false)} now${s.equity && s.open_risk / s.equity * 100 > data.max_open_risk_pct
-              ? ', over the limit, so the agent sizes new buys at 0 until it comes down' : ''}. A gap through a stop can lose more.</p>`
-          : html`<p class="muted" style="font-size:13px">No open positions.</p>`}
+              <span class="k">${r.symbol}${r.locked ? html` <span class="tag">${t('stop above your price')}</span>` : ''}</span>
+              <span class="v">${fmt.egp(r.loss ? -r.loss : 0)}<span class="faint" style="font-weight:500"> ${fmt.pct(-r.pct, 1)}</span></span>`)}</div>
+            <p class="faint" style="font-size:12px;margin-top:10px">${t('Your limit of {limit}% counts the risk from your buy prices: {now} now.',
+              { limit: data.max_open_risk_pct, now: fmt.pct(s.equity ? s.open_risk / s.equity : 0, 1, false) })}${' '}
+              ${s.equity && s.open_risk / s.equity * 100 > data.max_open_risk_pct
+              ? t('That is over the limit, so the agent sizes new buys at 0 until it comes down.') : ''} ${t('A gap through a stop can lose more.')}</p>`
+          : html`<p class="muted" style="font-size:13px">${t('No open positions.')}</p>`}
         </div>
       </section>
     </div>
@@ -170,16 +430,16 @@ function HealthTab({ data }) {
     <section class="section">
       <${SectionHead} title="How your stocks move together"
         hint="Correlation of daily moves over the last 60 sessions: 1 means they rise and fall together, 0 means unrelated." />
-      <div class="card">${held.length < 2 ? html`<p class="muted" style="font-size:13px">This needs at least two open positions.</p>`
+      <div class="card">${held.length < 2 ? html`<p class="muted" style="font-size:13px">${t('This needs at least two open positions.')}</p>`
         : !corr ? html`<${PageLoading} error=${error} />` : html`
-        <p style="font-size:13.5px;margin-bottom:12px">${corr.average == null ? 'Not enough shared history yet.'
-          : html`On average your stocks <b>${togetherWords(corr.average)}</b> (${fmt.num(corr.average, 2)}).${' '}
-            ${corr.average >= 0.5 ? 'A bad day for one is likely a bad day for most: your risk adds up more than the stops suggest.'
-              : 'That spreads your risk: they rarely all fall together.'}`}</p>
+        <p style="font-size:13.5px;margin-bottom:12px">${corr.average == null ? t('Not enough shared history yet.')
+          : html`${tp('On average your stocks {how} ({r}).', { how: html`<b>${t(togetherWords(corr.average))}</b>`, r: fmt.num(corr.average, 2) })}${' '}
+            ${t(corr.average >= 0.5 ? 'A bad day for one is likely a bad day for most: your risk adds up more than the stops suggest.'
+              : 'That spreads your risk: they rarely all fall together.')}`}</p>
         <div class="stat-list">${corr.pairs.map(p => html`
           <span class="k">${p.a} & ${p.b}</span>
           <span class="v"><b class=${p.r >= 0.7 ? 'warn' : ''}>${fmt.num(p.r, 2)}</b>
-            <span class="faint" style="font-weight:500"> ${togetherWords(p.r)}</span></span>`)}</div>`}
+            <span class="faint" style="font-weight:500"> ${t(togetherWords(p.r))}</span></span>`)}</div>`}
       </div>
     </section>`;
 }
@@ -193,13 +453,12 @@ function JournalTab({ data }) {
   }
   if (!h) return html`<section class="section"><${PageLoading} error=${error} /></section>`;
   const j = journal(data.closed, h);
-  const month = m => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
   const groupCols = first => [
-    { key: 'label', label: first, render: g => html`<b>${first === 'Month' ? month(g.label) : g.label}</b>` },
+    { key: 'label', label: first, render: g => html`<b>${first === 'Month' ? fmt.month(g.label) : tn(g.label)}</b>` },
     { key: 'n', label: 'Trades', align: 'r' },
     { key: 'win_rate', label: 'Won', align: 'r', fmt: v => fmt.pct(v, 0, false) },
-    { key: 'avg_return', label: 'Avg return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>` },
-    { key: 'pnl', label: 'P&L (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'avg_return', label: 'Average return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>` },
+    { key: 'pnl', label: 'Profit / loss (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
   ];
   const tradeCols = [
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} sub=${false} />` },
@@ -207,24 +466,24 @@ function JournalTab({ data }) {
     { key: 'exit_date', label: 'Sold', fmt: v => fmt.date(v) },
     { key: 'days', label: 'Days', align: 'r' },
     { key: 'return_pct', label: 'Return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v, 1)}</span>` },
-    { key: 'pnl', label: 'P&L', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'pnl', label: 'Profit / loss', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
     { key: 'real_return', label: 'After inflation', align: 'r', title: "The return minus Egypt's inflation over the days you held it",
       render: r => (r.inflation == null ? html`<span class="faint">–</span>` : html`<span class=${tone(r.real_return)}>${fmt.pct(r.real_return, 1)}</span>`) },
-    { key: 'source', label: 'From', render: r => html`<span class="muted">${r.source}</span>` },
-    { key: 'exit_reason', label: 'Why sold', render: r => html`<span class="muted">${r.exit_reason || '–'}</span>` },
+    { key: 'source', label: 'From', render: r => html`<span class="muted">${tn(r.source)}</span>` },
+    { key: 'exit_reason', label: 'Why sold', render: r => html`<span class="muted">${tn(r.exit_reason) || '–'}</span>` },
   ];
   return html`
     <section class="section">
       <div class="kpis">
-        <${Kpi} label="Closed trades" value=${fmt.int(j.n)} sub=${`held ${fmt.num(j.avg_days, 0)} days on average`} />
+        <${Kpi} label="Closed trades" value=${fmt.int(j.n)} sub=${t('held {n} days on average', { n: fmt.num(j.avg_days, 0) })} />
         <${Kpi} label="Won" value=${fmt.pct(j.win_rate, 0, false)} valueClass=${j.win_rate >= 0.5 ? 'up' : ''}
-          sub=${`avg win ${fmt.pct(j.avg_win, 1)} · avg loss ${fmt.pct(j.avg_loss, 1)}`} />
+          sub=${t('average win {w} · average loss {l}', { w: fmt.pct(j.avg_win, 1), l: fmt.pct(j.avg_loss, 1) })} />
         <${Kpi} label="Profit factor" value=${j.profit_factor == null ? 'no losses' : fmt.num(j.profit_factor, 2)}
           valueClass=${j.profit_factor == null || j.profit_factor >= 1 ? 'up' : 'down'} sub="money won ÷ money lost (above 1 = profitable)" />
-        <${Kpi} label="Total P&L" value=${fmt.signed(j.pnl)} valueClass=${tone(j.pnl)}
-          sub=${`EGP after fees and dividends · ${fmt.signed(j.per_trade)} a trade`} />
+        <${Kpi} label="Total profit / loss" value=${fmt.signed(j.pnl)} valueClass=${tone(j.pnl)}
+          sub=${t('EGP after fees and dividends · {v} a trade', { v: fmt.signed(j.per_trade) })} />
         ${j.has_inflation && html`<${Kpi} label="After inflation" value=${fmt.signed(j.real_pnl)} valueClass=${tone(j.real_pnl)}
-          sub=${`inflation took ${fmt.int(j.pnl - j.real_pnl)} EGP while your money was in`} />`}
+          sub=${t('inflation took {v} EGP while your money was in', { v: fmt.int(j.pnl - j.real_pnl) })} />`}
       </div>
     </section>
     <div class="grid grid-2" style="align-items:start">
@@ -241,9 +500,64 @@ function JournalTab({ data }) {
       <div class="card flush"><${DataTable} columns=${tradeCols} rows=${j.trades} rowKey=${r => r.id} /></div></section>`;
 }
 
-function PositionDetail({ p, data, onDone }) {
-  const fee = data.fee_pct / 100;
-  const [form, setForm] = useState({ date: todayISO(), shares: String(p.shares), price: String(p.last), reason: data.sell_reasons[0] });
+// A position 30%+ under its average price: what the tests say, the sell rule (sell on the first bounce, engine.js
+// onBounce) and averaging down worked out. Tests 2016–2026 (2026-10): stocks that fell this far under their 60-day
+// high, the share that got back to it within 3 and 6 months, fell another 20% within 3, and the median 6 months later
+// (every stock: +7.4%); and how often selling on the first bounce beat selling at once.
+const BIG_LOSS = 0.30;
+// Averaging down: an option only when the stock earns a buy on its own. After a 50%+ fall from its 3-month high the
+// model's top 10% did worse than the rest (median 6 months −14% against −9%, 52% fell another 20%), so not then.
+const LOSS_BANDS = [
+  { from: 0.30, back3: 0.09, back6: 0.25, worse: 0.28, med6: 0.096, bounce: 0.68 },
+  { from: 0.50, back3: 0.03, back6: 0.08, worse: 0.43, med6: -0.109, bounce: 0.64 },
+];
+
+function BigLossPlan({ p, data }) {
+  const [add, setAdd] = useState({ shares: String(p.shares), price: String(p.last) });
+  const loss = p.last / p.avg_price - 1;
+  const fall = Math.min(loss, p.from_high ?? 0);              // the deeper of: under your price, under its 3-month high
+  const crash = (p.from_high ?? 0) <= -0.5;                  // at half its 3-month high or less
+  const band = [...LOSS_BANDS].reverse().find(b => -fall >= b.from);
+  const n = parseInt(add.shares, 10) || 0, price = parseFloat(add.price) || 0;
+  const cost = p.avg_price * p.shares + p.fees, more = n * price + orderFee(n * price, data.fee_cfg);
+  const avg = n > 0 && price > 0 ? (cost + more) / (p.shares + n) : null;
+  const earns = (p.buy_signal || p.top_pick) && !crash;
+  return html`<div class="big-loss">
+    <h4><${Icon} name="alert" size=${15} /> ${t('Big loss plan')}</h4>
+    <p>${tp('Down {loss} ({egp}). To get back to your {avg} it must rise {need}.', {
+      loss: html`<b class="down">${fmt.pct(-loss, 1, false)}</b>`, egp: fmt.egp(p.pnl), avg: fmt.price(p.avg_price),
+      need: html`<b>${fmt.pct(p.avg_price / p.last - 1, 0)}</b>` })}</p>
+    <p class="muted">${t('Stocks that fell {pct} or more from a high, 2016–2026: {b3} got back to it within 3 months and {b6} within 6; {w} fell another 20% or more within 3 months. Their typical next 6 months: {m} (every stock: +7%).', {
+      pct: fmt.pct(band.from, 0, false), b3: fmt.pct(band.back3, 0, false), b6: fmt.pct(band.back6, 0, false),
+      w: fmt.pct(band.worse, 0, false), m: fmt.pct(band.med6, 0) })}</p>
+    <div class="big-loss-step"><b>${t('1. Selling')}</b>
+      <span>${p.status === 'BOUNCE'
+        ? t('Sell at its first close above its 20-day average ({level} now), or by {date} at the latest.', { level: fmt.price(p.bounce_level), date: fmt.date(p.bounce_by) })
+        : p.status === 'EXIT' ? t('The rules say sell at the next open: {why}', { why: tn(p.reason) })
+          : t('Your own stop ({stop}) is still above the price, so the rules keep holding it.', { stop: fmt.price(p.stop) })}
+        ${' '}<span class="faint">${t('Waiting for that first bounce beat selling at once {pct} of the time in the tests.', { pct: fmt.pct(band.bounce, 0, false) })}</span></span></div>
+    <div class="big-loss-step"><b>${t('2. Averaging down')}</b>
+      <span>${earns
+        ? t('{sym} earns a buy on its own today ({why}), so buying more is an option: size it as a new trade with its own stop.', {
+          sym: p.symbol, why: t(p.buy_signal ? 'a BUY signal' : "the model's top 10%") })
+        : crash ? t("Not now: {sym} is at half its 3-month high or less. After crashes like that, even the model's top-rated stocks usually kept falling in the tests (typical next 6 months −14%).", { sym: p.symbol })
+          : t("Not now: {sym} has no BUY signal and isn't in the model's top 10%. Buying more only lowers the average; it doesn't make the stock a better buy.", { sym: p.symbol })}</span>
+      <div class="form-grid" style="margin-top:8px">
+        <${Field} label="Buy more: shares"><input class="input" type="number" min="1" step="1" value=${add.shares}
+          onInput=${e => setAdd(a => ({ ...a, shares: e.target.value }))} /><//>
+        <${Field} label="At price"><input class="input" type="number" min="0.001" step="any" value=${add.price}
+          onInput=${e => setAdd(a => ({ ...a, price: e.target.value }))} /><//>
+      </div>
+      ${avg && html`<p style="margin-top:8px">${tp('New average {avg}: it must rise {need} to break even (now {now}). Money in {sym}: {total}; another 20% fall would cost {drop} more.', {
+        avg: html`<b>${fmt.price(avg)}</b>`, need: html`<b>${fmt.pct(avg / p.last - 1, 0)}</b>`, now: fmt.pct(p.avg_price / p.last - 1, 0),
+        sym: p.symbol, total: fmt.egp(cost + more), drop: html`<b class="down">${fmt.egp(0.2 * p.last * (p.shares + n))}</b>` })}</p>`}
+    </div>
+    <p class="faint" style="font-size:12px">${t('Tested rules and numbers, not advice: the decision is yours.')}</p>
+  </div>`;
+}
+
+function PositionDetail({ p, data, onDone, onClose }) {
+  const [form, setForm] = useState({ date: lastSession(), shares: String(p.shares), price: String(p.price ?? p.last), reason: data.sell_reasons[0] });
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showDividend, setShowDividend] = useState(false);
@@ -251,7 +565,7 @@ function PositionDetail({ p, data, onDone }) {
   const qty = parseInt(form.shares, 10) || 0;
   const price = parseFloat(form.price) || 0;
   const valid = qty >= 1 && qty <= p.shares && price > 0 && !!form.date;
-  const pnl = valid ? (price - p.avg_price) * qty - (p.fees * qty) / p.shares - price * qty * fee : null;
+  const pnl = valid ? (price - p.avg_price) * qty - (p.fees * qty) / p.shares - orderFee(price * qty, data.fee_cfg) : null;
 
   const submit = async e => {
     e.preventDefault();
@@ -289,58 +603,257 @@ function PositionDetail({ p, data, onDone }) {
   const part = f => setForm(x => ({ ...x, shares: String(Math.max(1, Math.floor(p.shares * f))) }));
 
   const sellForm = html`<form onSubmit=${submit}>
-      <h4>Sell ${p.symbol}: all or part of your ${fmt.int(p.shares)} shares</h4>
+      <h4>${t('Sell {sym}: all or part of your {n} shares', { sym: p.symbol, n: fmt.int(p.shares) })}</h4>
       <div class="form-grid">
-        <${Field} label="Sell date"><input class="input" type="date" value=${form.date} onInput=${set('date')} required /><//>
-        <${Field} label="Shares to sell" error=${qty > p.shares ? `You hold ${fmt.int(p.shares)}` : null}>
+        <${Field} label="Sell date"><${DateInput} value=${form.date} onInput=${set('date')} /><//>
+        <${Field} label="Shares to sell" error=${qty > p.shares ? t('You hold {n}', { n: fmt.int(p.shares) }) : null}>
           <input class=${cls('input', qty > p.shares && 'invalid')} type="number" min="1" max=${p.shares} step="1"
             value=${form.shares} onInput=${set('shares')} required /><//>
         <${Field} label="Sell price"><input class="input" type="number" min="0.01" step="0.01" value=${form.price}
           onInput=${set('price')} required /><//>
         <${Field} label="Reason"><select class="input" value=${form.reason} onChange=${set('reason')}>
-          ${data.sell_reasons.map(r => html`<option value=${r}>${r}</option>`)}</select><//>
+          ${data.sell_reasons.map(r => html`<option value=${r}>${tn(r)}</option>`)}</select><//>
       </div>
       <div class="row" style="margin-top:10px;gap:6px">
-        <span class="faint" style="font-size:12px">Quick:</span>
+        <span class="faint" style="font-size:12px">${t('Quick:')}</span>
         <button type="button" class="btn sm ghost" onClick=${() => part(0.25)}>25%</button>
         <button type="button" class="btn sm ghost" onClick=${() => part(0.5)}>50%</button>
-        <button type="button" class="btn sm ghost" onClick=${() => part(1)}>All</button>
+        <button type="button" class="btn sm ghost" onClick=${() => part(1)}>${t('All')}</button>
       </div>
       <div class="form-foot">
         <span class="preview">${valid
-          ? html`${qty === p.shares ? 'Closes the position' : `${fmt.int(p.shares - qty)} shares stay open at ${fmt.price(p.avg_price)}`}
-              · P&L after fees <b class=${tone(pnl)}>${fmt.signed(pnl)} EGP</b>`
-          : 'Enter the shares and price you sold at.'}</span>
+          ? html`${qty === p.shares ? t('Closes the position') : t('{n} shares stay open at {price}', { n: fmt.int(p.shares - qty), price: fmt.price(p.avg_price) })}${' · '}
+              ${t('profit/loss after fees')} <b class=${tone(pnl)}>${fmt.egp(pnl)}</b>`
+          : t('Enter the shares and price you sold at.')}</span>
         <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="sell" />${t('Record sale')}</button>
       </div>
     </form>`;
 
   return html`<div class="pos-detail">
-    ${p.adjust ? html`<${AdjustPanel} p=${p} onDone=${onDone} />` : sellForm}
+    ${!p.adjust && p.last / p.avg_price - 1 <= -BIG_LOSS && html`<${BigLossPlan} p=${p} data=${data} />`}
+    ${p.adjust ? html`<${p.adjust.rights ? RightsPanel : AdjustPanel} p=${p} onDone=${onDone} />` : html`<div>${sellForm}${STATIC && p.stop != null && html`<${StopForm} p=${p} />`}</div>`}
     <div>
-      <h4>Transactions in this position${p.n_buys > 1 ? ` · ${p.n_buys} buys combined at the average price` : ''}</h4>
-      <table class="mini-table"><thead><tr><th>Date</th><th>Side</th><th class="r">Shares</th><th class="r">Price</th>
-        <th class="r">Fees</th><th>Note</th></tr></thead>
-        <tbody>${p.fills.map(f => html`<tr><td>${fmt.date(f.date)}</td><td><span class=${`side-tag ${f.side}`}>${f.side.toUpperCase()}</span></td>
-          <td class="r">${f.side === 'bonus' ? fmt.signed(f.shares) : fmt.int(f.shares)}</td>
-          <td class="r">${f.side === 'bonus' ? '–' : fmt.price(f.price)}</td>
-          <td class="r">${f.side === 'buy' || f.side === 'sell' ? fmt.num(f.fees, 2) : '–'}</td>
-          <td class="muted">${f.side === 'dividend' ? html`<b class="up">+${fmt.num(f.amount, 2)} EGP</b> ${f.note}
-            <button class="x-btn" title="Remove this dividend" onClick=${() => removeDividend(f.dividend_id)}><${Icon} name="x" size=${13} /></button>`
-            : f.note || ''}</td></tr>`)}</tbody></table>
+      <h4>${t('Transactions in this position')}${p.n_buys > 1 ? ` · ${t('{n} buys combined at the average price', { n: p.n_buys })}` : ''}</h4>
+      <${Fills} fills=${p.fills} tradeId=${p.id} data=${data} onRemoveDividend=${removeDividend} />
       ${showDividend
         ? html`<${DividendForm} p=${p} onClose=${() => setShowDividend(false)} />`
         : html`<button class="linkish" style="margin-top:10px" onClick=${() => setShowDividend(true)}>
-            <${Icon} name="coins" size=${14} /> Record a cash dividend</button>`}
-      <div class="row" style="margin-top:14px;justify-content:space-between">
-        <span class="faint" style="font-size:12px">First buy ${fmt.date(p.first_buy)} · sell by ${fmt.date(p.sell_by)}</span>
+            <${Icon} name="coins" size=${14} /> ${t('Record a cash dividend')}</button>`}
+      <div class="faint" style="font-size:12px;margin-top:14px">${t('First buy {a} · sell by {b}', { a: fmt.date(p.first_buy), b: fmt.date(p.sell_by) })}</div>
+      <div class="row" style="margin-top:10px;justify-content:space-between">
         <button class="btn sm danger-ghost" type="button" onClick=${() => setConfirmDelete(true)}>
-          <${Icon} name="trash" size=${14} />Logged by mistake</button>
+          <${Icon} name="trash" size=${14} />${t('Logged by mistake')}</button>
+        <button class="btn sm" type="button" onClick=${onClose}><${Icon} name="x" size=${14} />${t('Close')}</button>
       </div>
     </div>
-    ${confirmDelete && html`<${Confirm} title=${`Delete the ${p.symbol} position?`} danger confirmLabel="Delete position"
+    ${confirmDelete && html`<${Confirm} title=${t('Delete the {sym} position?', { sym: p.symbol })} danger confirmLabel="Delete position"
       text="This removes the position and all its transactions, as if you never logged it. Use it only for mistakes. To record a sale, use Record sale instead."
       onConfirm=${remove} onClose=${() => setConfirmDelete(false)} />`}
+  </div>`;
+}
+
+// Your own stop, e.g. right on a support you trust: from the next session, not under the automatic one (local/api.js setStop).
+function StopForm({ p }) {
+  const [v, setV] = useState('');
+  const [busy, setBusy] = useState(false);
+  const n = parseFloat(v);
+  const save = async stop => {
+    setBusy(true);
+    try {
+      toast((await api(`/portfolio/${p.id}/stop`, { method: 'POST', body: { stop } })).message);
+      setV('');
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<form class="stop-form" onSubmit=${e => { e.preventDefault(); if (n > 0) save(n); }}>
+    <h4>${t('Change the stop')}</h4>
+    <div class="row">
+      <input class="input" type="number" min="0.01" step="0.001" value=${v} onInput=${e => setV(e.target.value)}
+        placeholder=${t('Now {stop}', { stop: fmt.price(p.stop) })} aria-label=${t('New stop')} />
+      <button class="btn" type="submit" disabled=${!(n > 0) || busy}><${Icon} name="shield" size=${14} />${t('Set stop')}</button>
+      ${p.my_stop && html`<button type="button" class="linkish" disabled=${busy} onClick=${() => save(null)}>${t('Back to the automatic stop')}</button>`}
+    </div>
+    <p class="faint">${p.stops_mine ? t('From the next session (today\'s if it hasn\'t opened yet), and it stays there until you change it again.')
+      : t('From the next session (today\'s if it hasn\'t opened yet), and it can still rise to a newer support.')}
+      ${p.my_stop ? t('To lower it, type a lower price, as low as the automatic stop.') : ''} ${t("The automatic stop sits a little under a support so a dip that only touches it doesn't sell you; a stop right on the support sells on a touch.")}</p>
+  </form>`;
+}
+
+// A trade's transactions. On the website each buy and sale can be edited or deleted, and one added: the position is
+// then rebuilt from them (local/engine.js rebuildTrade). Bonus shares and dividends have their own buttons.
+function Fills({ fills, tradeId, data, onRemoveDividend }) {
+  const [editing, setEditing] = useState(null);      // a fill, 'new', or null
+  const [deleting, setDeleting] = useState(null);
+  const remove = async f => {
+    try {
+      toast((await api(`/portfolio/fills/${f.id}`, { method: 'DELETE' })).message);
+      setDeleting(null);
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
+  const [undoing, setUndoing] = useState(null);
+  const undo = async f => {
+    try {
+      toast((await api(`/portfolio/undo/${f.id}`, { method: 'DELETE' })).message);
+      setUndoing(null);
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
+  const editable = f => STATIC && (f.side === 'buy' || f.side === 'sell');
+  return html`<table class="mini-table"><thead><tr><th>${t('Date')}</th><th>${t('Side')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Price')}</th>
+      <th class="r">${t('Fees')}</th><th>${t('Note')}</th>${STATIC && html`<th></th>`}</tr></thead>
+      <tbody>${fills.map(f => html`<tr class=${editing && editing.id === f.id ? 'editing' : ''}><td>${fmt.date(f.date)}</td><td><span class=${`side-tag ${f.side}`}>${t(f.side.toUpperCase())}</span></td>
+        <td class="r">${f.side === 'bonus' ? fmt.signed(f.shares) : fmt.int(f.shares)}</td>
+        <td class="r">${f.side === 'bonus' ? '–' : fmt.price(f.price)}</td>
+        <td class="r">${f.side === 'buy' || f.side === 'sell' ? fmt.num(f.fees, 2) : '–'}</td>
+        <td class="muted">${f.side === 'dividend' ? html`<b class="up">+${fmt.egp(f.amount, 2)}</b> ${tn(f.note)}
+          ${onRemoveDividend && html`<button class="x-btn" title=${t('Remove this dividend')} onClick=${() => onRemoveDividend(f.dividend_id)}><${Icon} name="x" size=${13} /></button>`}`
+          : tn(f.note) || ''}${STATIC && f.undo && html` <button class="linkish" onClick=${() => setUndoing(f)}>${t('Take back')}</button>`}</td>
+        ${STATIC && html`<td class="fill-actions">${editable(f) && html`
+          <button class="x-btn edit" title=${t('Edit')} aria-label=${t('Edit')} onClick=${() => setEditing(f)}><${Icon} name="pencil" size=${14} /></button>
+          <button class="x-btn" title=${t('Delete')} aria-label=${t('Delete')} onClick=${() => setDeleting(f)}><${Icon} name="trash" size=${14} /></button>`}</td>`}</tr>`)}</tbody></table>
+    ${STATIC && (editing
+      ? html`<${FillForm} key=${editing === 'new' ? 'new' : editing.id} fill=${editing === 'new' ? null : editing} tradeId=${tradeId} data=${data}
+          onClose=${() => setEditing(null)} />`
+      : html`<button class="linkish" style="margin-top:10px;margin-inline-end:16px" onClick=${() => setEditing('new')}>
+          <${Icon} name="plus" size=${14} /> ${t('Add a transaction')}</button>`)}
+    ${deleting && html`<${Confirm} danger confirmLabel="Delete"
+      title=${t('Delete this {side}?', { side: t(deleting.side === 'buy' ? 'buy' : 'sale') })}
+      text=${t('{n} shares at {price} on {date}. Everything after it is worked out again. Deleting the last buy deletes the whole trade.',
+        { n: fmt.int(deleting.shares), price: fmt.price(deleting.price), date: fmt.date(deleting.date) })}
+      onConfirm=${() => remove(deleting)} onClose=${() => setDeleting(null)} />`}
+    ${undoing && html`<${Confirm} confirmLabel="Take back" title=${t('Take this update back?')}
+      text=${t("The position goes back to how it was before it: its shares, average price, stop and target. Use it when what you recorded wasn't right.")}
+      onConfirm=${() => undo(undoing)} onClose=${() => setUndoing(null)} />`}`;
+}
+
+const SIDES = [{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }];
+
+// Add a buy or sale to a trade, or edit one (fill).
+// What you type for a buy: the order's price (the site adds the fees), or your broker's average cost or purchase
+// value, which already have the fees in them (Thndr's do), so none are added. A purchase value is divided by the
+// shares. Thndr rounds the purchase value it shows (KORA: 79,082.57 against the 79,119.20 its profit/loss uses), so
+// "Exact from Thndr" works it out from the same screen's market value and profit/loss.
+const BASES = [{ value: 'price', label: 'Price paid' }, { value: 'avg', label: 'Average cost' }, { value: 'value', label: 'Purchase value' }];
+const BASIS_HELP = {
+  price: "The order's price: the site adds your broker's fees.",
+  avg: "Your broker's average cost: it already has the fees in it (Thndr's does), so none are added.",
+  value: "What the shares cost in all, fees in (Thndr: Purchase value). Thndr rounds it a little: Exact from Thndr gives its exact figure.",
+};
+const typedPrice = (f, shares) => (f.basis === 'value' ? parseFloat(f.value) / shares : parseFloat(f.price));
+
+function AmountField({ form, setForm }) {
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  return form.basis === 'value'
+    ? html`<${Field} label="Purchase value (EGP)"><input class="input" type="number" min="0.01" step="any" value=${form.value}
+        onInput=${set('value')} placeholder="0.00" required /><//>`
+    : html`<${Field} label=${form.basis === 'avg' ? 'Average cost' : 'Price paid'}><input class="input" type="number" min="0.001"
+        step="any" value=${form.price} onInput=${set('price')} placeholder="0.00" required /><//>`;
+}
+
+function BasisPick({ form, setForm }) {
+  const exact = k => e => setForm(f => {
+    const n = { ...f, [k]: e.target.value };
+    const mv = parseFloat(n.mv), pl = parseFloat(n.pl);
+    return Number.isFinite(mv) && Number.isFinite(pl) ? { ...n, value: (mv - pl).toFixed(2) } : n;
+  });
+  return html`<div class="buy-basis">
+    <${Seg} options=${BASES} value=${form.basis} onChange=${v => setForm(f => ({ ...f, basis: v }))} />
+    <div class="f-help">${t(BASIS_HELP[form.basis])}</div>
+    ${form.basis === 'value' && html`<${More} label="Exact from Thndr">
+      <p class="muted" style="font-size:12.5px;margin-bottom:8px">${t("From the stock's My position screen in Thndr. Type the profit/loss with its minus sign when it's a loss: the purchase value is Market value − Profit/Loss.")}</p>
+      <div class="form-grid">
+        <${Field} label="Market value"><input class="input" type="number" step="any" value=${form.mv} onInput=${exact('mv')} placeholder="0.00" /><//>
+        <${Field} label="Profit / loss"><input class="input" type="number" step="any" value=${form.pl} onInput=${exact('pl')} placeholder="-0.00" /><//>
+      </div><//>`}
+  </div>`;
+}
+
+function FillForm({ fill, tradeId, data, onClose }) {
+  const [form, setForm] = useState(fill
+    ? { side: fill.side, date: fill.date, shares: String(fill.shares), price: String(fill.price), note: fill.note || '',
+      basis: fill.fees_in ? 'avg' : 'price', value: '', mv: '', pl: '' }
+    : { side: 'buy', date: lastSession(), shares: '', price: '', note: '', basis: 'price', value: '', mv: '', pl: '' });
+  const [busy, setBusy] = useState(false);
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const sell = form.side === 'sell';
+  const shares = parseInt(form.shares, 10) || 0, price = (sell ? parseFloat(form.price) : typedPrice(form, shares)) || 0;
+  const valid = shares >= 1 && price > 0 && !!form.date;
+  const feesIn = !sell && form.basis !== 'price';
+  const reasons = data.sell_reasons.includes(form.note) || !form.note ? data.sell_reasons : [form.note, ...data.sell_reasons];
+  const submit = async e => {
+    e.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    const body = { side: form.side, date: form.date, shares, price, note: sell ? (form.note || data.sell_reasons[0]) : form.note,
+      fees_in: feesIn };
+    try {
+      const r = fill ? await api(`/portfolio/fills/${fill.id}`, { method: 'PUT', body })
+        : await api(`/portfolio/${tradeId}/fills`, { method: 'POST', body });
+      toast(r.message);
+      onClose();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<form class="fill-form" onSubmit=${submit}>
+    <h4>${fill ? t(fill.side === 'buy' ? 'Edit this buy' : 'Edit this sale') : t('Add a transaction')}</h4>
+    ${!fill && html`<${Seg} options=${SIDES} value=${form.side} onChange=${v => setForm(f => ({ ...f, side: v }))} />`}
+    <div class="form-grid" style="margin-top:10px">
+      <${Field} label="Date"><${DateInput} value=${form.date} onInput=${set('date')} /><//>
+      <${Field} label="Shares"><input class="input" type="number" min="1" step="1" value=${form.shares} onInput=${set('shares')} required /><//>
+      ${sell ? html`<${Field} label="Sell price"><input class="input" type="number" min="0.001" step="any" value=${form.price}
+        onInput=${set('price')} required /><//>` : html`<${AmountField} form=${form} setForm=${setForm} />`}
+      ${sell && html`<${Field} label="Reason"><select class="input" value=${form.note || data.sell_reasons[0]} onChange=${set('note')}>
+        ${reasons.map(r => html`<option value=${r}>${tn(r)}</option>`)}</select><//>`}
+    </div>
+    ${!sell && html`<${BasisPick} form=${form} setForm=${setForm} />`}
+    <div class="form-foot">
+      <span class="preview">${!valid ? t('Enter the shares and price.') : feesIn ? html`${fmt.price(price)} · ${t('(fees already in the price)')}`
+        : html`${t('Fees')} <b>${fmt.egp(orderFee(price * shares, data.fee_cfg), 2)}</b>`}</span>
+      <span class="row" style="gap:8px">
+        <button class="btn ghost" type="button" onClick=${onClose}>${t('Cancel')}</button>
+        <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="check" />${t('Save')}</button></span>
+    </div>
+  </form>`;
+}
+
+// A closed trade, opened from the table: its transactions (edit, delete, add) and deleting the whole trade.
+function ClosedDetail({ r, data, onClose }) {
+  const [confirm, setConfirm] = useState(false);
+  const remove = async () => {
+    try {
+      toast((await api(`/portfolio/closed/${r.id}`, { method: 'DELETE' })).message);
+      onClose();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 9000);
+    }
+  };
+  return html`<div class="card" style="margin-top:12px">
+    <div class="card-title"><a class="sym" href=${`#/stock/${encodeURIComponent(r.symbol)}`}>${r.symbol}</a>
+      <span class="faint">${t('Bought {a} · sold {b}', { a: fmt.date(r.entry_date), b: fmt.date(r.exit_date) })}</span></div>
+    ${r.source_open && html`<p class="muted" style="font-size:13px;margin-bottom:10px">${t('This was part of a position that is still open: these are all its transactions. Deleting this sale puts its shares back in the open position.')}</p>`}
+    <${Fills} fills=${r.fills} tradeId=${r.source_id} data=${data} />
+    <div class="row" style="margin-top:14px;justify-content:space-between">
+      ${!r.source_open ? html`<button class="btn sm danger-ghost" type="button" onClick=${() => setConfirm(true)}>
+        <${Icon} name="trash" size=${14} />${t('Delete this trade')}</button>` : html`<span></span>`}
+      <button class="btn sm" type="button" onClick=${onClose}><${Icon} name="x" size=${14} />${t('Close')}</button>
+    </div>
+    ${confirm && html`<${Confirm} title=${t('Delete the {sym} trade?', { sym: r.symbol })} danger confirmLabel="Delete trade"
+      text="This removes the trade and all its transactions from your history and your profit/loss, as if you never logged it."
+      onConfirm=${remove} onClose=${() => setConfirm(false)} />`}
   </div>`;
 }
 
@@ -364,21 +877,70 @@ function AdjustPanel({ p, onDone }) {
     }
   };
   return html`<div class="adjust-panel">
-    <h4><${Icon} name="split" size=${15} /> ${p.symbol}: bonus shares or a split from ${fmt.date(a.ex_date)}</h4>
-    <div class="muted" style="font-size:13px">TradingView divided all past ${p.symbol} prices by ${fmt.num(a.factor, 4)}:
-      that's <b>${a.describe}</b>. Your broker should now show about <b>${fmt.int(a.shares_expected)}</b> shares instead of ${fmt.int(p.shares)}.
-      Until you confirm, this position's stop can't be checked.</div>
+    <h4><${Icon} name="split" size=${15} /> ${t('{sym}: bonus shares or a split from {date}', { sym: p.symbol, date: fmt.date(a.ex_date) })}</h4>
+    <div class="muted" style="font-size:13px">${tp("TradingView divided all past {sym} prices by {factor}: that's {what}. Your broker should now show about {n} shares instead of {old}. Until you confirm, this position's stop can't be checked.",
+      { sym: p.symbol, factor: fmt.num(a.factor, 4), what: html`<b>${tn(a.describe)}</b>`, n: html`<b>${fmt.int(a.shares_expected)}</b>`, old: fmt.int(p.shares) })}</div>
     <div class="row" style="align-items:flex-end">
       <${Field} label="Shares you hold now (check your broker)">
         <input class="input" type="number" min="1" step="1" value=${shares} onInput=${e => setShares(e.target.value)} /><//>
       <span class="preview" style="font-size:12.5px;color:var(--text-2);flex:1;min-width:220px">${n >= 1
-        ? html`Average price ${fmt.price(p.avg_price)} → <b>${fmt.price(p.avg_price / ratio)}</b>. Stop and target move by the same
-            ratio. What you paid in total doesn't change.` : 'Enter your share count.'}</span>
+        ? tp("Average price {old} → {new}. Stop and target move by the same ratio. What you paid in total doesn't change.",
+            { old: fmt.price(p.avg_price), new: html`<b>${fmt.price(p.avg_price / ratio)}</b>` }) : t('Enter your share count.')}</span>
     </div>
     <div class="row">
-      <button class="btn primary" disabled=${busy || n < 1} onClick=${() => send({ shares: n })}><${Icon} name="check" />Update position</button>
-      <button class="btn ghost" disabled=${busy} onClick=${() => send({ ignore: true })}>My shares didn't change</button>
+      <button class="btn primary" disabled=${busy || n < 1} onClick=${() => send({ shares: n })}><${Icon} name="check" />${t('Update position')}</button>
+      <button class="btn ghost" disabled=${busy} onClick=${() => send({ ignore: true })}>${t("My shares didn't change")}</button>
     </div>
+  </div>`;
+}
+
+// A rights issue: past prices were divided by the right's value. Until you subscribe or sell your rights there's
+// nothing to record (they show beside the shares, as at your broker). Subscribed: your share count and what each new
+// share cost; sold (or let lapse): what you got for them (local/engine.js newAverage).
+const RIGHTS_CHOICES = [{ value: 'hold', label: 'Still have them' }, { value: 'sub', label: 'Subscribed' },
+  { value: 'sold', label: 'Sold them' }];
+function RightsPanel({ p, onDone }) {
+  const a = p.adjust, r = p.rights;
+  const [kind, setKind] = useState('hold');
+  const [shares, setShares] = useState(String(p.shares + (r ? r.units : 0)));
+  const [paid, setPaid] = useState(r ? String(r.sub_price) : '');
+  const [got, setGot] = useState('');
+  const [busy, setBusy] = useState(false);
+  const n = parseInt(shares, 10) || 0, cost = parseFloat(paid) || 0, money = got.trim() === '' ? NaN : parseFloat(got);
+  const ok = kind === 'sub' ? n > p.shares && cost > 0 : kind === 'sold' && money >= 0;
+  const avg = !ok ? null : kind === 'sub' ? newAverage(p.avg_price, p.shares, n, a.factor, true, cost)
+    : newAverage(p.avg_price, p.shares, p.shares, a.factor, true, 0, money);
+  const send = async () => {
+    setBusy(true);
+    try {
+      const body = kind === 'sub' ? { event_id: a.event_id, shares: n, paid: cost } : { event_id: a.event_id, shares: p.shares, got: money };
+      toast((await api(`/portfolio/${p.id}/adjust`, { method: 'POST', body })).message);
+      onDone();
+      refreshAll();
+    } catch (err) {
+      toast(err.message, 'error', 10000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<div class="adjust-panel">
+    <h4><${Icon} name="split" size=${15} /> ${t('{sym}: rights issue from {date}', { sym: p.symbol, date: fmt.date(a.ex_date) })}</h4>
+    <${Seg} options=${RIGHTS_CHOICES} value=${kind} onChange=${setKind} />
+    ${kind === 'hold' ? html`<div class="muted" style="font-size:13px">${t("Nothing to record yet: your rights stay beside your shares, as at your broker, until you subscribe or sell them. Come back here when you do. Until then this position's stop can't be checked.")}</div>`
+      : html`<div class="row" style="align-items:flex-end">
+      ${kind === 'sub' ? html`<${Field} label="Shares you hold now (check your broker)">
+          <input class="input" type="number" min=${p.shares + 1} step="1" value=${shares} onInput=${e => setShares(e.target.value)} /><//>
+        <${Field} label="What each new share cost (EGP)">
+          <input class="input" type="number" min="0" step="0.001" value=${paid} onInput=${e => setPaid(e.target.value)} /><//>`
+        : html`<${Field} label="What you got for them in all (EGP, after fees; 0 if they lapsed)">
+          <input class="input" type="number" min="0" step="0.01" value=${got} onInput=${e => setGot(e.target.value)} /><//>`}
+      <span class="preview" style="font-size:12.5px;color:var(--text-2);flex:1;min-width:220px">${ok
+        ? tp('Average price {old} → {new}. Stop and target move with the prices.', { old: fmt.price(p.avg_price), new: html`<b>${fmt.price(avg)}</b>` })
+        : t(kind === 'sub' ? 'Enter your shares now (more than before) and what each new share cost.' : 'Enter what you got for your rights.')}</span>
+    </div>
+    <div class="row">
+      <button class="btn primary" disabled=${busy || !ok} onClick=${send}><${Icon} name="check" />${t('Update position')}</button>
+    </div>`}
   </div>`;
 }
 
@@ -402,24 +964,25 @@ function DividendForm({ p, onClose }) {
     }
   };
   return html`<form class="preview-box" style="margin-top:12px;gap:10px" onSubmit=${submit}>
-    <b>Cash dividend on ${p.symbol}</b>
+    <b>${t('Cash dividend on {sym}', { sym: p.symbol })}</b>
     <div class="form-grid">
-      <${Field} label="Paid on"><input class="input" type="date" value=${form.date} onInput=${set('date')} required /><//>
+      <${Field} label="Paid on"><${DateInput} weekends value=${form.date} onInput=${set('date')} /><//>
       <${Field} label="Amount received (EGP)" help="As your broker paid it, after tax.">
         <input class="input" type="number" min="0.01" step="0.01" value=${form.amount} onInput=${set('amount')} required /><//>
       <${Field} label="Note (optional)"><input class="input" value=${form.note} onInput=${set('note')} maxlength="200" /><//>
     </div>
     <div class="row">
-      <span style="flex:1">${amount > 0 ? html`${fmt.num(amount / p.shares, 3)} EGP per share on your ${fmt.int(p.shares)} shares. It adds to this position's P&L.` : ''}</span>
+      <span style="flex:1">${amount > 0 ? t("{v} EGP per share on your {n} shares. It adds to this position's profit / loss.", { v: fmt.num(amount / p.shares, 3), n: fmt.int(p.shares) }) : ''}</span>
       <button class="btn ghost sm" type="button" onClick=${onClose}>${t('Cancel')}</button>
       <button class="btn primary sm" type="submit" disabled=${busy || amount <= 0}><${Icon} name="check" />${t('Save dividend')}</button>
     </div>
   </form>`;
 }
 
-function BuyForm({ data, query }) {
+function BuyForm({ data, query, onDone }) {
   const stocks = useStore(s => s.stocks);
-  const blank = { symbol: '', date: todayISO(), price: '', shares: '', stop: '', notes: '' };
+  const lastDate = useStore(s => s.status && s.status.market && s.status.market.date);
+  const blank = { symbol: '', date: lastSession(), price: '', shares: '', stop: '', notes: '', basis: 'price', value: '', mv: '', pl: '' };
   const [form, setForm] = useState(() => ({ ...blank, symbol: query.buy || '', price: query.price || '', shares: query.shares || '' }));
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -433,24 +996,28 @@ function BuyForm({ data, query }) {
     const st = stocks && stocks.find(x => x.symbol === sym);
     setForm(f => ({ ...f, symbol: sym, price: st && st.close != null ? String(st.close) : f.price }));
   };
-  const price = parseFloat(form.price);
   const shares = parseInt(form.shares, 10);
+  const price = typedPrice(form, shares);
+  const feesIn = form.basis !== 'price';
   const stop = parseFloat(form.stop) || 0;
   const badStop = stop > 0 && price > 0 && stop >= price;
   const valid = !!form.symbol && price > 0 && shares >= 1 && !!form.date && !badStop;
   const held = data.positions.find(p => p.symbol === form.symbol);
   const signals = data.signals.map(x => x.symbol);
+  // further than a day's price limit from the last close, dated on or after it: most likely an older buy logged today
+  const st = stocks && stocks.find(x => x.symbol === form.symbol);
+  const far = st && st.close > 0 && price > 0 && lastDate && form.date >= lastDate && Math.abs(price / st.close - 1) > 0.2;
 
   let preview = null;
   if (valid) {
-    const cost = price * shares, fees = (cost * data.fee_pct) / 100;
+    const cost = price * shares, fees = feesIn ? 0 : orderFee(cost, data.fee_cfg);
     preview = html`<div class="preview-box">
-      <span>Cost <b>${fmt.egp(cost)}</b> + fees <b>${fmt.egp(fees, 2)}</b> · cash after <b class=${data.summary.cash - cost - fees < 0 ? 'down' : ''}>${fmt.egp(data.summary.cash - cost - fees)}</b></span>
+      <span>Cost <b>${fmt.egp(cost, feesIn ? 2 : 0)}</b> ${feesIn ? html`(${fmt.price(price)} ${t('a share')}) ${t('(fees already in the price)')}` : html`+ fees <b>${fmt.egp(fees, 2)}</b>`} · cash after <b class=${data.summary.cash - cost - fees < 0 ? 'down' : ''}>${fmt.egp(data.summary.cash - cost - fees)}</b></span>
       <span>${held
         ? html`Joins your ${held.symbol} position: ${fmt.int(held.shares)} → <b>${fmt.int(held.shares + shares)}</b> shares at a new average of
             <b>${fmt.price((held.avg_price * held.shares + cost) / (held.shares + shares))}</b>. Stop and target are recalculated from the average${stop ? ' (using your stop)' : ''}.`
         : stop ? html`New position with your stop at <b>${fmt.price(stop)}</b>.`
-          : 'New position. The stop is set automatically: 2× the daily range below your price, kept between 4% and 12%.'}</span></div>`;
+          : 'New position. The stop is set automatically just under the nearest support on the chart that day (4–12% below your price), or 2× the daily range when there is none; each evening it rises to the newest support.'}</span></div>`;
   }
 
   const submit = async e => {
@@ -459,11 +1026,12 @@ function BuyForm({ data, query }) {
     setBusy(true);
     try {
       const r = await api('/portfolio/buy', { method: 'POST', body: {
-        symbol: form.symbol, date: form.date, price, shares, stop: stop || null, notes: form.notes } });
+        symbol: form.symbol, date: form.date, price, shares, stop: stop || null, notes: form.notes, fees_in: feesIn } });
       toast(r.message);
       setForm(blank);
       if (query.buy) go('#/portfolio');
       refreshAll();
+      if (onDone) onDone();          // the buy box closes once the buy is saved
     } catch (err) {
       toast(err.message, 'error', 9000);
     } finally {
@@ -474,24 +1042,172 @@ function BuyForm({ data, query }) {
   return html`<form class="card" onSubmit=${submit}>
     <div class="buy-grid">
       <${Field} label="Stock"><${StockPicker} value=${form.symbol} onChange=${pick} starred=${signals}
-        placeholder="Search symbol or name…" /><//>
-      <${Field} label="Buy date"><input class="input" type="date" value=${form.date} onInput=${set('date')} required /><//>
-      <${Field} label="Price paid"><input class="input" type="number" min="0.01" step="0.01" value=${form.price}
-        onInput=${set('price')} placeholder="0.00" required /><//>
+        placeholder=${t('Search symbol or name…')} /><//>
+      <${Field} label="Buy date"><${DateInput} value=${form.date} onInput=${set('date')} /><//>
+      <${AmountField} form=${form} setForm=${setForm} />
       <${Field} label="Shares"><input class="input" type="number" min="1" step="1" value=${form.shares}
         onInput=${set('shares')} placeholder="0" required /><//>
     </div>
+    <${BasisPick} form=${form} setForm=${setForm} />
     <div class="buy-grid-2">
       <${Field} label="Stop-loss (optional)" error=${badStop ? 'Must be below the price you paid' : null}
         help="Leave empty to use the agent's rule."><input class=${cls('input', badStop && 'invalid')} type="number" min="0"
-        step="0.01" value=${form.stop} onInput=${set('stop')} placeholder="automatic" /><//>
+        step="0.01" value=${form.stop} onInput=${set('stop')} placeholder=${t('automatic')} /><//>
       <${Field} label="Notes (optional)"><input class="input" value=${form.notes} onInput=${set('notes')} maxlength="500" /><//>
     </div>
+    ${far && html`<div style="margin-top:12px"><${Callout} tone="warn">${t('{sym} closed at {close} on {date}, so {price} is far from what it traded at then. If you bought earlier, set the real buy date: the stop, the day count and the exit rules start from it.', {
+      sym: form.symbol, close: fmt.price(st.close), date: fmt.date(lastDate), price: fmt.price(price) })}<//></div>`}
     <div class="form-foot">
-      <div style="flex:1;min-width:260px">${preview || html`<span class="faint" style="font-size:12.5px">⭐ = today's BUY signals.
-        Buying more of a stock you already hold adds the shares to that position at the average price, and the 1-month
-        limit keeps counting from your first buy.</span>`}</div>
+      <div style="flex:1;min-width:260px">${preview || html`<span class="faint" style="font-size:12.5px">${t("⭐ = today's BUY signals. Buying more of a stock you already hold adds the shares to that position at the average price, and the 1-month limit keeps counting from your first buy.")}</span>`}</div>
       <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="plus" />${t('Save buy')}</button>
     </div>
   </form>`;
+}
+
+// ------------------------------------------------------------------ holdings from a broker screenshot
+// The site's bot reads the picture with Cloudflare's free AI (worker/bot.js read, local/api.js readScreenshot); you
+// check every row here before anything is added, and each row is logged like a buy on the form above.
+const plainName = x => String(x || '').toLowerCase().replace(/[ً-ٰٟـ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي')
+  .replace(/ة/g, 'ه').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+// A smaller JPEG of the picture (the site's page rules allow data: pictures, not blob: ones).
+function shrink(file, most = 1600) {
+  return new Promise((resolve, reject) => {
+    const fail = () => reject(new Error(t("That file isn't a picture this browser can open.")));
+    const reader = new FileReader();
+    reader.onerror = fail;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = fail;
+      img.onload = () => {
+        const k = Math.min(1, most / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL('image/jpeg', 0.88));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function matchStock(stocks, h) {
+  if (h.symbol && stocks.some(s => s.symbol === h.symbol)) return h.symbol;
+  const name = plainName(h.name);
+  if (name.length >= 3) {
+    const hit = stocks.find(s => { const n = plainName(s.name_ar); return n && (n.includes(name) || name.includes(n)); });
+    if (hit) return hit.symbol;
+  }
+  return h.symbol || '';
+}
+
+// A stock you already hold, checked by what you paid, fees in: the picture's market value − profit/loss (exact,
+// whatever the price did since) against this site's average × shares + buy fees (the bot's check, worker/bot.js).
+function HeldCheck({ r, p }) {
+  const here = p.avg_price * p.shares + (p.fees || 0);
+  return Math.abs(r.cost - here) <= Math.max(3, here * 1e-4)
+    ? html`<span class="up">${t('Already in My Portfolio, and it matches: you paid {v} EGP, fees in.', { v: fmt.int(here) })}</span>`
+    : html`<span class="warn">${t('Already in My Portfolio: you paid {a} EGP on the picture, {b} EGP here. Fix it with Sell or edit.', { a: fmt.int(r.cost), b: fmt.int(here) })}</span>`;
+}
+
+function ImportPanel({ data }) {
+  const stocks = useStore(s => s.stocks) || [];
+  const [linked, setLinked] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState(null);
+  useEffect(() => { import('../local/api.js').then(m => setLinked(m.botStatus() === 'linked')); }, []);
+  if (linked === null) return null;
+  if (!linked) {
+    return html`<p class="muted" style="font-size:13px">${t('Connect Telegram first (Settings → Connect Telegram): the site\'s bot reads the picture with Cloudflare\'s free AI. The picture isn\'t kept.')}
+      ${' '}<a href="#/settings">${t('Settings →')}</a></p>`;
+  }
+  const held = sym => data.positions.find(p => p.symbol === sym);
+  const known = sym => stocks.some(s => s.symbol === sym);
+  const pickFile = async e => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true); setRows(null);
+    try {
+      const m = await import('../local/api.js');
+      const got = await m.readScreenshot(await shrink(file));
+      const syms = got.holdings.map(h => matchStock(stocks, h));
+      const ask = [...new Set(syms.filter(known))].join(',');
+      const q = ask ? await api(`/quotes?s=${encodeURIComponent(ask)}`).catch(() => ({})) : {};
+      const now = sym => (q[sym] && q[sym].price) || (stocks.find(s => s.symbol === sym) || {}).close;
+      setRows(got.holdings.map((h, i) => {
+        const symbol = syms[i];
+        // Market value − profit/loss is exactly what you paid, fees in (Thndr's own sum); with no share count on the
+        // picture (Thndr's list of stocks), the shares are the market value ÷ the price now.
+        const cost = h.value && h.pnl != null && h.value - h.pnl > 0 ? h.value - h.pnl : null;
+        const shares = h.shares || (cost && now(symbol) ? Math.round(h.value / now(symbol)) : null);
+        const price = cost && shares ? cost / shares : h.avg_price || h.last;
+        return { id: i, symbol, name: h.name || '', shares: String(shares || ''), price: price ? String(+price.toFixed(4)) : '',
+          cost, value: h.value, pnl: h.pnl, est: !h.shares && !!shares, at: now(symbol), date: lastSession(),
+          guessed: !cost && !h.avg_price, on: known(symbol) && !held(symbol) && !!(cost || h.avg_price) };
+      }));
+    } catch (err) {
+      toast(t(err.message), 'error', 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const edit = (id, k) => e => setRows(rs => rs.map(r => {
+    if (r.id !== id) return r;
+    const v = k === 'on' ? e.target.checked : k === 'symbol' ? e.target.value.toUpperCase().trim() : e.target.value;
+    const n = parseInt(v, 10);         // fewer or more shares for the same total paid: the average follows
+    return { ...r, [k]: v, ...(k === 'shares' ? { est: false } : {}),
+      ...(k === 'shares' && r.cost && n >= 1 ? { price: String(+(r.cost / n).toFixed(4)) } : {}) };
+  }));
+  const ok = r => known(r.symbol) && parseInt(r.shares, 10) >= 1 && parseFloat(r.price) > 0;
+  const chosen = (rows || []).filter(r => r.on && ok(r));
+  const add = async () => {
+    setBusy(true);
+    let done = 0;
+    for (const r of chosen) {
+      try {
+        await api('/portfolio/buy', { method: 'POST', body: { symbol: r.symbol, date: r.date, price: parseFloat(r.price),
+          shares: parseInt(r.shares, 10), stop: null, notes: t('Added from a screenshot'), fees_in: !r.guessed } });
+        done += 1;
+        setRows(rs => rs.filter(x => x.id !== r.id));
+      } catch (err) {
+        toast(`${r.symbol}: ${err.message}`, 'error', 9000);
+      }
+    }
+    setBusy(false);
+    setRows(rs => (rs && rs.length ? rs : null));          // all added: back to the button
+    if (done) { toast(t('Added {n} to My Portfolio.', { n: done })); refreshAll(); }
+  };
+  return html`<div class="import-panel">
+    <p class="muted" style="font-size:13px">${t('Take a screenshot of your holdings in your broker\'s app (Thndr\'s home screen with all your stocks works) and pick it here. The bot reads every stock on it with Cloudflare\'s free AI (about 15 seconds): each one\'s market value and profit/loss give what you paid, fees in. The picture isn\'t kept. Check every number before adding: the reader can misread.')}</p>
+    <label class=${cls('btn', busy && 'disabled')} style="margin-top:10px"><${Icon} name="plus" />
+      ${busy && !rows ? t('Reading the picture…') : t('Pick a screenshot')}
+      <input type="file" accept="image/*" hidden disabled=${busy} onChange=${pickFile} /></label>
+    ${rows && (rows.length ? html`
+      <div class="table-wrap" style="margin-top:12px"><table class="table import-table">
+        <thead><tr><th></th><th>${t('Stock')}</th><th class="r">${t('Shares')}</th><th class="r">${t('Average cost')}</th></tr></thead>
+        <tbody>${rows.map(r => html`<tr key=${r.id} class="import-row">
+          <td><input type="checkbox" checked=${r.on} disabled=${!ok(r)} onChange=${edit(r.id, 'on')}
+            aria-label=${t('Add {sym}', { sym: r.symbol || r.name })} /></td>
+          <td><input class="input sm" value=${r.symbol} onInput=${edit(r.id, 'symbol')} style="width:76px" />
+            ${r.name && html`<div class="faint" style="font-size:11.5px" dir="auto">${r.name}</div>`}</td>
+          <td class="r"><input class="input sm" type="number" min="1" step="1" value=${r.shares} onInput=${edit(r.id, 'shares')} style="width:80px" /></td>
+          <td class="r"><input class="input sm" type="number" min="0.001" step="any" value=${r.price} onInput=${edit(r.id, 'price')} style="width:86px" />
+            ${r.cost && html`<div class="faint" dir="auto" style="font-size:11.5px;white-space:nowrap">${t('{v} worth', { v: fmt.int(r.value) })}${' · '}<span class="num">${r.pnl >= 0 ? '+' : '−'}${fmt.int(Math.abs(r.pnl))}</span></div>`}</td>
+          </tr><tr key=${`${r.id}n`} class="import-note"><td></td><td colspan="3" style="font-size:12px">
+            ${r.on && html`<div class="import-date"><span class="muted">${t('Bought on')}</span>
+              <${DateInput} small value=${r.date} onInput=${edit(r.id, 'date')} /></div>`}
+            ${!known(r.symbol) ? html`<span class="warn">${t("Not an EGX symbol the agent knows: type it.")}</span>`
+            : held(r.symbol) && r.cost ? html`<${HeldCheck} r=${r} p=${held(r.symbol)} />`
+            : held(r.symbol) ? html`<span class="warn">${t('Already in My Portfolio ({n} shares): adding joins it.', { n: fmt.int(held(r.symbol).shares) })}</span>`
+            : r.guessed ? html`<span class="warn">${t('No average price on the picture: this is the last price. Type what you paid.')}</span>`
+            : r.est ? html`<span class="warn">${t('Shares worked out from the market value ÷ the price now ({p}): check the units in your broker\'s app.', { p: fmt.price(r.at) })}</span>`
+            : html`<span class="faint">${t('New position')}</span>`}</td></tr>`)}</tbody></table></div>
+      <div class="row" style="margin-top:12px;gap:12px;flex-wrap:wrap;align-items:center">
+        <span class="faint" style="flex:1;min-width:220px;font-size:12.5px">${t("Each stock's date sets its stop and target from the chart on that day: change it if you bought earlier.")}</span>
+        <button class="btn primary" disabled=${busy || !chosen.length} onClick=${add}>
+          ${t('Add {n} to My Portfolio', { n: chosen.length })}</button>
+      </div>` : html`<p class="muted" style="margin-top:12px;font-size:13px">${t('No holdings found on that picture. Try a screenshot of the portfolio screen itself.')}</p>`)}
+  </div>`;
 }

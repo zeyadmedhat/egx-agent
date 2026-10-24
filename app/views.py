@@ -5,18 +5,19 @@ import json
 import math
 import sqlite3
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
 
-from egx_agent import breadth, config, corporate, db, portfolio, predict, risk, scan, strategy
-from egx_agent.data import dividends, news, prices, shariah, universe
+from egx_agent import (ai_forecast, breadth, config, corporate, db, holidays, levels, mood, portfolio, predict, ranges,
+                       record, risk, scan, strategy)
+from egx_agent.data import dividends, flows, fundamentals, macro, news, ownership, prices, shariah, universe
 from egx_agent.indicators import add_indicators
 
-EGX_DAY = pd.offsets.CustomBusinessDay(weekmask="Sun Mon Tue Wed Thu")
-STATUS_ORDER = {"ADJUST": 0, "EXIT": 1, "REVIEW": 2, "TIGHTEN STOP": 3, "HOLD": 4, "NO DATA": 5}
-ACTION_STATUSES = ("ADJUST", "EXIT", "REVIEW", "TIGHTEN STOP")
+STATUS_ORDER = {"ADJUST": 0, "EXIT": 1, "BOUNCE": 2, "REVIEW": 3, "TIGHTEN STOP": 4, "HOLD": 5, "NO DATA": 6}
+ACTION_STATUSES = ("ADJUST", "EXIT", "BOUNCE", "REVIEW", "TIGHTEN STOP")
 SELL_REASONS = ["Stop-loss", "Target reached", "Time limit", "Trend break", "Taking partial profit",
                 "Other / my decision"]
 INFO_FIELDS = ("symbol", "name_ar", "sector", "egx30", "egx70", "egx33", "kashif_status", "kashif_label", "purity",
@@ -64,9 +65,7 @@ def column(s: pd.Series, digits: int = 4) -> list:
     return clean(s.round(digits).astype(object).where(s.notna(), None).tolist())
 
 
-def sessions_after(day: str, n: int) -> str:
-    """Date n EGX sessions after `day` (Sunday–Thursday calendar; public holidays not included)."""
-    return str((pd.Timestamp(day) + n * EGX_DAY).date())
+sessions_after = holidays.sessions_after     # date n EGX sessions after a day, the announced holidays skipped
 
 
 def px(v) -> str:
@@ -206,6 +205,40 @@ def stocks_list(d: Data) -> list[dict]:
     return out
 
 
+def rights_list(d: Data, today: str | None = None) -> list[dict]:
+    """Rights issues with their own symbol on the Stocks page (KORA_r1, like your broker's), from the ex-date until
+    about three months after the subscription closes, when the new shares are listed and the rights go."""
+    today = today or date.today().isoformat()
+    out = []
+    for e in corporate.events(d.conn):
+        t = e["terms"]
+        if not t or not t.get("schedule") or not e["ex_date"] <= today <= \
+                (date.fromisoformat(t["schedule"][-1][0]) + timedelta(days=92)).isoformat():
+            continue
+        at = {x[2]: x[0] for x in t["schedule"]}
+        start, end = at.get("Rights trading starts"), at.get("Rights trading ends")
+        trading = {}
+        if start and end:     # the rights' chart (pages/rights.js): their whole trading period, laid out ahead
+            q = "SELECT date, open, high, low, close FROM {} WHERE symbol=? AND date BETWEEN ? AND ? ORDER BY date"
+            trading = {"days": [x.date().isoformat() for x in pd.date_range(start, end, freq=holidays.session_day())],
+                       "bars": [dict(r) for r in d.conn.execute(q.format("rights_prices"), (f"{e['symbol']}_r1", start, end))],
+                       "share": [{"date": r["date"], "close": r["close"]}
+                                 for r in d.conn.execute(q.format("prices"), (e["symbol"], start, end))]}
+        out.append({"symbol": f"{e['symbol']}_r1", "base": e["symbol"], "ex_date": e["ex_date"],
+                    "name_ar": d.info(e["symbol"]).get("name_ar"), "close": (t["last"] or {}).get("close", t["ref"]), "change": (t["last"] or {}).get("change"), **t,
+                    "trading": trading})
+    return out
+
+
+def rights_past(d: Data) -> list[dict]:
+    """Every past rights issue for the top search (pages/rights.js PastRights opens #/stock/SVCE_r1?ex=...)."""
+    def build():
+        study = corporate.rights_study(d.conn) or {"past": []}
+        return [{"symbol": f"{p['symbol']}_r1", "base": p["symbol"], "ex": p["ex"],
+                 "name_ar": d.info(p["symbol"]).get("name_ar")} for p in study["past"]]
+    return d.cache.get(d.version, ("rights_past",), build)
+
+
 def signals(d: Data) -> tuple[str | None, list[dict]]:
     """The latest scan's signals for this person: their Shariah filter applied and BUYs sized for their account.
 
@@ -242,10 +275,25 @@ def signal_order(r: dict) -> tuple:
     return -(p if p is not None else -1.0), -(r.get("score") or 0)
 
 
+def adjust_reason(ev: dict, rights: dict | None = None) -> str:
+    """Why a position waits for its new share count (local/api.js says the same)."""
+    if rights:
+        return (f"Rights issue from {nice_date(ev['ex_date'])}: you also hold {rights['units']:,} rights "
+                f"({rights['symbol']}). Once you've subscribed or sold them, record it here so the stop and P&L stay right.")
+    if ev.get("rights"):
+        return (f"Rights issue from {nice_date(ev['ex_date'])}: past prices ÷ {ev['factor']:.4g}. Once you've "
+                "subscribed or sold your rights, enter the shares you hold now so the stop and P&L stay right.")
+    return (f"Bonus shares or split from {nice_date(ev['ex_date'])}: {ev['describe']}. "
+            "Enter the shares you hold now so the stop and P&L stay right.")
+
+
 def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
-    fee = d.cfg["fee_pct_per_side"] / 100
     pending = corporate.pending(d.conn, "real")
+    events = corporate.events(d.conn)
     dividends = corporate.dividends_by_trade(d.conn, "real")
+    # a big loss's averaging-down rule: only when the stock earns a buy on its own (a BUY signal or a top-10% rating)
+    buys = {x["symbol"] for x in signals(d)[1] if x["action"] == "BUY"}
+    preds = predictions(d)["by_symbol"]
     out = []
     for _, r in portfolio.trades_df(d.conn, "real", ("open",)).iterrows():
         if symbol and r.symbol != symbol:
@@ -253,14 +301,15 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
         ind = d.indicators(r.symbol)
         ev = pending.get(int(r.id))
         factor = 1.0
+        rights = corporate.rights_holding(ev, int(r.shares))
         if ev:
             # Past prices were re-based after this buy, so the exit rules can't be checked until the share
-            # count is updated. Value the old share count at the new price × the ratio meanwhile.
-            factor = ev["factor"]
-            last = float(ind["close"].iloc[-1]) if len(ind) else float(r.entry_price) / factor
+            # count is updated. Value the old share count at the new price × the ratio meanwhile, or after a rights
+            # issue, the shares at the new price and the rights beside them, as your broker does.
+            factor = 1.0 if rights else ev["factor"]
+            last = float(ind["close"].iloc[-1]) if len(ind) else float(r.entry_price) / ev["factor"]
             stt = {"status": "ADJUST", "stop": None, "days_held": int((ind.index >= pd.Timestamp(r.entry_date)).sum()),
-                   "reason": f"Bonus shares or split from {nice_date(ev['ex_date'])}: {ev['describe']}. "
-                             "Enter the shares you hold now so the stop and P&L stay right."}
+                   "reason": adjust_reason(ev, rights)}
         else:
             stt = portfolio.real_status(r, ind, d.cfg)
             last = stt.get("last_close") or float(r.entry_price)
@@ -277,14 +326,58 @@ def open_positions(d: Data, symbol: str | None = None) -> list[dict]:
             "id": int(r.id), "symbol": r.symbol, "info": d.info(r.symbol), "status": stt["status"],
             "reason": stt["reason"], "first_buy": r.entry_date, "avg_price": float(r.entry_price),
             "shares": int(r.shares), "last": last, "value": worth * int(r.shares),
-            "pnl_pct": worth / float(r.entry_price) - 1,
-            "pnl": (worth - r.entry_price) * r.shares - fees - worth * r.shares * fee + div,
+            # like your broker: against what you paid with the buy fees; selling fees count once you sell
+            "pnl_pct": ((worth - r.entry_price) * r.shares - fees) / (r.entry_price * r.shares + fees),
+            "pnl": (worth - r.entry_price) * r.shares - fees + div,
             "stop": stt["stop"], "prev_stop": stt.get("prev_stop"), "initial_stop": float(r.initial_stop),
-            "target": float(r.target), "day": int(stt["days_held"]),
+            "bounce_level": stt.get("bounce_level"), "bounce_by": stt.get("bounce_by"),
+            "buy_signal": r.symbol in buys, "top_pick": bool((preds.get(r.symbol) or {}).get("top10")),
+            # how far under its 3-month high: after a 50%+ fall even the model's top ratings did worse (2026-10)
+            "from_high": last / float(ind["close"].tail(60).max()) - 1 if len(ind) else None,
+            "target": float(r.target), "day": int(stt["days_held"]), "stops_mine": d.cfg.get("stop_moves") == "mine",
             "sell_by": sessions_after(r.entry_date, d.cfg["max_hold_days"] - 1),
-            "fees": fees, "dividends": div, "notes": r.notes or "", "fills": fills, "adjust": ev,
+            "fees": fees, "dividends": div, "notes": r.notes or "", "fills": fills, "adjust": ev, "rights": rights,
             "n_buys": sum(1 for f in fills if f["side"] == "buy") or 1,
+            "real": corporate.real_cost(fills, int(r.shares), float(r.entry_price), fees, worth, d.cfg, rights,
+                                        events, r.symbol),
         })
+    out.sort(key=lambda p: (STATUS_ORDER.get(p["status"], 9), p["symbol"]))
+    return clean(out)
+
+
+def book_positions(d: Data, book: dict) -> list[dict]:
+    """A website friend's open positions, from the record their browser keeps (synced through the Telegram bot), with
+    what the exit rules say at the last close: what open_positions gives for yours, as the site works it out
+    (app/static/js/local/api.js). Enough for orders(): the evening message tells them what to do."""
+    done = {(a.get("event_id"), a.get("trade_id")) for a in book.get("adjustments") or [] if isinstance(a, dict)}
+    events = corporate.events(d.conn)
+    out = []
+    for t in book.get("trades") or []:
+        if not isinstance(t, dict) or t.get("account") != "real" or t.get("status") != "open":
+            continue
+        try:
+            sym, shares, entry = str(t["symbol"]), int(t["shares"]), float(t["entry_price"])
+            row = pd.Series({**t, "initial_stop": float(t["initial_stop"]), "target": float(t["target"])})
+        except (KeyError, TypeError, ValueError):
+            continue            # an incomplete record: the site shows it, the message skips it
+        ind = d.indicators(sym)
+        since = str(t.get("entry_date") or t.get("signal_date") or "")
+        ev = next((e for e in events if e["symbol"] == sym and since < e["ex_date"] and (e["id"], t.get("id")) not in done),
+                  None)
+        rights = None
+        if ev:
+            ev = {**ev, "describe": corporate.what(ev["factor"], ev["rights"])}
+            rights = corporate.rights_holding(ev, shares)
+            last = float(ind["close"].iloc[-1]) if len(ind) else entry / ev["factor"]
+            stt = {"status": "ADJUST", "stop": None, "days_held": int((ind.index >= pd.Timestamp(since)).sum()),
+                   "reason": adjust_reason(ev, rights)}
+        else:
+            stt = portfolio.real_status(row, ind, d.cfg)
+            last = stt.get("last_close") or entry
+        out.append({"id": t.get("id"), "symbol": sym, "status": stt["status"], "reason": stt["reason"], "shares": shares,
+                    "avg_price": entry, "last": last, "stop": stt["stop"], "prev_stop": stt.get("prev_stop"),
+                    "bounce_level": stt.get("bounce_level"), "bounce_by": stt.get("bounce_by"),
+                    "target": float(row["target"]), "day": int(stt["days_held"]), "adjust": ev, "rights": rights})
     out.sort(key=lambda p: (STATUS_ORDER.get(p["status"], 9), p["symbol"]))
     return clean(out)
 
@@ -296,11 +389,22 @@ def status(d: Data) -> dict:
     mine = {"buys": sum(1 for r in sig if r["action"] == "BUY")}
     return {
         "version": d.version,
-        "market": {**{k: m.get(k) for k in ("date", "egx30_close", "egx30_change", "egx30_ema50", "risk_off",
+        "market": {**{k: m.get(k) for k in ("date", "egx30_close", "egx30_change", "egx30_ema50", "risk_off", "weak_breadth",
                                             "watches", "finished")}, **mine} if m else None,
         "alerts": sum(1 for p in positions if p["status"] in ACTION_STATUSES),
         "positions": len(positions),
+        "holidays": {h["date"]: h["title"] for h in holidays.upcoming()},
     }
+
+
+def best_entry(d: Data, sym: str) -> dict | None:
+    """The best way in besides today's price (the stock page's Where to buy it): the dip or breakout (levels.entries)
+    with the most reward for the risk, or None."""
+    ind = d.indicators(sym)
+    if len(ind) < 60:
+        return None
+    ents = levels.entries(ind, d.cfg, levels.plan_at(ind, d.cfg))
+    return max(ents, key=lambda e: e["rr"]) if ents else None
 
 
 def today(d: Data) -> dict:
@@ -310,18 +414,24 @@ def today(d: Data) -> dict:
     buys, watch = [], []
     preds = predictions(d)
     warn = cautions_map(d)
+    firms = company_brief(d)
+    floats = free_floats(d)
     for r in [dict(x) for x in rows]:
         r["info"] = d.info(r["symbol"])
+        r["free_float"] = floats.get(r["symbol"])
         r["pred"] = preds["by_symbol"].get(r["symbol"])
         r["cautions"] = warn.get(r["symbol"], [])
+        r["co"] = firms.get(r["symbol"])
         if r["action"] == "BUY":
             r["sell_by"] = sessions_after(scan_date, cfg["max_hold_days"])
+            r["range"] = range_view(d, r["symbol"])     # the chance its target and stop trade within a month
             buys.append(r)
-        else:
+        elif shariah.passes_filter(r["info"], cfg["shariah_filter"]):   # close to a BUY: only what your filter allows
             px = d.prices(r["symbol"])
             trigger = float(px["high"].tail(20).max()) if len(px) else None
             r["trigger"] = trigger
             r["to_trigger"] = trigger / r["close"] - 1 if trigger and r["close"] else None
+            r["best_in"] = best_entry(d, r["symbol"])
             watch.append(r)
     idx = d.indicators(prices.INDEX_SYMBOL)
     spark = None
@@ -336,14 +446,22 @@ def today(d: Data) -> dict:
     return clean({
         "market": {**m, "buys": len(buys)} if m else None, "scan_date": scan_date, "buys": buys, "watch": watch,
         "positions": positions, "spark": spark, "orders": orders(d, positions),
+        "changes": stock_changes(d, [p["symbol"] for p in positions]),
         "breadth": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
-                    **breadth.verdict(b, m.get("risk_off") if m else None)} if b else None,
+                    **breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None)} if b else None,
+        "mood": mood_brief(d),
         "paper": {"equity": paper["equity"], "return_pct": paper["return_pct"], "open": paper["open_count"],
                   "last_scan": json.loads(paper_scan) if paper_scan else None},
         "model": {k: preds[k] for k in ("base", "count", "date")} if preds["by_symbol"] else None,
-        "cfg": {k: cfg[k] for k in ("max_hold_days", "review_day", "riskoff_block_buys", "auto_paper", "buy_score",
-                                    "shariah_filter")},
+        "cfg": {**{k: cfg[k] for k in ("max_hold_days", "review_day", "riskoff_block_buys", "auto_paper", "buy_score",
+                                       "shariah_filter")}, "fee_pct_per_side": config.fee_pct(cfg)},
+        "record": signal_record(d), "odds": record.public_odds(record.stored_odds(d.conn)),
     })
+
+
+def signal_record(d: Data) -> dict:
+    """Every BUY the agent published and how it went (egx_agent/record.py), the same for everyone."""
+    return d.cache.get(d.version, ("record",), lambda: record.signal_record(d.conn, d.cfg, d.indicators))
 
 
 def corporate_history(conn: sqlite3.Connection, sym: str, close: float) -> dict:
@@ -368,7 +486,6 @@ def corporate_history(conn: sqlite3.Connection, sym: str, close: float) -> dict:
 
 
 EVENT_KINDS = ("dividend", "bonus", "split", "rights", "placement", "treasury_buy", "consolidation", "reduction")
-HOLD_CALENDAR_DAYS = 30       # about 20 sessions: the longest a trade is held
 
 
 def cautions_map(d: Data) -> dict[str, list[dict]]:
@@ -381,13 +498,14 @@ def cautions_map(d: Data) -> dict[str, list[dict]]:
             "SELECT symbol, MIN(ex_date) AS ex_date, amount FROM cash_dividends WHERE ex_date > ? GROUP BY symbol",
             (today,))}
         results = dividends.next_results(d.conn, today)
+        hold_days = round(d.cfg["max_hold_days"] * 7 / 5) + 1      # the longest a trade is held, in calendar days
         since = (date.fromisoformat(today) - pd.Timedelta(days=7)).isoformat()
         maybe = {r[0] for r in d.conn.execute(
             "SELECT symbol FROM corp_actions WHERE effective > ? UNION SELECT symbol FROM news "
             "WHERE symbol != '' AND tone < 0 AND published >= ?", (today, since))} | set(nxt) | set(results)
         out = {}
         for sym in sorted(maybe & set(d.table.index)):
-            c = news.cautions(d.conn, sym, today, HOLD_CALENDAR_DAYS, div=nxt.get(sym), results=results.get(sym))
+            c = news.cautions(d.conn, sym, today, hold_days, div=nxt.get(sym), results=results.get(sym))
             if c:
                 out[sym] = c
         return out
@@ -416,6 +534,95 @@ def news_view(d: Data) -> dict:
     return {**news_feed(d), "held": sorted({p["symbol"] for p in open_positions(d)}), "watchlist": watchlist(d)}
 
 
+def ai_record(d: Data) -> pd.DataFrame:
+    """Every finished AI forecast with what happened (ai_forecast.record), once a build."""
+    return d.cache.get(d.version, ("ai_record",), lambda: ai_forecast.record(d.conn))
+
+
+def ai_grades(d: Data) -> dict:
+    """How each model and their middle did on every stock, by sessions ahead: {"5": {"middle": grade, ...}}."""
+    def build():
+        rec = ai_record(d)
+        return {str(k): {m: ai_forecast.grade(g) for m, g in rec[rec["step"] == k].groupby("model")}
+                for k in ai_forecast.STEPS}
+    return d.cache.get(d.version, ("ai_grades",), build)
+
+
+AI_RESETS = ("rights", "bonus", "split", "consolidation")
+
+
+def ai_view(d: Data, sym: str, close: pd.Series) -> dict | None:
+    """The stock page's "What the AI models forecast": each model's latest 20-session path from the close it ran
+    after, by 1, 5 and 20 sessions ahead: the middle and the spread of the models, how many point each way, how big the
+    move is for this stock (score: 100 when all agree and the middle moves at least a usual amount), and how the
+    middle's earlier forecasts here and on every stock did against what happened and against "no change"."""
+    rows = d.conn.execute("SELECT model, made, path FROM ai_paths WHERE symbol=?", (sym,)).fetchall()
+    close = pd.Series(close.to_numpy(float), index=[str(t.date()) for t in close.index])
+    made = max((r["made"] for r in rows), default=None)
+    if made is None or not (close.index <= made).any():
+        return None
+    paths = {r["model"]: json.loads(r["path"]) for r in rows if r["made"] == made}
+    start_date = close.index[close.index <= made][-1]            # its last close then (made, unless it didn't trade)
+    start = float(close[start_date])
+    rec = ai_record(d)
+    mine = rec[(rec["symbol"] == sym) & (rec["model"] == "middle")]
+    earlier = pd.read_sql_query("SELECT made, p1, p5, p20 FROM ai_forecasts WHERE symbol=? AND made<?", d.conn,
+                                params=(sym, made)).groupby("made").median().tail(8)
+    grades = ai_grades(d)
+    # bonus shares, a split or a rights issue going ex after the last close: that day the price is reset for the new
+    # shares, which the models can't know (afterwards their forecasts move to the new prices: db.add_price_event)
+    last = close.index[-1]
+    resets = sorted((a for a in news.actions(d.conn, sym, since=last, kinds=AI_RESETS) if a["effective"] > last),
+                    key=lambda a: a["effective"])
+    steps = {}
+    for k in ai_forecast.STEPS:
+        vals = {m: p[k - 1] for m, p in paths.items()}
+        mid = float(np.median(list(vals.values())))
+        up = sum(v > start * 1.0001 for v in vals.values())      # saved to 5 digits: a hair isn't a move
+        down = sum(v < start * 0.9999 for v in vals.values())
+        moves = (close / close.shift(k) - 1).abs().tail(250).dropna()
+        typical = float(moves.median()) if len(moves) >= 40 else None
+        agree = max(0.0, 2 * max(up, down) / len(vals) - 1)     # all one way: 1; split evenly: 0
+        size = min(1.0, abs(mid / start - 1) / typical) if typical else 0.0
+        done = mine[mine["step"] == k].set_index("made")
+        past = []
+        for m, v in earlier[f"p{k}"].dropna().items():
+            target = done["target"].get(m) or holidays.sessions_after(m, k)
+            past.append({"made": m, "target": target, "start": _num(close[close.index <= m].iloc[-1]), "value": float(v),
+                         "actual": _num(done["actual"].get(m))})
+        target = holidays.sessions_after(made, k)
+        reset = next(({"kind": a["kind"], "date": a["effective"]} for a in resets if a["effective"] <= target), None)
+        steps[str(k)] = {"target": target, "reset": reset, "values": vals, "mid": mid,
+                         "lo": min(vals.values()), "hi": max(vals.values()), "up": up, "down": down,
+                         "typical": typical, "score": round(100 * agree * size),
+                         "record": ai_forecast.grade(done.reset_index()), "all": grades.get(str(k), {}), "past": past}
+    shown = close.tail(61)                     # 40 sessions before the start and any since
+    return {"made": made, "start": start, "start_date": start_date, "models": [{"key": m, "name": n, "lab": lab}
+                                                       for m, (n, lab) in ai_forecast.MODELS.items() if m in paths],
+            "paths": paths, "steps": steps, "closes": {"time": list(shown.index), "close": column(shown)},
+            "tested": ai_forecast.TESTED}
+
+
+def range_view(d: Data, sym: str) -> dict | None:
+    """The stock page's "How far it could move" (egx_agent/ranges.py, every stock once a build): its 5- and
+    20-session ranges and price ladders, how its and every stock's ranges of the last year did, and the replay."""
+    r = d.cache.get(d.version, ("ranges",), lambda: ranges.build(d.conn))
+    mine = r["stocks"].get(sym)
+    if not mine:
+        return None
+    # a rights issue, bonus shares or a split going ex inside a window resets the price that day: the range is in
+    # today's prices, so the page says so instead of showing it (as the AI card; such windows aren't in the record)
+    resets = sorted((a for a in news.actions(d.conn, sym, since=mine["made"], kinds=AI_RESETS) if a["effective"] > mine["made"]),
+                    key=lambda a: a["effective"])
+    steps = {k: {**s, "reset": next(({"kind": a["kind"], "date": a["effective"]} for a in resets
+                                     if a["effective"] <= s["target"]), None)} for k, s in mine["steps"].items()}
+    return {**mine, "steps": steps, "all": r["all"], "tested": ranges.TESTED}
+
+
+def _num(v) -> float | None:
+    return None if v is None or not np.isfinite(v) else float(v)
+
+
 def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail: int | None = None) -> dict:
     """The parts of a stock's page that are the same for everyone: facts, chart, rule checklist, the model.
 
@@ -439,24 +646,42 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
         "index_ret63": last.index_ret63, "last_bar": str(ind.index[-1].date()),
         "high52": year["high"].max(), "low52": year["low"].min(), "volume": last.volume, "vol_ratio": last.vol_ratio,
     }
-    sf = strategy.signal_frame(ind, cfg).iloc[-1]
+    sf = levels.apply(ind, strategy.signal_frame(ind, cfg), cfg).iloc[-1]
     # the agent's usual plan if bought at the next open: what the size calculator starts from
     out["plan"] = {"stop": sf.stop, "target": sf.target, "atr": last.atr14}
+    # stop-loss and target from the chart's support and resistance, with the levels behind them (every stock)
+    out["chart"] = levels.plan_at(ind, cfg)
+    out["entries"] = levels.entries(ind, cfg, out["chart"])   # buying on a dip to support or on a breakout instead
+    k = rule_checks(ind, cfg, sf)
     out["checklist"] = [   # shown when the stock has no signal today
-        {"ok": sf.eligible, "text": f"Liquid & clean data (≥ {cfg['min_avg_value_egp'] / 1e6:g}M EGP/day, "
-                                     f"≥ {cfg['min_history_bars']} days of history)"},
-        {"ok": sf.trend_ok, "text": "Uptrend: price above its 20- and 50-day averages"},
-        {"ok": last.close > last.high20_prev,
-         "text": f"Breakout: close above the 20-day high ({last.high20_prev:.2f})"},
-        {"ok": last.vol_ratio >= 1.5, "text": f"Volume ≥ 1.5× normal (last session {last.vol_ratio:.1f}×)"},
-        {"ok": last.adx14 > 20, "text": f"Trend strength ADX > 20 (now {last.adx14:.0f})"},
+        {"ok": k["liquid"], "text": f"Liquid & clean data (≥ {cfg['min_avg_value_egp'] / 1e6:g}M EGP/day, "
+                                    f"≥ {cfg['min_history_bars']} days of history)"},
+        {"ok": k["trend"], "text": "Uptrend: price above its 20- and 50-day averages"},
+        {"ok": k["breakout"], "text": f"Breakout: close above the 20-day high ({k['high20']:.2f})"},
+        {"ok": k["volume"], "text": f"Volume ≥ 1.5× normal (last session {k['vol_ratio']:.1f}×)"},
+        {"ok": k["adx"], "text": f"Trend strength ADX > 20 (now {k['adx14']:.0f})"},
     ]
     preds = predictions(d)
     if sym in preds["by_symbol"]:
-        out["prediction"] = {**preds["by_symbol"][sym], **{k: preds.get(k) for k in ("base", "count", "date", "top_n")}}
+        out["prediction"] = {**preds["by_symbol"][sym],
+                             **{k: preds.get(k) for k in ("base", "count", "date", "top_n", "bands")}}
     out["corporate"] = corporate_history(d.conn, sym, last.close)
-    out["news"] = news.stock_news(d.conn, sym, 30)
+    out["fundamentals"] = dividends.company_numbers(d.conn, sym, d.table["sector"])
+    out["free_float"] = free_floats(d).get(sym)
+    out["analysts"] = dividends.analyst_targets(d.conn, sym)
+    out["owner_moves"] = ownership.recent_moves(d.conn, (date.today() - timedelta(days=365)).isoformat(), sym)
+    out["news"] = news.stock_news(d.conn, sym)
+    out["big_deals"] = news.big_deals(d.conn, sym, (date.today() - timedelta(days=365)).isoformat())
     out["cautions"] = cautions_map(d).get(sym, [])
+    out["ai"] = ai_view(d, sym, ind["close"])
+    out["range"] = range_view(d, sym)
+    if {"sup", "ptgt"} & set(cols):
+        # The site's browser needs the chart's levels on each recent day: `sup`, the stop under support (NaN when
+        # there's none), which an open position's stop rises to, and `ptgt`, the target, for a buy logged that day.
+        rows = np.zeros(len(ind), dtype=bool)
+        rows[-PLAN_DAYS:] = True
+        lv = levels.frame(ind, cfg, rows) if cfg.get("levels_mode") == "chart" else pd.DataFrame(index=ind.index)
+        ind = ind.assign(sup=lv.get("sup", np.nan), ptgt=lv.get("target", np.nan))
     shown = ind if tail is None else ind.tail(tail)
     out["series"] = {"time": [str(t.date()) for t in shown.index], **{c: column(shown[c]) for c in cols}}
     if "div" in shown:   # cash dividends by ex-date: the exit rules in the browser move the stop for them too
@@ -465,12 +690,43 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     return out
 
 
+def rule_checks(ind: pd.DataFrame, cfg: dict, sf: pd.Series | None = None) -> dict:
+    """The breakout rule's checks at the last close, passed or not, with the numbers behind them: the stock page's
+    checklist and the bot's /why."""
+    last = ind.iloc[-1]
+    sf = strategy.signal_frame(ind, cfg).iloc[-1] if sf is None else sf
+    return {"liquid": bool(sf.eligible), "trend": bool(sf.trend_ok), "breakout": bool(last.close > last.high20_prev),
+            "volume": bool(last.vol_ratio >= 1.5), "adx": bool(last.adx14 > 20), "high20": float(last.high20_prev),
+            "vol_ratio": float(last.vol_ratio), "adx14": float(last.adx14)}
+
+
+PLAN_DAYS = 250               # the site gets the chart's levels for about a year of days (stock_public)
+INTRADAY_SHOWN = {"1h": 700, "4h": 400}     # bars per chart: about 5½ months of hours, 8 months of 4-hour bars
+
+
+def stock_intraday(d: Data, symbol: str) -> dict:
+    """The 1-hour and 4-hour charts: {"1h": series, "4h": series} like stock_public's, with `time` in seconds and
+    Cairo's clock read as UTC (so the chart labels show the exchange's hours). Empty when there are no hourly bars."""
+    hourly = db.load_intraday(d.conn, symbol.upper())
+    out = {}
+    for key, df in (("1h", hourly), ("4h", prices.four_hour(hourly))):
+        if len(df) < 30:
+            continue
+        shown = add_indicators(df).tail(INTRADAY_SHOWN[key])
+        out[key] = {"time": ((shown.index - pd.Timestamp(0)) // pd.Timedelta(seconds=1)).tolist(),
+                    **{c: column(shown[c]) for c in SERIES_COLS}}
+    return clean(out)
+
+
 def screener(d: Data) -> dict:
     """Every stock's numbers for the screener, the same for everyone: the site publishes this, and your own marks
     (your Shariah filter's effect on signals, what you hold) are added where you look (screener_view)."""
     def build():
         preds = predictions(d)["by_symbol"]
         yields = {r["symbol"]: r["yield_pct"] for r in d.conn.execute("SELECT symbol, yield_pct FROM dividend_yield")}
+        firms = company_values(d.conn)
+        today = db.get_meta(d.conn, "scan_data_date") or date.today().isoformat()
+        coming = dividends.coming(d.conn, today)
         _, df = current_scan(d.conn)
         action = {r["symbol"]: r["action"] for r in records(df)}
         rows = []
@@ -491,8 +747,9 @@ def screener(d: Data) -> dict:
                 "vs_ema20": last.close / last.ema20 - 1, "vs_ema50": last.close / last.ema50 - 1,
                 "vs_ema200": last.close / ema200 - 1, "from_high": last.close / year["high"].max() - 1,
                 "from_low": last.close / year["low"].min() - 1,
-                **{k: p.get(k) for k in ("p10", "p20", "top10", "top20")},
+                **{k: p.get(k) for k in ("p10", "p20", "top10", "top20", "rating")},
                 "yield": y / 100 if y is not None else None, "action": action.get(sym),
+                "pe": (firms.get(sym) or {}).get("pe"), "exdiv": (coming.get(sym) or {}).get("ex_date"),
             })
         return clean({"date": str(d.indicators(prices.INDEX_SYMBOL).index[-1].date()) if rows else None,
                       "min_value": d.cfg["min_avg_value_egp"], "rows": rows})
@@ -528,8 +785,17 @@ def dividend_calendar(d: Data) -> dict:
         coming = [a for a in news.actions(d.conn, since=today, kinds=("dividend", "bonus", "split", "rights"))
                   if a["symbol"] in d.table.index and a["effective"]
                   and not (a["kind"] == "dividend" and _near(have, a["symbol"], a["effective"]))]
+        # rights issues announced in the last 6 months with no ex-date yet (none since, or it's an older one's row)
+        last_ex = dict(d.conn.execute("SELECT symbol, MAX(effective) FROM corp_actions WHERE kind = 'rights' "
+                                      "AND effective != '' GROUP BY symbol").fetchall())
+        undated = {}
+        for a in news.actions(d.conn, since=(date.today() - pd.Timedelta(days=183)).isoformat(), kinds=("rights",)):
+            if not a["effective"] and a["symbol"] in d.table.index and (last_ex.get(a["symbol"]) or "") < a["announced"]:
+                undated.setdefault(a["symbol"], a)
         return clean({"today": today, "updated": updated, "min_value": d.cfg["min_avg_value_egp"], "dividends": cash,
-                      "yields": yields, "bonus": bonus, "coming": sorted(coming, key=lambda a: a["effective"])})
+                      "yields": yields, "bonus": bonus,
+                      "coming": sorted(coming, key=lambda a: a["effective"]) + list(undated.values()),
+                      "rights_history": corporate.rights_history(d.conn, today)})
     return d.cache.get(d.version, ("dividends",), build)
 
 
@@ -575,7 +841,7 @@ def screener_view(d: Data) -> dict:
 
 
 CALC_KEYS = ("capital", "risk_per_trade_pct", "max_position_pct", "max_open_risk_pct", "max_positions", "max_per_sector",
-             "max_pct_of_adv", "fee_pct_per_side", "target_r", "stop_min_pct", "stop_max_pct")
+             "max_pct_of_adv", "broker", "fee_pct_per_side", "target_r", "stop_min_pct", "stop_max_pct")
 
 
 def calc_view(d: Data) -> dict:
@@ -584,12 +850,17 @@ def calc_view(d: Data) -> dict:
     real = portfolio.account_summary(d.conn, "real", d.cfg, d.closes())
     m = market_info(d.conn)
     b = breadth_data(d)
+    since = (pd.Timestamp.today() - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
+    n, value = d.conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(f.shares * f.price), 0) FROM fills f JOIN trades t ON t.id = f.trade_id "
+        "WHERE t.account = 'real' AND f.side IN ('buy', 'sell') AND f.date >= ?", (since,)).fetchone()
     return clean({
-        "equity": real["equity"], "cash": real["cash"],
+        "equity": real["equity"], "cash": real["cash"], "orders_30d": {"n": n, "value": value},
         "positions": portfolio.positions_for_allocation(d.conn, "real", ("open",)),
         "cfg": {k: d.cfg[k] for k in CALC_KEYS},
         "risk_off": bool(m.get("risk_off")) if m else False,
         "switch": breadth.switch(b["above50"]) if b else None,
+        "money": money_rates(d.conn), "shares_value": real["equity"] - real["cash"],
     })
 
 
@@ -600,29 +871,34 @@ def stock_detail(d: Data, symbol: str) -> dict:
         return clean(out)
     _, sig_rows = signals(d)
     row = [r for r in sig_rows if r["symbol"] == sym]
-    levels = []
+    ch = out.get("chart")
+    lines = [{"label": "Stop", "price": ch["stop"], "kind": "stop"},
+              {"label": "Target", "price": ch["target"], "kind": "target"}] if ch else []
     if row:
         sig = row[0]
         out["signal"] = sig
         out.pop("checklist")
         if sig["action"] == "BUY":
-            levels = [{"label": "Buy up to", "price": sig["entry_high"], "kind": "entry"},
+            lines = [{"label": "Buy up to", "price": sig["entry_high"], "kind": "entry"},
                       {"label": "Stop", "price": sig["stop"], "kind": "stop"},
                       {"label": "Target", "price": sig["target"], "kind": "target"}]
 
     pos = open_positions(d, sym)
     if pos:
-        out["position"] = pos[0]
-        levels = [{"label": "Avg price", "price": pos[0]["avg_price"], "kind": "entry"},
+        out["position"], out["fee_pct"] = pos[0], config.fee_pct(d.cfg)
+        lines = [{"label": "Avg price", "price": pos[0]["avg_price"], "kind": "entry"},
                   {"label": "Stop", "price": pos[0]["stop"], "kind": "stop"},
                   {"label": "Target", "price": pos[0]["target"], "kind": "target"}]
-    out["levels"] = levels
+    out["levels"] = lines
     out["fills"] = [dict(r) for r in d.conn.execute(
         """SELECT f.date, f.side, SUM(f.shares) AS shares, AVG(f.price) AS price FROM fills f
            JOIN trades t ON t.id = f.trade_id WHERE t.account='real' AND f.symbol=? AND f.side IN ('buy', 'sell')
            GROUP BY f.date, f.side""",
         (sym,))]
     return clean(out)
+
+
+LIMIT_KEYS = ("max_position_pct", "max_positions", "max_per_sector", "max_open_risk_pct")   # the Health tab's checkup
 
 
 def portfolio_view(d: Data) -> dict:
@@ -642,8 +918,10 @@ def portfolio_view(d: Data) -> dict:
     buy_signals = [{k: r[k] for k in ("symbol", "entry_high", "shares")} for r in sig_rows if r["action"] == "BUY"]
     return clean({
         "summary": s, "positions": open_positions(d), "closed": rows, "closed_stats": stats, "signals": buy_signals,
-        "fee_pct": cfg["fee_pct_per_side"], "sell_reasons": SELL_REASONS, "max_hold_days": cfg["max_hold_days"],
+        "fee_pct": config.fee_pct(cfg), "fee_cfg": {k: cfg[k] for k in ("broker", "fee_pct_per_side")},
+        "sell_reasons": SELL_REASONS, "max_hold_days": cfg["max_hold_days"],
         "review_day": cfg["review_day"], "max_open_risk_pct": cfg["max_open_risk_pct"],
+        "limits": {k: cfg[k] for k in LIMIT_KEYS},
     })
 
 
@@ -655,8 +933,119 @@ def history_data(d: Data) -> dict:
             "SELECT scan_date, symbol, setup FROM scans WHERE action='BUY' ORDER BY scan_date, symbol")]
         inflation = [{"date": r["date"], "value": r["value"]} for r in d.conn.execute(
             "SELECT date, value FROM macro WHERE series='inflation' AND date >= '2015-01-01' ORDER BY date")]
-        return {"buys": buys, "inflation": inflation}
+        money = {}
+        for name in ("usdegp", "gold", "interbank"):
+            rows = d.conn.execute("SELECT date, value FROM macro WHERE series=? AND date >= ? ORDER BY date",
+                                  (name, MONEY_SINCE)).fetchall()
+            money[name] = {"time": [r["date"] for r in rows], "value": [round(r["value"], 4) for r in rows]}
+        return {"buys": buys, "inflation": inflation, "money": money}
     return d.cache.get(d.version, ("history",), build)
+
+
+MONEY_SINCE = "2022-01-01"     # the dollar, gold and interest rate history the site publishes (history_data)
+
+
+def money_rates(conn: sqlite3.Connection) -> dict | None:
+    """The latest dollar rate, gold (EGP a gram of 24-carat), interbank rate and yearly inflation (%): for the zakat
+    and certificate calculators. None before the Egypt data is downloaded."""
+    last = {r["series"]: (r["date"], r["value"]) for r in conn.execute(
+        "SELECT m.series, m.date, m.value FROM macro m JOIN (SELECT series, MAX(date) AS d FROM macro GROUP BY series) x "
+        "ON x.series = m.series AND x.d = m.date")}
+    if "usdegp" not in last:
+        return None
+    gold = last["gold"][1] * last["usdegp"][1] / macro.OUNCE_G if "gold" in last else None
+    return {"date": last["usdegp"][0], "usdegp": last["usdegp"][1], "gold_gram": gold,
+            "gold_date": last["gold"][0] if "gold" in last else None,
+            "rate": last["interbank"][1] if "interbank" in last else None,
+            "inflation": last["inflation"][1] if "inflation" in last else None}
+
+
+def company_values(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Each company's numbers from TradingView (data/dividends.py FUNDAMENTALS): market_cap, pe, …, under the agent's
+    own symbols (TradingView's names for a few companies differ)."""
+    back = {v: k for k, v in prices.TV_ALIASES.items()}
+    return {back.get(r["symbol"], r["symbol"]): json.loads(r["data"])
+            for r in conn.execute("SELECT symbol, data FROM fundamentals")}
+
+
+def stock_changes(d: Data, symbols: Iterable[str] | None = None) -> dict:
+    """What's new for each stock since the session before the last close: {since, by_symbol: {symbol: {news,
+    dividends, actions, owners}}}, the stocks with something only. Home's "What changed for your stocks" and the
+    evening Telegram pick the stocks you hold; a stop that moved comes from the positions themselves."""
+    idx = d.indicators(prices.INDEX_SYMBOL).index
+    if len(idx) < 2:
+        return {"since": None, "by_symbol": {}}
+    prev = str(idx[-2].date())
+    since = prev + "T14:30"                     # after that session's close
+    keep = set(symbols) if symbols is not None else None
+    out: dict[str, dict] = {}
+
+    def add(sym, kind, item):
+        if sym and (keep is None or sym in keep):
+            out.setdefault(sym, {}).setdefault(kind, []).append(item)
+    for n in d.conn.execute("SELECT symbol, source, published, title, url, tone FROM news WHERE symbol != '' "
+                            "AND published >= ? ORDER BY published DESC", (since,)):
+        if len(out.get(n["symbol"], {}).get("news", [])) < 3:
+            add(n["symbol"], "news", {k: n[k] for k in ("source", "published", "title", "url", "tone")})
+    for r in d.conn.execute("SELECT symbol, ex_date, pay_date, amount FROM cash_dividends WHERE first_seen >= ? "
+                            "AND ex_date >= ?", (since, prev)):
+        add(r["symbol"], "dividends", {k: r[k] for k in ("ex_date", "pay_date", "amount")})
+    for r in d.conn.execute("SELECT symbol, kind, type, effective FROM corp_actions WHERE announced >= ?", (prev,)):
+        add(r["symbol"], "actions", {"label": news.KIND_LABELS.get(r["kind"], r["type"]), "effective": r["effective"]})
+    for m in ownership.recent_moves(d.conn, since):
+        add(m["symbol"], "owners", {k: m[k] for k in ("holder", "before", "after")})
+    return {"since": prev, "by_symbol": out}
+
+
+def free_floats(d: Data) -> dict[str, dict]:
+    """Each company's free float: the lower of Arab Finance's and Mubasher's owners lists, TradingView's when neither
+    has one (ownership.combined; worked out from the lists each time, so a better rule fixes the old ones too). Shown,
+    not used. Tested in 2026-10 as inputs to the 10-session model (float %, the float's value, its rank, how fast it
+    trades): the model's own top picks did a little better, but the rules plus its picks made 25.8% a year against
+    32.5% and won fewer trades, on all 4 seeds."""
+    def build():
+        tv = {r["symbol"]: json.loads(r["data"]).get("free_float") for r in d.conn.execute("SELECT symbol, data FROM fundamentals")}
+        lists = {r["symbol"]: (ownership.free_float(json.loads(r["holders"] or "[]")),
+                               ownership.free_float(json.loads(r["af_holders"]), 0) if r["af_holders"] else None)
+                 for r in d.conn.execute("SELECT symbol, holders, af_holders FROM ownership")}
+        out = {s: ownership.combined(tv.get(s), *lists.get(s, (None, None))) for s in set(tv) | set(lists)}
+        return {s: v for s, v in out.items() if v}
+    return d.cache.get(d.version, ("free_floats",), build)
+
+
+def company_brief(d: Data) -> dict[str, dict]:
+    """Each company's latest results in brief, for the BUY cards, Close to a BUY and the bot's /why: its last 4
+    reported quarters (or last year) against the 4 before (data/fundamentals.py; about 3 times as many companies as
+    TradingView's own ratios): profit and sales growth (when the year before made a profit / had sales), the profit
+    margin (below 0: it lost money), and its P/E (the last close ÷ a year of profit per share) next to the middle P/E
+    of its sector (at least 3 companies). The same for everyone."""
+    def build():
+        rep = fundamentals.reports(d.conn)
+        rep = rep[rep["ni"].notna()]
+        if rep.empty:
+            return {}
+        # the newest numbers each company has published: its quarters when it has them, otherwise its years
+        last = rep.assign(q=rep["kind"].eq("q")).sort_values(["q", "known"]).groupby("symbol").tail(1).set_index("symbol")
+        closes = d.closes()
+        sector = d.table["sector"].to_dict() if "sector" in d.table else {}
+        grow = lambda now, before: now / before - 1 if before and before > 0 and np.isfinite(now) else None  # noqa: E731
+        out, pes = {}, {}
+        for sym, r in last.iterrows():
+            c = closes.get(sym)
+            pe = c / r["eps"] if c and r["ni"] > 0 and (r["eps"] or 0) > 0 else None
+            b = {"growth": grow(r["ni"], r["ni_prev"]), "sales": grow(r["rev"], r["rev_prev"]),
+                 "margin": r["ni"] / r["rev"] if (r["rev"] or 0) > 0 else None, "pe": pe}
+            b = {k: round(float(v), 4) for k, v in b.items() if v is not None and np.isfinite(v)}
+            if b:
+                out[sym] = b
+            if pe and sector.get(sym):
+                pes.setdefault(sector[sym], []).append(pe)
+        middle = {s: float(np.median(v)) for s, v in pes.items() if len(v) >= 3}
+        for sym, b in out.items():
+            if "pe" in b and sector.get(sym) in middle:
+                b["sector_pe"] = round(middle[sector[sym]], 4)
+        return out
+    return d.cache.get(d.version, ("company_brief",), build)
 
 
 def portfolio_history(d: Data) -> dict:
@@ -737,14 +1126,25 @@ def orders(d: Data, positions: list[dict] | None = None) -> dict | None:
     for p in positions:
         sym, st = p["symbol"], p["status"]
         base = {"symbol": sym, "trade_id": p["id"], "shares": p["shares"]}
-        if st == "ADJUST":
+        if st == "ADJUST" and p.get("rights"):
+            r = p["rights"]
+            items.append({**base, "key": f"adjust:{sym}", "kind": "adjust", "rights": r["units"],
+                          "title": f"Record what you do with your {sym} rights",
+                          "detail": f"You hold {r['units']:,} rights ({r['symbol']}) from {nice_date(p['adjust']['ex_date'])}: "
+                                    f"{r['note']} Once you subscribe or sell them, record it on My Portfolio. "
+                                    "Its stop can't be checked until then."})
+        elif st == "ADJUST":
             items.append({**base, "key": f"adjust:{sym}", "kind": "adjust",
-                          "title": f"Update {sym} for its bonus shares",
+                          "title": f"Update {sym} for its {'rights issue' if p['adjust'].get('rights') else 'bonus shares'}",
                           "detail": f"{p['adjust']['describe'].capitalize()}, from {nice_date(p['adjust']['ex_date'])}. "
                                     "On My Portfolio, enter the shares you hold now. Its stop can't be checked until then."})
         elif st == "EXIT":
             items.append({**base, "key": f"sell:{sym}", "kind": "sell",
                           "title": f"Sell all {p['shares']:,} {sym} at the open", "detail": p["reason"]})
+        elif st == "BOUNCE":      # a big loss: sold on the first bounce (portfolio.on_bounce)
+            items.append({**base, "key": f"bounce:{sym}", "kind": "review", "level": p["bounce_level"],
+                          "title": f"Sell {sym} on a bounce: at its first close above {px(p['bounce_level'])}",
+                          "detail": p["reason"]})
         elif st == "TIGHTEN STOP":
             items.append({**base, "key": f"stop:{sym}", "kind": "stop", "from": p["prev_stop"], "to": p["stop"],
                           "title": f"Move your {sym} stop up to {px(p['stop'])}",
@@ -802,6 +1202,17 @@ def breadth_data(d: Data) -> dict | None:
     return d.cache.get(d.version, "breadth", build)
 
 
+def mood_data(d: Data) -> dict | None:
+    """The market mood gauge (egx_agent/mood.py): the Market page's card."""
+    return d.cache.get(d.version, "mood", lambda: clean(mood.compute(mood.load(d.conn))))
+
+
+def mood_brief(d: Data) -> dict | None:
+    """Just the gauge, for Home, the evening message and the bot."""
+    x = mood_data(d)
+    return {k: x.get(k) for k in ("date", "score", "label", "week_ago", "flows")} if x else None
+
+
 JUMP = 0.30   # a one-day move this big can't happen within EGX's daily price limits
 
 
@@ -816,7 +1227,8 @@ def movers(d: Data) -> dict:
         if px.empty:
             return {"movers": None, "highs": [], "lows": []}
         close = px.pivot(index="date", columns="symbol", values="close").sort_index()
-        value = (close * px.pivot(index="date", columns="symbol", values="volume").reindex_like(close)).tail(20).mean()
+        traded = close * px.pivot(index="date", columns="symbol", values="volume").reindex_like(close)
+        value = traded.tail(20).mean()
         today = close.iloc[-1].dropna().index                      # traded at the last close
         c = close.ffill(limit=5)
         year = close.tail(250)
@@ -833,7 +1245,23 @@ def movers(d: Data) -> dict:
         last = close.iloc[-1].reindex(today)
         highs = [s for s in today if enough[s] and last[s] >= year[s].max() * 0.999]
         lows = [s for s in today if enough[s] and last[s] <= year[s].min() * 1.001]
-        return clean({"movers": out, "highs": sorted(highs), "lows": sorted(lows)})
+        # the heatmap: every stock that traded at the last close, by sector, with its moves (a split's jump left out)
+        firms = company_values(d.conn)
+        sectors = d.table["sector"]
+        moves = {key: (c.iloc[-1] / c.iloc[-1 - n] - 1).where(daily.tail(n).max() <= JUMP)
+                 for key, n in (("chg1", 1), ("ret5", 5), ("ret21", 21))}
+        tiles = [{"symbol": s, "sector": sectors.get(s) or "Other", "cap": (firms.get(s) or {}).get("market_cap"),
+                  "value": value.get(s), **{k: m.get(s) for k, m in moves.items()}}
+                 for s in today if s in sectors.index]
+        # money by sector: each sector's share of the money traded at the last close, and its usual share (the 20
+        # sessions before), so you see where money is going now. One big deal day counts too.
+        by = traded.T.groupby(sectors.reindex(traded.columns).fillna("Other")).sum().T
+        last, usual = by.iloc[-1], by.iloc[-21:-1].sum()
+        sector_money = sorted(({"sector": k, "value": float(last[k]), "share": float(last[k] / last.sum()),
+                                "usual": float(usual[k] / usual.sum()) if usual.sum() else None}
+                               for k in by.columns if last[k] > 0), key=lambda r: -r["value"]) if last.sum() else []
+        return clean({"movers": out, "highs": sorted(highs), "lows": sorted(lows), "tiles": tiles,
+                      "sector_money": sector_money})
     return d.cache.get(d.version, ("movers",), build)
 
 
@@ -853,9 +1281,78 @@ def market_view(d: Data) -> dict:
     b = breadth_data(d)
     m = market_info(d.conn)
     if not b:
-        return {"breadth": None, "market": m or None, "results": results_calendar(d)}
-    return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("risk_off") if m else None), "market": m or None,
-                  "results": results_calendar(d), **movers(d)})
+        return {"breadth": None, "market": m or None, "results": results_calendar(d), "mood": mood_data(d),
+                "investors": flows.recent_split(d.conn)}
+    return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None), "market": m or None,
+                  "results": results_calendar(d), "mood": mood_data(d), "investors": flows.recent_split(d.conn),
+                  **movers(d)})
+
+
+INDEX_PERIODS = (("1W", 5), ("1M", 21), ("3M", 63), ("6M", 126), ("1Y", 250), ("3Y", 750), ("5Y", 1250))
+
+
+def index_view(d: Data) -> dict:
+    """The EGX30 page: its chart with its averages, where it stands against them and its 1-year range, its returns
+    over each period and each calendar year in pounds and in dollars (and EGX70's beside it), how jumpy it is, and
+    the agent's own rule about it (no new BUYs while it is under its 50-day average)."""
+    def build():
+        df = db.load_prices(d.conn, prices.INDEX_SYMBOL)
+        if len(df) < 60:
+            return {"has_data": False}
+        ind = add_indicators(df)
+        c = ind["close"]
+        ema200 = c.ewm(span=200, adjust=False).mean()
+        last, year = ind.iloc[-1], ind.tail(250)
+        daily = c.pct_change(fill_method=None).tail(250).dropna()
+        raw = db.load_macro(d.conn)
+        def on_days(name):     # a macro series on the index's days (the last value known each day), or None
+            if raw.empty or name not in raw or raw[name].dropna().empty:
+                return None
+            v = raw[name].dropna()
+            return v.reindex(v.index.union(c.index)).ffill().reindex(c.index)
+        usd, e70 = on_days("usdegp"), on_days("egx70")
+        in_usd = c / usd if usd is not None else None
+
+        def ret(s, n):
+            s = s.dropna() if s is not None else None
+            return float(s.iloc[-1] / s.iloc[-1 - n] - 1) if s is not None and len(s) > n else None
+
+        start = c[c.index.year < c.index[-1].year]    # this year so far: from last year's final close
+        periods = [{"key": k, "egp": ret(c, n), "usd": ret(in_usd, n), "egx70": ret(e70, n)} for k, n in INDEX_PERIODS]
+        if len(start):
+            ytd = lambda s: float(s.iloc[-1] / s.loc[:start.index[-1]].dropna().iloc[-1] - 1) \
+                if s is not None and s.loc[:start.index[-1]].notna().any() else None  # noqa: E731
+            periods.insert(4, {"key": "YTD", "egp": ytd(c), "usd": ytd(in_usd), "egx70": ytd(e70)})
+        years = []
+        ends = c.groupby(c.index.year).tail(1)            # each year's last close
+        for i in range(1, len(ends)):
+            a, b = ends.index[i - 1], ends.index[i]
+            yr = {"year": int(b.year), "egp": float(ends.iloc[i] / ends.iloc[i - 1] - 1), "partial": b == c.index[-1]}
+            if in_usd is not None and pd.notna(in_usd.get(a)) and pd.notna(in_usd.get(b)):
+                yr["usd"] = float(in_usd[b] / in_usd[a] - 1)
+            years.append(yr)
+        peak = c.cummax()
+        m = market_info(d.conn)
+        b = breadth_data(d)
+        return {
+            "has_data": True, "date": str(ind.index[-1].date()), "close": float(last.close),
+            "change": float(last.close / ind["close"].iloc[-2] - 1), "ema20": float(last.ema20), "ema50": float(last.ema50),
+            "ema200": float(ema200.iloc[-1]), "rsi14": float(last.rsi14), "high52": float(year["high"].max()),
+            "low52": float(year["low"].min()), "ath": float(peak.iloc[-1]), "ath_date": str(c.idxmax().date()),
+            "from_ath": float(c.iloc[-1] / peak.iloc[-1] - 1), "usd_close": float(in_usd.iloc[-1]) if in_usd is not None else None,
+            "volatility": float(daily.std() * np.sqrt(245)), "up_days": float((daily > 0).mean()),
+            "best_day": {"date": str(daily.idxmax().date()), "ret": float(daily.max())},
+            "worst_day": {"date": str(daily.idxmin().date()), "ret": float(daily.min())},
+            "drop_1y": float((year["close"] / year["close"].cummax() - 1).min()),
+            "periods": periods, "years": years[-10:][::-1], "risk_off": bool(m.get("egx30_off", m.get("risk_off"))) if m else None,
+            "above50": b["above50"] if b else None,
+            "levels": levels.nearby(ind),         # its support and resistance, the same tools as a stock's
+            "series": {"time": [str(t.date()) for t in ind.index], **{k: column(ind[k]) for k in SERIES_COLS}},
+            # weekly points, counted back from the last close so the chart ends on it
+            "usd_line": [{"time": str(t.date()), "value": round(float(v), 2)} for t, v in in_usd.dropna().iloc[::-5][::-1].items()]
+            if in_usd is not None else [],
+        }
+    return clean(d.cache.get(d.version, "egx30", build))
 
 
 def predictions(d: Data) -> dict:
@@ -864,7 +1361,7 @@ def predictions(d: Data) -> dict:
         lt = predict.latest(d.conn)
         meta = predict.load_meta(predict.model_dir(d.conn))
         if lt.empty or not meta:
-            return {"by_symbol": {}, "base": None, "count": 0, "date": None}
+            return {"by_symbol": {}, "base": None, "count": 0, "date": None, "bands": []}
         base = {hz: (meta["horizons"].get(str(hz), {}).get("all") or {}).get("hit") for hz in predict.HORIZONS}
         # its top 10% each day: the group its tested results are about, so the only chances worth showing
         cut = max(1, math.ceil(len(lt) * TOP_SHARE))
@@ -873,18 +1370,39 @@ def predictions(d: Data) -> dict:
         by = {}
         for sym, r in lt.iterrows():
             by[sym] = {f"{k}{hz}": r.get(f"{k}{hz}") for hz in predict.HORIZONS for k in ("p", "rank")}
+            by[sym]["rating"] = rating(r.get("rank10"), len(lt))
             by[sym].update({f"top{hz}": bool(r.get(f"rank{hz}", cut + 1) <= cut) for hz in predict.HORIZONS})
             # what pushed its score up or down (predict.explain): [{f, up, text}, …]
             by[sym].update({f"why{hz}": json.loads(why.get((sym, hz)) or "null") for hz in predict.HORIZONS})
         return {"by_symbol": clean(by), "base": clean(base), "count": int(len(lt)), "date": lt["date"].iloc[0],
-                "top_n": cut}
+                "top_n": cut, "bands": rating_bands(meta)}
     return d.cache.get(d.version, ("predictions", db.get_meta(d.conn, "prediction_date"),
                                    db.get_meta(d.conn, "prediction_updated")), build)
 
 
+# The rating: where the model's 2-week score puts a stock among that day's liquid stocks, 1 (last) to 100 (first).
+# Its bands are the model's tested groups (predict.RANK_GROUPS): 91–100 is its top 10%, and so on.
+RATING_BANDS = {"Top 10%": (91, 100), "Next 20%": (71, 90), "Middle 20%": (51, 70), "Bottom half": (1, 50)}
+
+
+def rating(rank, n: int) -> int | None:
+    """1 = the model's best stock that day → 100; its worst → about 100/n."""
+    if rank is None or not n or not math.isfinite(rank):
+        return None
+    return max(1, math.ceil(100 * (n - rank + 1) / n))
+
+
+def rating_bands(meta: dict | None) -> list[dict]:
+    """How stocks in each rating band did on the years the model never saw: how often the target came first, and
+    the average trade after fees."""
+    groups = ((meta or {}).get("horizons", {}).get("10") or {}).get("groups") or []
+    return [{"from": RATING_BANDS[g["label"]][0], "to": RATING_BANDS[g["label"]][1], "hit": g.get("hit"),
+             "ret": g.get("ret"), "n": g.get("n")} for g in groups if g.get("label") in RATING_BANDS]
+
+
 HORIZON_KEYS = ("all", "top", "rule", "rule_agree", "rule_disagree", "auc", "lift", "grade", "verdict", "years",
                 "groups", "from", "to", "train_n", "good_years", "top_share", "features", "top_ret_cost", "portfolio",
-                "portfolio_cost", "chances", "extra_cost", "hold")
+                "portfolio_cost", "chances", "extra_cost")
 TOP_SHARE = 0.10   # the model's top picks: its best 10% each day
 
 
@@ -896,7 +1414,8 @@ def predict_public(d: Data) -> dict:
     out: dict = {"model": None, "rows": [], "deep": deep, "deep_years": prices.DEEP_YEARS,
                  "horizons": list(predict.HORIZONS), "retrain_days": predict.RETRAIN_DAYS,
                  "features": {str(hz): len(predict.HORIZON_FEATURES[hz]) for hz in predict.HORIZONS},
-                 "levels": {k: d.cfg[k] for k in ("atr_stop_mult", "stop_min_pct", "stop_max_pct", "target_r")}}
+                 "levels": {k: d.cfg.get(k) for k in ("atr_stop_mult", "stop_min_pct", "stop_max_pct", "target_r",
+                                                      "levels_mode")}}
     if not meta or not predict.model_path(root).exists():
         return out
     out["model"] = {
@@ -908,39 +1427,54 @@ def predict_public(d: Data) -> dict:
     preds = predictions(d)
     out.update(base=preds["base"], date=preds["date"], count=preds["count"], top_n=preds.get("top_n"))
     lt = predict.latest(d.conn)
+    wk = predict.WEEK
+    why_wk = {s: json.loads(w or "null") for s, w in d.conn.execute(
+        "SELECT symbol, why FROM predictions WHERE date=? AND horizon=?", (preds["date"], wk))}
     for sym, r in lt.iterrows():
         close = float(r["close"])
+        move = r.get(f"move{wk}")
+        week = {} if move is None or not math.isfinite(move) else {   # the week: its chance, target and stop
+            f"p{wk}": r.get(f"p{wk}"), f"rank{wk}": r.get(f"rank{wk}"), f"move{wk}": move, "level": r.get("level"),
+            f"target{wk}": close * (1 + move), f"stop{wk}": close * (1 - move), f"why{wk}": why_wk.get(sym)}
         out["rows"].append({
             "symbol": sym, "info": d.info(sym), "close": close, "stop": close * (1 - r["stop_pct"]),
             "target": close * (1 + r["target_pct"]), "target_pct": r["target_pct"], "stop_pct": r["stop_pct"],
-            **preds["by_symbol"].get(sym, {}),
+            **preds["by_symbol"].get(sym, {}), **week,
         })
     out["live"] = predict.live_record(d.conn, since=meta.get("live_since"))
+    out["recent"] = predict.recent_record(d.conn, since=meta.get("live_since"))
+    # each stock's rank at the close before, for the ▲▼ next to today's rank
+    prev = d.conn.execute("SELECT MAX(date) FROM predictions WHERE date < ?", (preds["date"],)).fetchone()[0]
+    if prev:
+        before = {hz: predict.ranks_for(d.conn, prev, hz) for hz in predict.ALL_HORIZONS}
+        for row in out["rows"]:
+            for hz in predict.ALL_HORIZONS:
+                row[f"prev_rank{hz}"] = (before[hz].get(row["symbol"]) or {}).get("rank")
+        out["prev_date"] = prev
     b = breadth_data(d)
     out["switch"] = breadth.switch(b["above50"]) if b else None
-    # the BUY rules with and without it on its test years, whether it still works live, and the 5-day experiment
+    # the BUY rules with and without it on its test years, and whether it still works live
     out["combo"] = meta.get("combo")
     out["health"] = predict.health(d.conn, meta)
     out["model_picks"] = int(d.cfg.get("model_picks", 0) or 0)
-    ex = str(predict.EXPERIMENT)
-    if ex in meta["horizons"] and f"rank{ex}" in lt:
-        top = lt.sort_values(f"rank{ex}").head(predict.PICKS)
-        out["experiment"] = {
-            "hz": predict.EXPERIMENT, "test": {k: meta["horizons"][ex].get(k) for k in HORIZON_KEYS},
-            "live": out["live"].get(ex), "picks": [{"symbol": s, "info": d.info(s), "close": float(r["close"]),
-                                                    "rank": int(r[f"rank{ex}"])} for s, r in top.iterrows()],
-        }
+    test = meta["horizons"].get(str(wk)) or {}
+    if test.get("week") and "level" in lt:
+        # the week: its tests and replay (predict.week_eval), how it did live, and today's market state
+        out["week"] = {"hz": wk, "atr": predict.WEEK_ATR, "test": test["week"], "extra_cost": test.get("extra_cost"),
+                       "live": out["live"].get(str(wk)), "weak": bool((lt["level"] == "weak").any())}
     return out
 
 
 def predict_view(d: Data) -> dict:
+    """The model's ranking, with only the stocks your Shariah filter allows (their rank stays the model's)."""
     out = predict_public(d)
+    out["shariah_filter"] = d.cfg["shariah_filter"]
     if out["model"]:
         _, sig_rows = signals(d)
         action = {r["symbol"]: r["action"] for r in sig_rows}
         held = {p["symbol"] for p in open_positions(d)}
-        for row in out["rows"]:
-            row.update(action=action.get(row["symbol"]), held=row["symbol"] in held)
+        out["rows"] = [{**row, "action": action.get(row["symbol"]), "held": row["symbol"] in held} for row in out["rows"]
+                       if shariah.passes_filter(row.get("info") or d.info(row["symbol"]), d.cfg["shariah_filter"])]
     return clean(out)
 
 
@@ -979,9 +1513,13 @@ SETTINGS_SECTIONS = [
         _f("capital", "Your trading capital", 1_000, 1e9, 5_000, "EGP",
            "Used for position sizing and the My Portfolio page. Include money you have added to the account."),
         _f("paper_capital", "Paper account", 1_000, 1e9, 5_000, "EGP", "Starting value of the virtual account."),
+        {"key": "broker", "label": "Your broker", "kind": "select",
+         "options": [{"value": k, "label": v} for k, v in config.BROKERS.items()],
+         "help": "Thndr: its exact fees on every order (EGP 2 + 0.1%, plus the exchange's and government's fees). "
+                 "Thndr Trader: the same without Thndr's commission. Compare the two in Calculator → Thndr fees."},
         _f("fee_pct_per_side", "Fees per buy or sell", 0, 2, 0.01, "%",
-           "Commission + EGX, clearing and regulator fees + taxes, for ONE side of a trade. "
-           "Check your broker's fee sheet."),
+           "Only with another broker: commission + EGX, clearing and regulator fees + taxes, for ONE side of a "
+           "trade. Check your broker's fee sheet."),
     ]},
     {"title": "Risk per trade", "fields": [
         _f("risk_per_trade_pct", "Max loss per trade", 0.25, 5, 0.25, "% of account",
@@ -994,10 +1532,21 @@ SETTINGS_SECTIONS = [
         _f("max_pct_of_adv", "Max position vs daily traded value", 0.5, 25, 0.5, "%",
            "Keeps you out of stocks too thin to exit quickly."),
     ]},
+    {"title": "Your stops", "fields": [
+        {"key": "stop_moves", "label": "Your positions' stops move", "kind": "choice",
+         "options": [{"value": "auto", "label": "By themselves: up to each newer support, never down (tested better)"},
+                     {"value": "mine", "label": "Only when I change them"}],
+         "help": "By themselves: each evening the stop rises to just under the newest support, and once a position "
+                 "has gained 1× its risk it goes no lower than your price + 1.5%; the to-do list says when to move "
+                 "it at your broker. Tested 2016–2026: 31.8% a year with stops that follow support against 22.3% "
+                 "without. Only when I change them: the stop stays where it was set when you bought, until you "
+                 "change it (Sell or edit → Change the stop)."},
+    ]},
     {"title": "Shariah", "fields": [
         {"key": "shariah_filter", "label": "Shariah filter for BUY signals", "kind": "select",
          "options": [{"value": k, "label": v} for k, v in config.SHARIAH_MODES.items()],
-         "help": "The EGX33 and Kashif badges always show. This only decides which stocks can get BUY signals."},
+         "help": "The EGX33 and Kashif badges always show. This decides which stocks can get BUY signals, and "
+                 "which show in Getting close and the model's ranking."},
     ]},
     {"title": "Paper trading", "fields": [
         {"key": "auto_paper", "label": "Place paper trades automatically after each scan", "kind": "toggle"},
@@ -1030,14 +1579,25 @@ SETTINGS_SECTIONS = [
                 "27%, with the same worst drop. 0 = none. Either way it decides which BUYs get money first."),
     ]},
     {"title": "Exits", "fields": [
+        {"key": "levels_mode", "label": "Stop-loss and target from", "kind": "choice",
+         "options": [{"value": "chart", "label": "The chart: support, resistance, Fibonacci"},
+                     {"value": "atr", "label": "A fixed rule: 2× the daily range, target 2× the risk"}],
+         "help": "Chart: the stop goes just under the nearest solid support and the target just under the first "
+                 "resistance. Tested 2016–2026 on years the model never saw: steadier (13% vs 9% a year in the first "
+                 "half, worst drop −22% vs −26%), but 24% vs 28% a year overall, because the fixed rule caught more "
+                 "of the 2021–26 boom."},
+        _f("target_min_r", "Chart target: at least", 1, 4, 0.25, "× the risk",
+           "Resistance closer than this is passed; the target goes to the next one."),
+        _f("target_max_r", "Chart target: at most", 1.5, 8, 0.25, "× the risk"),
         _f("atr_stop_mult", "Stop distance", 1, 5, 0.25, "× average daily range"),
         _f("stop_min_pct", "Tightest stop", 1, 20, 0.5, "% below entry"),
         _f("stop_max_pct", "Widest stop", 2, 30, 0.5, "% below entry"),
         _f("target_r", "Target", 1, 6, 0.25, "× the risk",
-           "2 means the target is twice as far above entry as the stop is below it."),
+           "2 means the target is twice as far above entry as the stop is below it. With chart levels, used only "
+           "when there's no resistance within reach."),
         _f("review_day", "Review if no progress by session", 3, 30, 1, kind="int"),
         _f("max_hold_days", "Hard exit after sessions", 5, 40, 1, kind="int",
-           help="20 sessions ≈ 1 month (EGX trades Sunday–Thursday)."),
+           help="15 sessions ≈ 3 weeks, 20 ≈ 1 month (EGX trades Sunday–Thursday). 15 did best in the 2016–2026 replay."),
     ]},
 ]
 for _sec in SETTINGS_SECTIONS:   # your own numbers, or the strategy everyone on the website shares
@@ -1093,8 +1653,14 @@ def parse_settings(values: dict, current: dict) -> tuple[dict, dict[str, str]]:
                     errors[key] = "Pick one of the options."
                 else:
                     new[key] = v
-            elif kind in ("toggle", "choice"):
+            elif kind == "toggle":
                 new[key] = bool(v)
+            elif kind == "choice":           # one of the options as it is: True/False, or a word like "chart"
+                match = [o["value"] for o in f["options"] if o["value"] == v and type(o["value"]) is type(v)]
+                if not match:
+                    errors[key] = "Pick one of the options."
+                else:
+                    new[key] = match[0]
             elif kind == "multi":
                 allowed = {o["value"] for o in f["options"]}
                 picked = [x for x in (v or []) if x in allowed]

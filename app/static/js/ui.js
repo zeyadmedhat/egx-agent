@@ -1,15 +1,16 @@
 // Shared building blocks: icons, Shariah badges, KPI tiles, tables, forms, the stock picker, dialogs.
 import {
   html, Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo, store, useStore, startJob, dismissToast, fmt, tone, cls,
-  stockHref, watchForData, toggleWatch, STATIC,
+  stockHref, watchForData, toggleWatch, STATIC, api, todayISO, toast, setStore, go,
 } from './lib.js';
-import { t, term } from './i18n.js';
+import { t, term, tn, tw } from './i18n.js';
 
 const tx = v => (typeof v === 'string' ? t(v) : v);   // plain text is translated; built pieces are left alone
 
 // ------------------------------------------------------------------ icons (stroke icons, 24×24)
 const ICONS = {
   activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  home: '<path d="m3 10 9-7 9 7"/><path d="M5 9v12h14V9"/><path d="M10 21v-6h4v6"/>',
   chart: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
   briefcase: '<rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
   flask: '<path d="M9 3h6"/><path d="M10 3v6.5L4.6 18.6A1.6 1.6 0 0 0 6 21h12a1.6 1.6 0 0 0 1.4-2.4L14 9.5V3"/><path d="M7 15h10"/>',
@@ -22,10 +23,13 @@ const ICONS = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
+  calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  pencil: '<path d="M21.2 6.8a2.8 2.8 0 0 0-4-4L4 16v4h4Z"/><path d="m15 5 4 4"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
   alert: '<path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4M12 17h.01"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   checkCircle: '<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>',
@@ -68,7 +72,7 @@ export function Badges({ info, compact }) {
   const src = info.egx33_manual ? 'added by you in Settings' : "Kashif's EGX33 index list";
   const egx = info.egx33
     ? html`<span class="badge ok" title=${`Member of the EGX33 Shariah index (source: ${src})`}>EGX33 ✓</span>`
-    : html`<span class="badge muted" title="Not in the EGX33 Shariah index">EGX33 ✗</span>`;
+    : html`<span class="badge muted" title=${t('Not in the EGX33 Shariah index')}>EGX33 ✗</span>`;
   const [c, en] = KASHIF[info.kashif_status] || ['muted', 'Not on Kashif'];
   const text = t(en);
   const tip = [
@@ -93,10 +97,11 @@ export function IndexPills({ info }) {
 
 // ------------------------------------------------------------------ chips, tiles, bits
 const STATUS = {
-  ADJUST: 'adjust', EXIT: 'exit', REVIEW: 'review', 'TIGHTEN STOP': 'tighten', HOLD: 'hold', 'NO DATA': 'nodata',
+  ADJUST: 'adjust', EXIT: 'exit', BOUNCE: 'review', REVIEW: 'review', 'TIGHTEN STOP': 'tighten', HOLD: 'hold', 'NO DATA': 'nodata',
   BUY: 'buy', WATCH: 'watch',
 };
-const STATUS_LABEL = { ADJUST: 'UPDATE SHARES' };
+const STATUS_LABEL = { ADJUST: 'UPDATE SHARES', EXIT: 'SELL', BOUNCE: 'SELL ON A BOUNCE', 'TIGHTEN STOP': 'RAISE STOP', REVIEW: 'CONSIDER SELLING',
+  WATCH: 'NEAR A BUY' };
 export function StatusChip({ status }) {
   return html`<span class=${`chip ${STATUS[status] || 'nodata'}`}><span class="dot"></span>${t(STATUS_LABEL[status] || status)}</span>`;
 }
@@ -126,6 +131,34 @@ export function ScoreRing({ score }) {
   </div>`;
 }
 
+// The rating (views.rating): where the model's 2-week chance puts a stock among the day's actively traded stocks, 1–100.
+// 91+ is its top 10%, the group its tests are about.
+export function Rating({ v, big }) {
+  if (v == null) return html`<span class="faint" title=${t('No rating: the model rates only stocks with enough daily trading.')}>–</span>`;
+  const band = v >= 91 ? 'top' : v >= 71 ? 'good' : v >= 51 ? 'mid' : 'low';
+  return html`<span class=${cls('rating', band, big && 'big')}
+    title=${t('Rating {v}/100: where the model puts it among the actively traded stocks today (100 = its first).', { v })}>${v}</span>`;
+}
+
+// A company's latest results in brief (views.company_brief): profit and sales growth over a year, or that it lost
+// money, and its P/E next to its sector's. compact: the growth and P/E only, for a table cell.
+export function CompanyLine({ co, compact }) {
+  if (!co) return compact ? html`<span class="faint">–</span>` : null;
+  const lost = co.margin != null && co.margin < 0;
+  const g = v => html`<b class=${v >= 0 ? 'up' : 'down'}>${fmt.pct(v, 0)}</b>`;
+  const pe = co.pe != null && html`<span title=${t('Price ÷ a year of profit: lower is cheaper')}>${t('P/E')} <b>${fmt.num(co.pe, 1)}</b>${
+    co.sector_pe != null && !compact ? html`<span class="faint"> (${t('sector')} ${fmt.num(co.sector_pe, 1)})</span>` : ''}</span>`;
+  const parts = [
+    lost ? html`<b class="down">${t('Lost money')}</b>` : co.growth != null && html`<span>${t('Profit')} ${g(co.growth)}</span>`,
+    !compact && co.sales != null && html`<span>${t('Sales')} ${g(co.sales)}</span>`,
+    pe,
+  ].filter(Boolean);
+  if (!parts.length) return compact ? html`<span class="faint">–</span>` : null;
+  return html`<span class=${cls('company-line', compact && 'compact')}
+    title=${t("The company's last 4 reported quarters against the 4 before (TradingView)")}>${
+    parts.map((p, i) => html`${i ? html`<span class="faint"> · </span>` : ''}${p}`)}</span>`;
+}
+
 export function ScoreBar({ score }) {
   const v = Math.max(0, Math.min(100, score || 0));
   return html`<div class="score-cell"><b>${Math.round(v)}</b><div class=${cls('bar', v >= 70 ? 'up' : '')} style="flex:1">
@@ -136,6 +169,133 @@ export function DayBar({ day, max, review }) {
   const pct = Math.min(100, (day / max) * 100);
   const tn = day >= max ? 'down' : day >= review ? 'warn' : '';
   return html`<div class="days"><span>${t('Day {day} of {max}', { day, max })}</span><div class=${cls('bar', tn)}><span style=${`width:${pct}%`}></span></div></div>`;
+}
+
+// ------------------------------------------------------------------ your positions, with live prices
+// Live prices for a few stocks (/quotes: TradingView's screener, about 15 minutes late): {symbol: {price, change}},
+// asked again every minute while the session is open. {} until they come, or when they can't be had.
+export function useQuotes(symbols) {
+  const key = [...new Set(symbols)].sort().join(',');
+  const [q, setQ] = useState({});
+  useEffect(() => {
+    if (!key) return undefined;
+    let on = true;
+    const get = () => api(`/quotes?s=${encodeURIComponent(key)}`).then(r => { if (on && r) setQ(r); }).catch(() => null);
+    get();
+    const id = setInterval(() => { if (!document.hidden && sessionState().state === 'open') get(); }, 60000);
+    return () => { on = false; clearInterval(id); };
+  }, [key]);
+  return q;
+}
+
+// The symbols to ask live prices for: each position's, and its rights' (KORAR1) while it holds them.
+export const quoteSymbols = ps => ps.flatMap(p => (p.rights ? [p.symbol, `${p.symbol}R1`] : [p.symbol]));
+
+// A position at the newest price when there is one: price, P&L after fees (the selling fee on the new value) and
+// whether it has already crossed its stop or target. Live only while the session is open; otherwise the quote is the
+// last close. p: views.open_positions / local/api.js openPositions.
+export function livePosition(p, q) {
+  // the rights beside the shares (Thndr's KORA_r1) at their last trade once they trade (TradingView's KORAR1)
+  const rq = p.rights && q && q[`${p.symbol}R1`];
+  if (rq) p = { ...p, rights: { ...p.rights, price: rq.price, value: p.rights.units * rq.price, change: rq.change, live: true },
+    rights_gain: p.rights.units * rq.price - p.rights.value };
+  const quote = q && q[p.symbol];
+  const real = (price, extra = 0) => p.real && { ...p.real, pnl: p.real.pnl + (price - p.last) * p.shares + extra,
+    pnl_pct: (p.real.pnl + (price - p.last) * p.shares + extra) / p.real.real_cost, to_break_even: p.real.break_even / price - 1 };
+  if (!quote || (p.adjust && !p.rights)) return { ...p, price: p.last, live: false, day_change: null, real: real(p.last, p.rights_gain || 0) };
+  const price = quote.price;
+  const pnl = p.pnl + (price - p.last) * p.shares;          // like the broker's: selling fees count once you sell
+  const cost = p.avg_price * p.shares + (p.fees || 0);
+  return { ...p, price, live: sessionState().state === 'open', day_change: quote.change, pnl, pnl_pct: (price * p.shares - cost) / cost,
+    real: real(price, p.rights_gain || 0),
+    hit_stop: p.stop != null && price <= p.stop, hit_target: price >= p.target };
+}
+
+// What the agent says to do, in two or three words (the exit rules' status, egx_agent/portfolio.py).
+const DO = { HOLD: 'Hold', EXIT: 'Sell at the open', BOUNCE: 'Sell on a bounce', REVIEW: 'Consider selling', 'TIGHTEN STOP': 'Raise your stop',
+  ADJUST: 'Update your shares', 'NO DATA': 'No price yet' };
+
+// Where the price sits between your stop and your target, with your buy price marked (on Picks: Buy up to).
+export function PlanBar({ p }) {
+  if (p.stop == null || !(p.target > p.stop)) return null;
+  const at = v => `${Math.max(0, Math.min(100, ((v - p.stop) / (p.target - p.stop)) * 100))}%`;
+  return html`<div class="planbar" aria-hidden="true">
+      <div class="track"><span class="fill" style=${`width:${at(p.price)}`}></span>
+        <span class="mark buy" style=${`inset-inline-start:${at(p.avg_price)}`} title=${t('Your buy price')}></span>
+        <span class="mark now" style=${`inset-inline-start:${at(p.price)}`}></span></div></div>
+    <div class="planbar-labels">
+      <span><span class="down">${t('Stop')} ${fmt.price(p.stop)}</span> <span class="faint">${fmt.pct(p.stop / p.price - 1, 1)}</span></span>
+      <span><span class="up">${t('Target')} ${fmt.price(p.target)}</span> <span class="faint">${fmt.pct(p.target / p.price - 1, 1)}</span></span>
+    </div>`;
+}
+
+// One open position: what to do, the price and P&L (live during the session), stop to target, days held.
+export function PositionCard({ p, hold, children, onOpen, open }) {
+  // selling on a bounce (a big loss): the stop and target bar means nothing now, its reason says when to sell
+  const urgent = p.hit_stop && p.status !== 'BOUNCE' ? { tone: 'exit', text: 'At or under your stop now: sell' }
+    : p.hit_target ? { tone: 'hold', text: 'At your target now: take the profit' } : null;
+  return html`<article class=${cls('card pos-card', p.status !== 'HOLD' && 'act', open && 'open')} id=${`pos-${p.id}`}>
+    <div class="pos-head">
+      <${StockAvatar} symbol=${p.symbol} size=${36} />
+      <div class="pos-who"><a class="sym-big" href=${stockHref(p.symbol)}>${p.symbol}</a>
+        <div class="faint pos-sub">${t('{n} shares · bought at {price}', { n: fmt.int(p.shares), price: fmt.price(p.avg_price) })}</div></div>
+      <span class=${`chip ${STATUS[p.status] || 'nodata'}`}><span class="dot"></span>${t(p.rights ? 'Rights issue' : DO[p.status] || p.status)}</span>
+    </div>
+    <div class="pos-nums">
+      <div><div class="k">${t('Price')}${p.live ? html` <span class="live-dot" title=${t('Live, about 15 minutes late')}></span>` : ''}</div>
+        <div class="v">${fmt.price(p.price)}${p.day_change != null ? html` <span class=${cls('pos-day', tone(p.day_change))}>${fmt.pct(p.day_change, 1)}</span>` : ''}</div>
+        <div class="faint s">${p.live ? t('live, ~15 min late') : t('last close')}</div></div>
+      <div class="r"><div class="k">${t('Profit / loss')}</div>
+        <div class=${cls('v', tone(p.pnl))}>${fmt.pct(p.pnl_pct, 1)}</div>
+        <div class=${cls('s', tone(p.pnl))}>${fmt.signed(p.pnl)} ${t('EGP')}</div></div>
+    </div>
+    <${RealCost} r=${p.real} />
+    ${p.status !== 'BOUNCE' && html`<${PlanBar} p=${p} />`}
+    ${urgent && html`<div class=${cls('pos-urgent', urgent.tone)}><${Icon} name="alert" size=${14} />${t(urgent.text)}</div>`}
+    ${p.status !== 'HOLD' && html`<p class="pos-reason" dir="auto">${tn(p.reason)}</p>`}
+    ${p.cautions && p.cautions.length > 0 && html`<div style="margin-bottom:8px"><${Cautions} items=${p.cautions} compact /></div>`}
+    <div class="pos-foot"><${DayBar} day=${p.day} max=${hold.max} review=${hold.review} />
+      ${onOpen && (open ? html`<button class="btn sm" onClick=${onOpen} aria-expanded="true"><${Icon} name="x" size=${14} />${t('Close')}</button>`
+        : html`<button class="btn sm ghost" onClick=${onOpen} aria-expanded="false">${t('Sell or edit')}<${Icon} name="chevron" size=${14} /></button>`)}</div>
+    ${children}
+  </article>`;
+}
+
+// After a rights issue: what the shares really cost (corporate.real_cost). Your broker never takes the cash from
+// selling the rights off the shares' cost, so its average, break-even and loss look worse than they are.
+function RealCost({ r }) {
+  if (!r) return null;     // the P&L above already uses the real cost once the rights are recorded; unsold: theirs added
+  const tile = (k, v, sub, c = '') => html`<div><div class="k">${t(k)}</div><div class=${cls('v', c)}>${v}</div><div class="s">${sub}</div></div>`;
+  return html`<div class="real-cost"><div class="k">${t('Counting the rights')}</div><div class="rt-prices">
+    ${r.app_avg != null && tile('Average at your broker', fmt.price(r.app_avg), t('without the rights cash'))}
+    ${tile('Real average', fmt.price(r.real_avg), t(r.app_avg != null ? 'rights cash taken off' : 'what you paid'))}
+    ${tile('Break-even', fmt.price(r.break_even), r.to_break_even > 0 ? t('needs {v}, after the selling fee', { v: fmt.pct(r.to_break_even, 1) })
+      : t('reached'), r.to_break_even > 0 ? '' : 'up')}
+    ${r.unsold > 0 && tile('Real profit / loss', fmt.pct(r.pnl_pct, 1), `${fmt.signed(r.pnl)} ${t('EGP')} · ${t('with the rights')}`, tone(r.pnl))}
+  </div>${r.unlisted > 0 && html`<p class="faint s" style="margin:0 0 10px">${t('{n} subscribed shares can be sold once the new shares are listed.', { n: fmt.int(r.unlisted) })}</p>`}</div>`;
+}
+
+// A rights issue's rights beside the shares they came with, as your broker lists them (Thndr: KORA_r1, cost 0): at
+// their price before they trade (corporate.rights_terms), all of it profit until you subscribe or sell them.
+export function RightsCard({ p }) {
+  const r = p.rights;
+  return html`<article class="card pos-card" id=${`pos-${p.id}-rights`}>
+    <div class="pos-head">
+      <${StockAvatar} symbol=${p.symbol} size=${36} />
+      <div class="pos-who"><a class="sym-big" href=${stockHref(r.symbol)}>${r.symbol}</a>
+        <div class="faint pos-sub">${t('{n} rights · subscription price {price}', { n: fmt.int(r.units), price: fmt.price(r.sub_price) })}</div></div>
+      <span class="chip nodata"><span class="dot"></span>${t('Rights')}</span>
+    </div>
+    <div class="pos-nums">
+      <div><div class="k">${t(r.live ? 'Last trade price' : 'Price')}</div><div class="v">${fmt.price(r.price)}</div>
+        <div class="faint s">${r.live ? html`<${Change} value=${r.change} />` : r.last
+          ? html`${t('last close')} <${Change} value=${r.last.change} />` : t('before the rights trade')}</div></div>
+      <div class="r"><div class="k">${t('Market value')}</div><div class="v">${fmt.int(r.value)}</div>
+        <div class="s up">${fmt.signed(r.value)} ${t('EGP')}</div></div>
+    </div>
+    <p class="pos-reason" dir="auto">${tn(r.note)}</p>
+    <div class="pos-foot"><a class="btn sm ghost" href=${stockHref(r.symbol)}>${t('Dates, choices and what happens next')}<${Icon} name="chevron" size=${14} /></a></div>
+  </article>`;
 }
 
 export function Empty({ icon = 'info', title, text, action }) {
@@ -204,7 +364,7 @@ export function Term({ k, children }) {
     ${pos && html`<span class="term-pop" role="tooltip" style=${style}><b>${info[0]}</b>${info[1]}</span>`}</span>`;
 }
 
-// Is EGX trading right now? Sunday to Thursday, 10:00–14:30 Cairo time (public holidays aren't known here).
+// Is EGX trading right now? Sunday to Thursday, 10:00–14:30 Cairo time, except the holidays it announced.
 export function sessionState(now = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Africa/Cairo', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -213,6 +373,7 @@ export function sessionState(now = new Date()) {
   const day = `${parts.year}-${parts.month}-${parts.day}`;
   const mins = Number(parts.hour) * 60 + Number(parts.minute);
   if (parts.weekday === 'Fri' || parts.weekday === 'Sat') return { state: 'weekend', day };
+  if (((store.status && store.status.holidays) || {})[day]) return { state: 'holiday', day };
   if (mins < 600) return { state: 'pre', day };
   if (mins < 870) return { state: 'open', day };
   return { state: 'after', day };
@@ -233,6 +394,8 @@ export function SessionBadge({ dataDate }) {
         'The session ended. The agent scans after the close; until then its numbers use the {date} close.']
       : s.state === 'weekend'
         ? ['ok', 'Market closed', 'Closing prices', 'Final closing prices of {date}. EGX trades Sunday to Thursday.']
+        : s.state === 'holiday'
+          ? ['ok', 'Market closed', 'Holiday', 'EGX is closed today for a public holiday. Final closing prices of {date}.']
         : ['ok', s.state === 'pre' ? 'Before the open' : 'Market closed', 'Closing prices',
           'Final closing prices of {date}. The next session opens at 10:00 Cairo time.'];
   return html`<div class=${cls('session', tn)} title=${t(text, { date })}>
@@ -246,6 +409,15 @@ export function Fold({ title, hint, open: first, flush, children }) {
   return html`<details class="fold card" open=${open} onToggle=${e => setOpen(e.currentTarget.open)}>
     <summary><${Icon} name="chevron" size=${16} /><b>${tx(title)}</b>${hint && html`<span class="hint">${tx(hint)}</span>`}</summary>
     ${open && html`<div class=${cls('fold-body', flush && 'flush')}>${children}</div>`}</details>`;
+}
+
+// Which stocks a list shows under your Shariah filter (Settings), with a link to change it.
+const SHARIAH_SHOWN = { kashif: 'Kashif compliant only', egx33: 'EGX33 members only',
+  either: 'Kashif compliant OR EGX33 member', both: 'Kashif compliant AND EGX33 member' };
+export function ShariahNote({ mode }) {
+  if (!SHARIAH_SHOWN[mode]) return null;
+  return html`<span class="shariah-note"><${Icon} name="shield" size=${13} />${t('Showing: {filter}', { filter: t(SHARIAH_SHOWN[mode]) })}
+    <a href="#/settings">${t('Change')}</a></span>`;
 }
 
 // Short main text, the fine print one tap away.
@@ -271,8 +443,10 @@ export function Chance({ p, base, top }) {
     return html`<span class="chance-off" title="Not in the model's top 10% today. Its test results are about its top picks, so it doesn't give a chance for the rest.">${t('not a top pick')}</span>`;
   }
   const ratio = base ? p / base : 1;
-  return html`<span class=${cls('chance', ratio >= 1.3 ? 'up' : ratio <= 0.8 ? 'low' : '')}
-    title=${base ? `The average liquid stock: ${fmt.pct(base, 0, false)}` : ''}>${fmt.pct(p, 0, false)}</span>`;
+  // the bar: the line in the middle is the average stock, so a bar past it beats the average (twice it fills the bar)
+  return html`<span class="chance-cell" title=${base ? t('The average actively traded stock: {v}', { v: fmt.pct(base, 0, false) }) : ''}>
+    <span class=${cls('chance', ratio >= 1.3 ? 'up' : ratio <= 0.8 ? 'low' : '')}>${fmt.pct(p, 0, false)}</span>
+    ${base > 0 && html`<span class="chance-bar" aria-hidden="true"><i class=${ratio >= 1 ? 'up' : ''} style=${`width:${Math.min(ratio / 2, 1) * 100}%`}></i></span>`}</span>`;
 }
 
 // Why the prediction model scored a stock as it did: the measures that pushed its score up (green) and down (red),
@@ -281,7 +455,20 @@ export function Why({ items }) {
   if (!items || !items.length) return null;
   return html`<ul class="model-why" aria-label="Why the model scored it like this">${items.map(x => html`<li
     class=${x.up ? 'up' : 'down'} key=${x.f} title=${x.up ? 'Pushed its score up' : 'Pulled its score down'}>
-    <span aria-hidden="true">${x.up ? '▲' : '▼'}</span>${x.text}</li>`)}</ul>`;
+    <span aria-hidden="true">${x.up ? '▲' : '▼'}</span>${tw(x.text)}</li>`)}</ul>`;
+}
+
+// The rating's reason in one line, from the same list (Why): its strongest push up from the chart and from the
+// company's results (or its two strongest when one side has none), and its strongest pull down. stacked: one a line.
+const COMPANY_WHY = /^(f_|rank_(ey|growth|quality)$)/;
+export function Reason({ items, stacked }) {
+  if (!items || !items.length) return null;
+  const ups = items.filter(x => x.up);
+  const chart = ups.find(x => !COMPANY_WHY.test(x.f)), co = ups.find(x => COMPANY_WHY.test(x.f));
+  const pick = [...(chart && co ? ups.filter(x => x === chart || x === co) : ups.slice(0, 2)), ...items.filter(x => !x.up).slice(0, 1)];
+  return html`<span class=${cls('rating-why', stacked && 'stacked')} title=${t('What lifted (▲) and lowered (▼) its rating most')}>${pick.map((x, i) => html`${
+    i ? html`<span class="faint"> · </span>` : ''}<span class=${x.up ? 'up' : 'down'} key=${x.f}><span aria-hidden="true">${
+    x.up ? '▲' : '▼'}</span> ${tw(x.text)}</span>`)}</span>`;
 }
 
 // A star that adds the stock to your watchlist (or takes it off).
@@ -314,7 +501,7 @@ export const TAG_LABELS = { dividend: 'Dividend', bonus: 'Bonus shares', results
   deal: 'Deal', financing: 'Financing', legal: 'Legal', meeting: 'Meeting', buyback: 'Buyback', analysis: 'Analysis' };
 export function NewsList({ items, sources = {}, showSymbol, limit, empty = 'No news yet.' }) {
   const [all, setAll] = useState(false);
-  if (!items || !items.length) return html`<p class="muted" style="font-size:13px">${empty}</p>`;
+  if (!items || !items.length) return html`<p class="muted" style="font-size:13px">${tx(empty)}</p>`;
   const shown = limit && !all ? items.slice(0, limit) : items;
   return html`<ul class="news-list">${shown.map(n => html`<li key=${`${n.id}|${n.symbol || ''}`}>
       <span class=${cls('tone-dot', n.tone > 0 ? 'up' : n.tone < 0 ? 'down' : '')}
@@ -328,15 +515,15 @@ export function NewsList({ items, sources = {}, showSymbol, limit, empty = 'No n
         </div>
       </div></li>`)}</ul>
     ${limit && items.length > limit && html`<button class="linkish" style="margin-top:8px" onClick=${() => setAll(!all)}>
-      ${all ? 'Show fewer' : `Show all ${items.length}`}</button>`}`;
+      ${t(all ? 'Show fewer' : 'Show all {n}', { n: items.length })}</button>`}`;
 }
 
-// The market switch for the model's picks: full size, half size or no new buys, from breadth.
+// The market switch, from breadth: the model's picks at full or half size, or no new buys at all (breadth.switch).
 const SWITCH_TONE = { full: 'ok', half: 'warn', off: 'bad' };
 const SWITCH_DO = {
   full: "The model's top picks can be bought at your usual size.",
   half: "Buy the model's top picks at half your usual size.",
-  off: "Don't buy the model's picks until more stocks are back above their average.",
+  off: "No new BUYs at all until more stocks are back above their average.",
 };
 export function MarketSwitch({ sw, compact }) {
   if (!sw) return null;
@@ -388,6 +575,74 @@ export function Switch({ checked, onChange, label }) {
   return html`<label class="switch"><input type="checkbox" checked=${checked} onChange=${e => onChange(e.target.checked)} />
     <span class="track"></span>${label && html`<span>${label}</span>`}</label>`;
 }
+// ------------------------------------------------------------------ a date, picked on the site's own calendar
+// (the browser's own can't be styled). EGX trades Sunday–Thursday, so trade dates skip Friday and Saturday
+// (`weekends` lets them through, e.g. a dividend's payday) and nothing after `max` (today). A drop-in for
+// <input type="date">: onInput gets {target: {value: 'YYYY-MM-DD'}}. On a phone it opens as a sheet at the bottom.
+const isoOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const dayOf = s => new Date(`${s}T00:00:00`);
+const offDay = d => d.getDay() === 5 || d.getDay() === 6;
+export function lastSession(day = todayISO()) {
+  const d = dayOf(day);
+  while (offDay(d)) d.setDate(d.getDate() - 1);
+  return isoOf(d);
+}
+const DP_W = 300;
+
+export function DateInput({ value, onInput, max = todayISO(), weekends = false, small }) {
+  const [view, setView] = useState(null);        // the month shown (its 1st) while open, else null
+  const [pos, setPos] = useState(null);          // where the calendar sits; null on a phone (a sheet)
+  const btn = useRef(null);
+  const ar = store.lang === 'ar', locale = ar ? 'ar-EG-u-nu-latn' : 'en-GB';
+  const close = () => { setView(null); btn.current && btn.current.focus(); };
+  useEffect(() => {
+    if (!view) return undefined;
+    const onKey = e => e.key === 'Escape' && close();
+    const onMove = e => !(e.target.closest && e.target.closest('.dp')) && close();
+    addEventListener('keydown', onKey); addEventListener('resize', onMove); addEventListener('scroll', onMove, true);
+    return () => { removeEventListener('keydown', onKey); removeEventListener('resize', onMove); removeEventListener('scroll', onMove, true); };
+  }, [!view]);
+  const open = () => {
+    const r = btn.current.getBoundingClientRect(), h = 372;
+    const left = Math.max(8, Math.min(ar ? r.right - DP_W : r.left, innerWidth - DP_W - 8));
+    setPos(innerWidth < 560 ? null : { left, top: r.bottom + h + 8 > innerHeight && r.top > h ? r.top - h - 6 : r.bottom + 6 });
+    const d = dayOf(value || max);
+    setView(new Date(d.getFullYear(), d.getMonth(), 1));
+  };
+  const pick = day => { onInput({ target: { value: day } }); close(); };
+  const shown = value ? dayOf(value).toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : t('Pick a date');
+  const trigger = html`<button type="button" ref=${btn} class=${cls('input', 'date-btn', small && 'sm')} onClick=${() => (view ? close() : open())}
+    aria-haspopup="dialog" aria-expanded=${!!view}><${Icon} name="calendar" size=${small ? 14 : 16} /><span>${shown}</span></button>`;
+  if (!view) return trigger;
+  const y = view.getFullYear(), m = view.getMonth(), today = todayISO(), quick = weekends ? max : lastSession(max);
+  const cells = [...Array(view.getDay()).fill(null), ...Array.from({ length: new Date(y, m + 1, 0).getDate() }, (_, i) => new Date(y, m, i + 1))];
+  const heads = Array.from({ length: 7 }, (_, i) => new Date(2026, 0, 4 + i)       // 4 Jan 2026 was a Sunday
+    .toLocaleDateString(locale, { weekday: ar ? 'narrow' : 'short' }).slice(0, ar ? 3 : 2));
+  const later = isoOf(new Date(y, m + 1, 1)) > max;
+  return html`${trigger}<div class=${cls('dp-scrim', !pos && 'dim')} onMouseDown=${close}></div>
+    <div class=${cls('dp', !pos && 'sheet')} role="dialog" aria-label=${t('Pick a date')} style=${pos ? `left:${pos.left}px;top:${pos.top}px` : undefined}>
+      <div class="dp-head">
+        <button type="button" class="dp-nav prev" onClick=${() => setView(new Date(y, m - 1, 1))} aria-label=${t('Previous month')}><${Icon} name="chevron" size=${16} /></button>
+        <b>${view.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}</b>
+        <button type="button" class="dp-nav" disabled=${later} onClick=${() => setView(new Date(y, m + 1, 1))} aria-label=${t('Next month')}><${Icon} name="chevron" size=${16} /></button>
+      </div>
+      <div class="dp-grid">
+        ${heads.map((h, i) => html`<span class=${cls('dp-wd', !weekends && i >= 5 && 'off')}>${h}</span>`)}
+        ${cells.map((d, i) => {
+          if (!d) return html`<span key=${`b${i}`}></span>`;
+          const s = isoOf(d), off = s > max || (!weekends && offDay(d));
+          return html`<button type="button" key=${s} class=${cls('dp-day', s === value && 'on', s === today && 'today')} disabled=${off}
+            aria-pressed=${s === value} aria-label=${d.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            onClick=${() => pick(s)}>${d.getDate()}</button>`;
+        })}
+      </div>
+      <div class="dp-foot">
+        <button type="button" class="btn sm" onClick=${() => pick(quick)}>${t(quick === today ? 'Today' : 'Last session')}</button>
+        ${!weekends && html`<span class="faint">${t('Fri and Sat: no trading')}</span>`}
+      </div>
+    </div>`;
+}
+
 export function Field({ label, help, error, children, className }) {
   return html`<div class=${cls('field', className)}>
     ${label && html`<label>${tx(label)}</label>`}${children}
@@ -438,7 +693,7 @@ export function DataTable({ columns, rows, rowKey = (r, i) => i, onRowClick, sor
       <//>`;
     }) : html`<tr><td colspan=${columns.length} class="table-empty">${tx(empty)}</td></tr>`}</tbody>
   </table>${limit && sorted.length > limit && html`<div class="table-more">
-    <button class="linkish" onClick=${() => setAll(a => !a)}>${all ? 'Show fewer' : `Show all ${sorted.length}`}</button></div>`}</div>`;
+    <button class="linkish" onClick=${() => setAll(a => !a)}>${t(all ? 'Show fewer' : 'Show all {n}', { n: sorted.length })}</button></div>`}</div>`;
 }
 
 // ------------------------------------------------------------------ stock picker / search
@@ -448,15 +703,20 @@ function matches(stocks, q) {
   if (!s) return stocks.slice(0, 60);
   const starts = [], contains = [], names = [];
   for (const x of stocks) {
-    if (x.symbol.startsWith(s)) starts.push(x);
-    else if (x.symbol.includes(s)) contains.push(x);
+    const sym = x.symbol.toUpperCase();   // KORA_r1
+    if (sym.startsWith(s)) starts.push(x);
+    else if (sym.includes(s)) contains.push(x);
     else if ((x.name_ar || '').includes(q.trim()) || (x.sector || '').toUpperCase().includes(s)) names.push(x);
   }
   return [...starts, ...contains, ...names].slice(0, 60);
 }
 
 export function StockPicker({ value, onChange, starred = [], placeholder = 'Search stocks…', search, hotkey, invalid }) {
-  const stocks = useStore(s => s.stocks);
+  const listed = useStore(s => s.stocks);
+  // the top search also finds rights issues: KORA_r1 while it lasts (views.rights_list), and every past one, by date
+  const rights = useStore(s => s.rights), past = useStore(s => s.rightsPast);
+  const stocks = useMemo(() => listed && (search ? [...listed, ...(rights || []),
+    ...(past || []).filter(p => !(rights || []).some(r => r.base === p.base && r.ex_date === p.ex))] : listed), [listed, rights, past, search]);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(0);
@@ -488,7 +748,8 @@ export function StockPicker({ value, onChange, starred = [], placeholder = 'Sear
   }, [hi]);
 
   const pick = x => {
-    onChange(x.symbol);
+    if (x.ex) go(`${stockHref(x.symbol)}?ex=${x.ex}`);       // a past rights issue
+    else onChange(x.symbol);
     setOpen(false);
     setQ('');
     if (search) input.current?.blur();
@@ -509,8 +770,8 @@ export function StockPicker({ value, onChange, starred = [], placeholder = 'Sear
     ${open && html`<div class="dropdown" ref=${listRef}>${list.length ? list.map((x, i) => html`
       <div class=${cls('dd-item', i === hi && 'on')} onMouseDown=${e => { e.preventDefault(); pick(x); }} onMouseEnter=${() => setHi(i)}>
         <span class="s">${star.has(x.symbol) ? '⭐ ' : ''}${x.symbol}</span>
-        <span class="n"><span dir="rtl">${x.name_ar || ''}</span> <span class="faint">· ${x.sector || ''}</span></span>
-        <span class="p">${x.close != null ? html`${fmt.price(x.close)} <${Change} value=${x.change} />` : html`<span class="faint">${t('no data')}</span>`}</span>
+        <span class="n"><span dir="rtl">${x.name_ar || ''}</span> <span class="faint">· ${tn(x.sector || '')}</span></span>
+        <span class="p">${x.ex ? html`<span class="faint">${fmt.date(x.ex)}</span>` : x.close != null ? html`${fmt.price(x.close)} <${Change} value=${x.change} />` : html`<span class="faint">${t('no data')}</span>`}</span>
       </div>`) : html`<div class="dd-empty">${t(stocks ? 'No stock matches.' : 'Loading stocks…')}</div>`}</div>`}
   </div>`;
 }
@@ -538,7 +799,7 @@ export function Toasts() {
   const toasts = useStore(s => s.toasts);
   return html`<div class="toasts" role="status">${toasts.map(x => html`<div class=${`toast ${x.tone}`} key=${x.id}>
     <${Icon} name=${x.tone === 'error' ? 'xCircle' : 'checkCircle'} /><div>${x.message}</div>
-    <button class="x" onClick=${() => dismissToast(x.id)} aria-label="Dismiss"><${Icon} name="x" size=${14} /></button></div>`)}</div>`;
+    <button class="x" onClick=${() => dismissToast(x.id)} aria-label=${t('Dismiss')}><${Icon} name="x" size=${14} /></button></div>`)}</div>`;
 }
 
 export function useJob(kind) {
@@ -559,8 +820,8 @@ export function JobControl() {
       <span class="pbar"><span style=${`width:${pct}%`}></span></span><b>${pct}%</b></div>`;
   }
   if (store.me && !store.me.user.is_admin) {
-    const pill = market && html`<span class="data-pill" title="The site scans by itself after every close">
-      <${Icon} name="check" size=${14} /><span class="hide-mobile">Data:${' '}</span>${fmt.date(market.date, false)} close</span>`;
+    const pill = market && html`<span class="data-pill" title=${t('The site scans by itself after every close')}>
+      <${Icon} name="check" size=${14} /><span class="hide-mobile">${t('Data:')}${' '}</span>${t('{date} close', { date: fmt.date(market.date, false) })}</span>`;
     // The GitHub Pages site: the owner's button opens the scan on GitHub (Settings → Run a scan now).
     const url = STATIC && owner && scanUrl;
     return url ? html`${pill}<a class="btn primary" href=${url} target="_blank" rel="noopener noreferrer"
@@ -597,12 +858,12 @@ function TvFrame({ src, height, title }) {
     referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>`;
 }
 
-export function LiveChart({ symbol, height = 520 }) {
+export function LiveChart({ symbol, height = 520, interval = 'D' }) {
   const theme = useStore(s => s.theme);
-  const q = new URLSearchParams({ symbol: tvSymbol(symbol), interval: 'D', theme, style: '1', locale: tvLocale(),
+  const q = new URLSearchParams({ symbol: tvSymbol(symbol), interval, theme, style: '1', locale: tvLocale(),
     timezone: 'Africa/Cairo', hidesidetoolbar: '1', symboledit: '0', saveimage: '0', withdateranges: '1',
     hideideas: '1' });
-  return html`<${TvFrame} key=${theme + symbol} src=${`https://s.tradingview.com/widgetembed/?${q}`} height=${height}
+  return html`<${TvFrame} key=${theme + symbol + interval} src=${`https://s.tradingview.com/widgetembed/?${q}`} height=${height}
     title=${`${symbol} live chart from TradingView`} />`;
 }
 
@@ -620,7 +881,71 @@ export function LiveQuotes({ symbols, title = 'Live' }) {
   const opts = { width: '100%', height: '100%', colorTheme: theme, isTransparent: true, showSymbolLogo: true,
     symbolsGroups: [{ name: title, symbols: list.map(s => ({ name: tvSymbol(s), displayName: s })) }] };
   return html`<${TvFrame} key=${theme + list.join()} height=${96 + 38 * list.length} src=${widgetSrc('market-quotes', opts)}
-    title="Live prices from TradingView" />`;
+    title=${t('Live prices from TradingView')} />`;
 }
 
-export const LIVE_NOTE = 'Live prices from TradingView, about 15 minutes late. The signals, stops and your P&L still use the last close.';
+export const LIVE_NOTE = 'Live prices from TradingView, about 15 minutes late. The signals, stops and your profit / loss still use the last close.';
+
+// ------------------------------------------------------------------ the bell
+// A Telegram message when the stock gets a BUY (the bot's /watch). On a browser linked to the bot (Connect Telegram, or
+// the site opened inside Telegram) a tap turns it on or off right here and a lit bell shows it's on (local/api.js
+// setBell). Otherwise the tap opens Telegram once with t.me/<bot>?start=watch-SYMBOL, which worker/bot.js and
+// app/alerts.py read as "/watch SYMBOL". Only on the website, which has a bot (Picks and the stock page).
+export function useBells(tg) {
+  const bells = useStore(s => s.bells);             // the symbols with a bell on (shared, so a new star lights it); null: not linked
+  const setBells = v => setStore({ bells: v });
+  const bot = tg && tg.bot;
+  useEffect(() => {
+    if (bot) import('./local/api.js').then(m => m.bells()).then(setBells, () => setBells(null));
+  }, [bot]);
+  return [bells, setBells];
+}
+
+export function Bell({ sym, tg, bells, setBells }) {
+  const [busy, setBusy] = useState(false);
+  if (!tg || !tg.bot) return null;
+  if (bells) {
+    const on = bells.includes(sym);
+    const toggle = async e => {
+      e.preventDefault();
+      e.stopPropagation();
+      setBusy(true);
+      try {
+        setBells(await (await import('./local/api.js')).setBell(sym, !on));
+        toast(on ? t('{sym}: bell off. No Telegram message when it gets a BUY.', { sym })
+          : t("{sym}: bell on. You'll get a Telegram message when it gets a BUY.", { sym }));
+      } catch (err) {
+        toast(err.message, 'error', 8000);
+      } finally {
+        setBusy(false);
+      }
+    };
+    return html`<button type="button" class=${cls('bell-btn', on && 'on')} onClick=${toggle} disabled=${busy} aria-pressed=${on}
+      aria-label=${t(on ? 'Stop the Telegram message for {sym}' : 'Tell me on Telegram when {sym} gets a BUY', { sym })}
+      title=${t(on ? 'On: a Telegram message when {sym} gets a BUY. Tap to turn it off.' : 'Tell me on Telegram when {sym} gets a BUY', { sym })}>
+      <${Icon} name="bell" size=${15} /></button>`;
+  }
+  return html`<a class="bell-btn" href=${`https://t.me/${tg.bot}?start=watch-${sym}`} target="_blank" rel="noopener noreferrer"
+    onClick=${e => e.stopPropagation()} aria-label=${t('Tell me on Telegram when {sym} gets a BUY', { sym })}
+    title=${t('A Telegram message when {sym} gets a BUY signal. Telegram must be connected first: Settings → Connect Telegram.', { sym })}>
+    <${Icon} name="bell" size=${15} /></a>`;
+}
+
+// A big owner's move between two owners lists (data/ownership.py owner_moves): Home and the stock page.
+const pct1 = v => `${fmt.num(v, 1)}%`;
+export function ownerText(m) {
+  if (m.before == null) return t('{who}: new big owner with {p}', { who: m.holder, p: pct1(m.after) });
+  if (m.after == null) return t('{who}: no longer on the big owners list (had {p})', { who: m.holder, p: pct1(m.before) });
+  return t(m.after > m.before ? '{who} raised its stake from {a} to {b}' : '{who} cut its stake from {a} to {b}',
+    { who: m.holder, a: pct1(m.before), b: pct1(m.after) });
+}
+
+// What makes a support or resistance level (egx_agent/levels.py sources): "swing low 2026-03-02" → "Swing low (2 Mar
+// 2026)". Stock pages and EGX30.
+function source(what) {
+  const m = /^(.*?) (\d{4}-\d{2}-\d{2})$/.exec(what);
+  const name = m ? m[1] : what;
+  const label = t(name.charAt(0).toUpperCase() + name.slice(1));
+  return m ? `${label} (${fmt.date(m[2])})` : label;
+}
+export const sources = list => (list || []).map(source).join(' · ');

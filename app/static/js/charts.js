@@ -46,8 +46,42 @@ function baseOptions(t, extra = {}) {
 const points = (time, values) => time.map((t, i) => (values[i] == null ? { time: t } : { time: t, value: values[i] }));
 const showRange = (chart, n, bars) => chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - bars), to: n + 2 });
 
+// Shaded price bands across the whole chart, behind the candles: support and resistance zones.
+// bands: [{ low, high, color }]
+class Bands {
+  constructor(bands) { this.bands = bands; this.series = null; }
+  attached({ series }) { this.series = series; }
+  detached() { this.series = null; }
+  updateAllViews() {}
+  paneViews() {
+    const self = this;
+    const draw = target => target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, verticalPixelRatio: vr }) => {
+      if (!self.series) return;
+      for (const b of self.bands) {
+        const pad = b.high === b.low ? b.low * 0.002 : 0;      // a zone from one level: a thin band around it
+        const y1 = self.series.priceToCoordinate(b.high + pad), y2 = self.series.priceToCoordinate(b.low - pad);
+        if (y1 == null || y2 == null) continue;
+        const top = Math.round(Math.min(y1, y2) * vr);
+        ctx.fillStyle = b.color;
+        ctx.fillRect(0, top, bitmapSize.width, Math.max(Math.round(Math.abs(y2 - y1) * vr), Math.round(2 * vr)));
+      }
+    });
+    return [{ zOrder: () => 'bottom', renderer: () => ({ draw() {}, drawBackground: draw }) }];
+  }
+}
+
+// A bar's time for the legend: a date for daily bars, a date and the hour for the 1-hour and 4-hour charts (their
+// times are Cairo's clock written as UTC seconds).
+function barTime(time) {
+  if (typeof time !== 'number') return fmt.date(time);
+  const iso = new Date(time * 1000).toISOString();
+  return `${fmt.date(iso.slice(0, 10))} ${iso.slice(11, 16)}`;
+}
+
 // ------------------------------------------------------------------ price chart (candles, averages, volume, RSI, MACD)
-export function PriceChart({ series, levels = [], fills = [], bars = 250, show }) {
+// chart: the stock's support/resistance plan (levels.py): its zones are shaded when show.zones, its Fibonacci
+// levels drawn when show.fib.
+export function PriceChart({ series, levels = [], fills = [], bars = 250, show, chart: plan = null }) {
   const box = useRef();
   const legend = useRef();
   const chartRef = useRef();
@@ -57,7 +91,9 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show }
     const t = palette();
     const T = series.time;
     const n = T.length;
-    const chart = LWC.createChart(box.current, baseOptions(t));
+    const intraday = typeof T[0] === 'number';
+    const chart = LWC.createChart(box.current, baseOptions(t, intraday
+      ? { timeScale: { borderColor: t.border, rightOffset: 3, timeVisible: true, secondsVisible: false } } : {}));
     chartRef.current = chart;
 
     const candles = chart.addSeries(LWC.CandlestickSeries, {
@@ -85,7 +121,19 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show }
         axisLabelVisible: true, title: l.label,
       });
     }
-    if (fills.length) {
+    if (plan && show.zones) {
+      const shade = (z, color) => ({ low: z.low ?? z.price, high: z.high ?? z.price,
+        color: alpha(color, Math.min(0.05 + z.strength * 0.02, 0.2)) });
+      candles.attachPrimitive(new Bands([...(plan.supports || []).map(z => shade(z, t.up)),
+        ...(plan.resistances || []).map(z => shade(z, t.down))]));
+    }
+    if (plan && plan.fib && show.fib) {
+      for (const f of plan.fib.levels) candles.createPriceLine({
+        price: f.price, color: t.violet, lineWidth: 1, lineStyle: LWC.LineStyle.Dashed,
+        axisLabelVisible: true, title: `Fib ${(f.r * 100).toFixed(1)}%`,
+      });
+    }
+    if (fills.length && !intraday) {
       LWC.createSeriesMarkers(candles, [...fills].sort((a, b) => (a.date < b.date ? -1 : 1)).map(f => ({
         time: f.date, position: f.side === 'buy' ? 'belowBar' : 'aboveBar', color: f.side === 'buy' ? t.up : t.down,
         shape: f.side === 'buy' ? 'arrowUp' : 'arrowDown', text: `${f.side === 'buy' ? 'Buy' : 'Sell'} ${fmt.int(f.shares)}`,
@@ -128,7 +176,7 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show }
       const chg = prev ? series.close[i] / prev - 1 : null;
       const c = chg == null ? '' : chg >= 0 ? 'up' : 'down';
       const parts = [
-        `<span>${fmt.date(T[i])}</span>`,
+        `<span>${barTime(T[i])}</span>`,
         `<span>O <b>${fmt.price(series.open[i])}</b></span>`, `<span>H <b>${fmt.price(series.high[i])}</b></span>`,
         `<span>L <b>${fmt.price(series.low[i])}</b></span>`,
         `<span>C <b>${fmt.price(series.close[i])}</b> <span class="${c}">${fmt.pct(chg, 2)}</span></span>`,
@@ -144,7 +192,7 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show }
     chart.subscribeCrosshairMove(p => writeLegend(p.logical == null ? n - 1 : Math.round(p.logical)));
     showRange(chart, n, bars);
     return () => { chart.remove(); chartRef.current = null; };
-  }, [series, levels, fills, show.ema, show.volume, show.rsi, show.macd, theme]);
+  }, [series, levels, fills, plan, show.ema, show.volume, show.rsi, show.macd, show.zones, show.fib, theme]);
 
   useEffect(() => { if (chartRef.current) showRange(chartRef.current, series.time.length, bars); }, [bars]);
 
@@ -160,14 +208,16 @@ export function LineChart({ lines, height = 320, format = 'egp' }) {
   const theme = useStore(s => s.theme);
   useEffect(() => {
     const t = palette();
-    const f = format === 'pct' ? v => fmt.pct(v, 1) : v => fmt.short(v);
+    const f = format === 'pct' ? v => fmt.pct(v, 1) : format === 'grams' ? v => `${fmt.num(v, v < 100 ? 2 : 0)} g`
+      : format === 'usd' ? v => `$${fmt.short(v)}` : format === 'price' ? v => fmt.price(v) : v => fmt.short(v);
     const chart = LWC.createChart(box.current, baseOptions(t, {
       localization: { locale: 'en-US', priceFormatter: f },
       timeScale: { borderColor: t.border, fixLeftEdge: true, fixRightEdge: true },
     }));
     const made = lines.map(l => {
       const color = cssVar(l.color || '--accent');
-      const opts = { lineWidth: l.width || 2, color, priceLineVisible: false, lastValueVisible: true,
+      // hidden: a line that only spreads the time axis (days still to come), not drawn or listed
+      const opts = { lineWidth: l.width || 2, color, priceLineVisible: false, lastValueVisible: !l.hidden, visible: !l.hidden,
         lineStyle: l.dashed ? LWC.LineStyle.Dashed : LWC.LineStyle.Solid };
       const s = l.area
         ? chart.addSeries(LWC.AreaSeries, { ...opts, lineColor: color, topColor: alpha(color, 0.05), bottomColor: alpha(color, 0.35),
@@ -178,9 +228,9 @@ export function LineChart({ lines, height = 320, format = 'egp' }) {
     });
     const writeLegend = param => {
       if (!legend.current) return;
-      legend.current.innerHTML = made.map(({ s, l, color }) => {
+      legend.current.innerHTML = made.filter(m => !m.l.hidden).map(({ s, l, color }) => {
         const d = param && param.seriesData ? param.seriesData.get(s) : null;
-        const v = d ? d.value : l.data.length ? l.data[l.data.length - 1].value : null;
+        const v = d ? d.value : (l.data.findLast(x => x.value != null) || {}).value;   // days still to come: no value
         return `<span><span class="legend-dot" style="background:${color}"></span>${l.title} <b>${v == null ? '–' : f(v)}</b></span>`;
       }).join('');
     };
@@ -269,6 +319,48 @@ export function BreadthChart({ h, height = 440 }) {
         `<span><span class="legend-dot" style="background:${t.up}"></span>${tr('Above 50-day avg')} <b>${fmt.pct(h.above50[i], 0, false)}</b></span>`,
         `<span><span class="legend-dot" style="background:${t.violet}"></span>${tr('Above 20-day avg')} <b>${fmt.pct(h.above20[i], 0, false)}</b></span>`,
       ].join('');
+    };
+    writeLegend(n - 1);
+    chart.subscribeCrosshairMove(p => writeLegend(p.logical == null ? n - 1 : Math.round(p.logical)));
+    const fit = () => chart.timeScale().fitContent();
+    fit();
+    const frame = requestAnimationFrame(fit);
+    return () => { cancelAnimationFrame(frame); chart.remove(); };
+  }, [h, theme]);
+  return html`<div class="chart-box" style=${`height:${height}px`}><div class="chart-legend" ref=${legend}></div>
+    <div ref=${box} style="position:absolute;inset:0"></div></div>`;
+}
+
+// ------------------------------------------------------------------ market mood over a year
+// The mood (0–100) over shaded fear and greed zones.
+export function MoodChart({ h, height = 300 }) {
+  const box = useRef();
+  const legend = useRef();
+  const theme = useStore(s => s.theme);
+  useEffect(() => {
+    const t = palette();
+    const T = h.time;
+    const n = T.length;
+    const chart = LWC.createChart(box.current, baseOptions(t, {
+      timeScale: { borderColor: t.border, fixLeftEdge: true, fixRightEdge: true },
+    }));
+    const mood = chart.addSeries(LWC.LineSeries, {
+      color: t.accent, lineWidth: 2, priceLineVisible: false,
+      priceFormat: { type: 'custom', formatter: v => String(Math.round(v)), minMove: 1 },
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+    });
+    mood.setData(points(T, h.score));
+    mood.attachPrimitive(new Bands([
+      { low: 0, high: 25, color: alpha(t.down, 0.14) }, { low: 25, high: 45, color: alpha(t.down, 0.06) },
+      { low: 56, high: 76, color: alpha(t.up, 0.06) }, { low: 76, high: 100, color: alpha(t.up, 0.14) },
+    ]));
+    for (const [y, title] of [[25, tr('Extreme fear')], [76, tr('Extreme greed')]]) {
+      mood.createPriceLine({ price: y, color: t.text3, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title });
+    }
+    mood.priceScale().applyOptions({ scaleMargins: { top: 0.04, bottom: 0.04 } });
+    const writeLegend = i => {
+      if (!legend.current || i < 0 || i >= n) return;
+      legend.current.innerHTML = `<span>${fmt.date(T[i])}</span><span><span class="legend-dot" style="background:${t.accent}"></span>${tr('Mood')} <b>${h.score[i] == null ? '–' : Math.round(h.score[i])}</b></span>`;
     };
     writeLegend(n - 1);
     chart.subscribeCrosshairMove(p => writeLegend(p.logical == null ? n - 1 : Math.round(p.logical)));

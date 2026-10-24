@@ -33,3 +33,19 @@ def test_expected_session_date():
     assert expected_session_date(at(2026, 9, 27, 10, 0)) == date(2026, 9, 24)   # Sunday morning → Thursday
     assert expected_session_date(at(2026, 9, 27, 16, 0)) == date(2026, 9, 27)   # Sunday after close
     assert expected_session_date(at(2026, 9, 26, 12, 0)) == date(2026, 9, 24)   # Saturday → Thursday
+
+
+def test_a_scan_every_half_hour_during_the_session(tmp_path):
+    """Sunday–Thursday 10:15–14:45 Cairo a run scans the live prices when the last scan is 25+ minutes old."""
+    import json
+
+    from egx_agent import db
+    from egx_agent.scan import session_scan_due
+    conn = db.connect(tmp_path / "egx.db")
+    at = lambda d, h, m: datetime(2026, 10, d, h, m, tzinfo=CAIRO)  # noqa: E731  (4 Oct 2026 is a Sunday)
+    assert session_scan_due(conn, at(4, 11, 0))                      # no scan yet
+    db.set_meta(conn, "market", json.dumps({"finished": at(4, 10, 50).isoformat()}))
+    assert not session_scan_due(conn, at(4, 11, 0))                  # 10 minutes ago
+    assert session_scan_due(conn, at(4, 11, 20))                     # 30 minutes ago
+    assert not session_scan_due(conn, at(4, 9, 50)) and not session_scan_due(conn, at(4, 15, 30))   # closed
+    assert not session_scan_due(conn, at(9, 11, 20))                 # Friday

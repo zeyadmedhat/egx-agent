@@ -8,7 +8,7 @@ import { LineChart } from '../charts.js';
 
 const YEARS = [1, 2, 3, 4].map(y => ({ value: y, label: `${y} year${y > 1 ? 's' : ''}` }));
 const UNIVERSES = [
-  { value: 'all', label: 'All liquid EGX stocks' },
+  { value: 'all', label: 'All actively traded EGX stocks' },
   { value: 'egx30', label: 'EGX30 members only' },
   { value: 'egx33', label: 'EGX33 Shariah members only' },
 ];
@@ -42,9 +42,9 @@ export function BacktestPage() {
       next open, the same position sizing, fees, stops, targets and 1-month limit. The first run takes about 20–40 seconds.</p>
   </div>`;
 
-  if (loading && !res) return html`<${PageHead} title="Backtest" />${controls}<div style="margin-top:14px"><${PageLoading} error=${error} /></div>`;
+  if (loading && !res) return html`<${PageHead} title="Rules test" />${controls}<div style="margin-top:14px"><${PageLoading} error=${error} /></div>`;
   return html`
-    <${PageHead} title="Backtest" sub="How the rules would have done in the past, compared with simply holding EGX30." />
+    <${PageHead} title="Rules test" sub="How the rules would have done in the past, compared with simply holding EGX30." />
     ${controls}
     <div style="margin-top:14px"><${JobProgress} kind="backtest" title="Replaying the market…" /></div>
     ${!res && !mine && html`<div class="card" style="margin-top:14px"><${Empty} icon="history" title="No backtest yet"
@@ -71,13 +71,13 @@ function Results({ res, equity, drawdown }) {
     { key: 'shares', label: 'Shares', align: 'r', fmt: v => fmt.int(v) },
     { key: 'days_held', label: 'Days', align: 'r' },
     { key: 'return_pct', label: 'Return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v)}</span>` },
-    { key: 'pnl', label: 'P&L (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'pnl', label: 'Profit / loss (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
     { key: 'reason', label: 'Exit', render: r => html`<span class="muted">${r.reason}</span>` },
   ];
   const stockCols = [
     { key: 'symbol', label: 'Stock', render: r => html`<${StockCell} symbol=${r.symbol} sub=${false} />` },
     { key: 'trades', label: 'Trades', align: 'r' },
-    { key: 'pnl', label: 'P&L (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+    { key: 'pnl', label: 'Profit / loss (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
   ];
   return html`
     <section class="section">
@@ -93,7 +93,7 @@ function Results({ res, equity, drawdown }) {
         <${Kpi} label="Win rate" value=${m.win_rate == null ? '–' : fmt.pct(m.win_rate, 0, false)}
           sub=${m.avg_win != null ? `avg win ${fmt.pct(m.avg_win)} / loss ${fmt.pct(m.avg_loss)}` : ''} />
         <${Kpi} label="Profit factor" value=${pf} sub="above 1 = profitable" valueClass=${m.profit_factor_inf || m.profit_factor > 1 ? 'up' : 'down'} />
-        <${Kpi} label="Avg days held" value=${fmt.num(m.avg_days_held, 1)} sub=${`invested ${fmt.pct(m.exposure, 0, false)} of days`} />
+        <${Kpi} label="Average days held" value=${fmt.num(m.avg_days_held, 1)} sub=${`invested ${fmt.pct(m.exposure, 0, false)} of days`} />
       </div>
     </section>
     <div class="card flush" style="margin-top:14px"><${LineChart} lines=${equity} height=${340} /></div>

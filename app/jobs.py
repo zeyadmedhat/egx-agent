@@ -12,8 +12,8 @@ from typing import Callable
 
 import pandas as pd
 
-from egx_agent import backtest, config, corporate, db, predict, scan
-from egx_agent.data import macro, news, prices, shariah, universe
+from egx_agent import backtest, config, corporate, db, holidays, predict, record, scan
+from egx_agent.data import dividends, fundamentals, macro, news, prices, shariah, universe
 
 from . import accounts, alerts, health, views
 
@@ -96,6 +96,10 @@ class JobRunner:
             try:
                 conn = self.site.market()
                 try:
+                    try:   # EGX's holidays (a few looks a day), before deciding whether a close is due
+                        holidays.check(conn)
+                    except Exception:  # the days it knew still count
+                        pass
                     stale = scan.scan_is_stale(conn)
                 finally:
                     conn.close()
@@ -118,9 +122,19 @@ def scan_job(update_data: bool, site: "accounts.Site | None" = None):
         market = scan.run_scan(conn, cfg, progress=say, update_data=update_data, accounts=people)
         market["telegram"] = send_alerts(site, conn, cfg)
         market["model"] = retrain_if_due(conn, cfg, say)
+        market["odds"] = refresh_odds(conn, cfg)
         market["alarms"] = check_health(site, conn, cfg, market)
         return market
     return fn
+
+
+def refresh_odds(conn, cfg: dict) -> str:
+    """What the rules' past signals did by score, for the BUY cards: a 10-year replay once a week (record.py)."""
+    try:
+        return "updated" if record.refresh_odds(conn, cfg) else ""
+    except Exception as exc:  # the signals still work without it
+        traceback.print_exc()
+        return f"failed: {exc}"
 
 
 def owner_sender(site: "accounts.Site | None", cfg: dict) -> health.Send | None:
@@ -169,9 +183,11 @@ def send_alerts(site: "accounts.Site | None", conn, cfg: dict) -> str:
 
 
 def _egypt_data(conn) -> None:
-    """The model learns from the Egypt data and the dividend/bonus-share events. A scan downloads them, but
-    training shouldn't go without them when no scan ran first (a run with no new close, or the first training)."""
-    for ready, fetch in ((predict.egypt_data_ready, macro.update), (predict.events_data_ready, news.update_actions)):
+    """The model learns from the Egypt data, the dividend/bonus-share events and the company results. A scan downloads
+    them, but training shouldn't go without them when no scan ran first (a run with no new close, or the first
+    training)."""
+    for ready, fetch in ((predict.egypt_data_ready, macro.update), (predict.events_data_ready, news.update_actions),
+                         (fundamentals.ready, dividends.update)):
         if ready(conn):
             continue
         try:

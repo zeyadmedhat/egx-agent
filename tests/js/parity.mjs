@@ -5,6 +5,7 @@ import * as E from '../../app/static/js/local/engine.js';
 import { readBackup } from '../../app/static/js/local/site.js';
 import { planTrade } from '../../app/static/js/sizing.js';
 import * as I from '../../app/static/js/insights.js';
+import { orders } from '../../app/static/js/local/api.js';
 
 const input = JSON.parse(await new Promise(resolve => {
   let s = '';
@@ -12,7 +13,7 @@ const input = JSON.parse(await new Promise(resolve => {
   process.stdin.on('end', () => resolve(s));
 }));
 
-const bars = list => list.map(b => ({ ...b, atr14: E.num(b.atr14), ema50: E.num(b.ema50) }));
+const bars = list => list.map(b => ({ ...b, atr14: E.num(b.atr14), ema50: E.num(b.ema50), sup: E.num(b.sup) }));
 const emptyBook = () => ({ next_id: 1, trades: [], fills: [], dividends: [], adjustments: [] });
 
 const OPS = {
@@ -23,11 +24,26 @@ const OPS = {
     const book = emptyBook();
     const out = [];
     for (const s of steps) {
-      if (s.op === 'buy') out.push(E.addRealBuy(book, cfg, s.symbol, s.date, s.price, s.shares, s.atr, s.sector, s.stop, s.notes));
+      if (s.op === 'buy') out.push(E.addRealBuy(book, cfg, s.symbol, s.date, s.price, s.shares, s.atr, s.sector, s.stop, s.notes, null, !!s.fees_in));
       if (s.op === 'sell') out.push(E.sellReal(book, cfg, s.trade_id, s.date, s.price, s.shares, s.reason));
       if (s.op === 'dividend') out.push(E.addDividend(book, s.trade_id, s.date, s.amount, s.note).per_share);
       if (s.op === 'pending') out.push(E.pending(book, events, 'real'));
-      if (s.op === 'apply') out.push(E.applyEvent(book, s.trade_id, events.find(e => e.id === s.event_id), s.shares, s.today));
+      if (s.op === 'apply') out.push(E.applyEvent(book, s.trade_id, events.find(e => e.id === s.event_id), s.shares, s.today, s.paid || 0, s.got ?? null));
+      if (s.op === 'undo') out.push(E.undoEvent(book, book.fills.findLast(f => f.side === 'bonus').id));
+      if (s.op === 'trades') out.push(structuredClone(E.trades(book, 'real')));
+      // editing transactions (local/api.js editFill / deleteFill / addFillTo): fill is its place in book.fills
+      const at = () => ({ atr: s.atr, chart: null });
+      if (s.op === 'edit') {
+        const f = book.fills[s.fill];
+        Object.assign(f, s.set);
+        f.fees = f.fees_in ? 0 : E.orderFee(f.price * f.shares, cfg);   // a price with the fees in it keeps none
+        out.push(E.rebuildTrade(book, cfg, f.trade_id, at) && 'ok');
+      }
+      if (s.op === 'delfill') {
+        const f = book.fills[s.fill];
+        book.fills = book.fills.filter(x => x !== f);
+        out.push(E.rebuildTrade(book, cfg, f.trade_id, at) ? 'kept' : 'deleted');
+      }
     }
     return { out, trades: E.trades(book, 'real'), fills: book.fills,
       summary: E.accountSummary(book, 'real', cfg, steps.at(-1).closes || {}, events) };
@@ -39,14 +55,32 @@ const OPS = {
       trades: E.trades(book, 'real'), fills: book.fills, dividends: E.dividendsByTrade(book, 'real'),
       settings: book.settings, next_id: E.nextId(book) };
   },
+  // your wallet (local/api.js walletView): the account with its top-ups, withdrawals and fees, and what's settling
+  wallet: ({ book, cfg, today }) => ({ summary: E.accountSummary(book, 'real', cfg, {}, []),
+    unsettled: today.map(d => E.unsettled(book, d)) }),
+  // the real cost after a rights issue and the rights' three options (corporate.py real_cost, rights_options)
+  rightsMath: ({ cost, options }) => ({ cost: cost.map(a => E.realCost(...a)), options: options.map(a => E.rightsOptions(...a)) }),
   plan: args => planTrade(args),
+  // Thndr Trader (engine.js planMonth / planFree / planRenewals) and its fee on an order in and after the free 50
+  thndrPlan: ({ plan, book, days, today, cfg, value }) => ({
+    months: days.map(d => E.planMonth(plan, d)), free: days.map(d => E.planFree(book, plan, d)),
+    due: E.planRenewals(plan, plan.paid_to || plan.added, today), next: E.planNext(plan, today),
+    fees: [true, false, undefined].map(f => E.orderFee(value, { ...cfg, free_trade: f })) }),
   equity: args => I.equityCurve(args),
   journal: ({ closed, history }) => I.journal(closed, history),
   correlations: ({ series, symbols }) => I.correlations(series, symbols),
   describe: ({ factors }) => factors.map(f => E.describe(f)),
-  sessionsAfter: ({ pairs }) => pairs.map(([d, n]) => E.sessionsAfter(d, n)),
-  expected: ({ times }) => times.map(t => E.expectedSessionDate(new Date(t))),
+  sessionsAfter: ({ pairs, holidays }) => { E.setHolidays(holidays); return pairs.map(([d, n]) => E.sessionsAfter(d, n)); },
+  expected: ({ times, holidays }) => { E.setHolidays(holidays); return times.map(t => E.expectedSessionDate(new Date(t))); },
+  stopFrom: ({ times }) => times.map(t => E.stopFrom(new Date(t))),
   px: ({ values }) => values.map(v => E.px(v)),
+  // the orders for the next session (local/api.js orders) from the same signals and positions as views.orders
+  orders: ({ scan_date: day, rows, positions, market, coming, cfg, holidays }) => {
+    E.setHolidays(holidays);
+    const c = { signals: [day, rows], core: { market, dividends_coming: coming, kashif_url: '' }, cfg,
+      book: { checklist: {} }, stocks: new Map() };
+    return orders(c, positions);
+  },
 };
 
 const results = input.cases.map(c => {

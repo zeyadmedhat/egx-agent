@@ -1,11 +1,12 @@
 """Every company's cash dividends from TradingView's screener, kept as they're seen, and a stock's history."""
 from datetime import date, datetime, timedelta
 
+import pandas as pd
 import pytest
 
 from app import views
-from egx_agent import db
-from egx_agent.data import dividends
+from egx_agent import config, db
+from egx_agent.data import dividends, fundamentals
 
 
 def _row(name, yield_pct, recent=None, upcoming=None):
@@ -68,3 +69,69 @@ def test_results_dates_come_with_the_dividends(tmp_path):
     h = views.corporate_history(conn, "COMI", 100.0)
     assert h["results"] == {"next": soon, "last": recent}
     assert views.corporate_history(conn, "AIHC", 10.0)["results"]["next"] == soon
+
+
+def test_company_numbers_next_to_their_sector(tmp_path):
+    conn = db.connect(tmp_path / "egx.db")
+    nums = {"COMI": (6.0, 28.0, 0.35), "BANK1": (4.0, 10.0, 0.5), "BANK2": (5.0, 12.0, 0.4), "BANK3": (7.0, 20.0, None),
+            "TECH": (30.0, 50.0, 0.1)}
+    dividends.save(conn, [{**_row(s, None), "price_earnings_ttm": pe, "earnings_per_share_diluted_yoy_growth_ttm": g,
+                           "debt_to_equity_fq": de} for s, (pe, g, de) in nums.items()] + [_row("NONE", None)])
+    sectors = pd.Series({"COMI": "Banks", "BANK1": "Banks", "BANK2": "Banks", "BANK3": "Banks", "TECH": "Tech"})
+    f = dividends.company_numbers(conn, "COMI", sectors)
+    assert f["values"] == {"pe": 6.0, "eps_growth": pytest.approx(0.28), "debt_equity": 0.35}   # percents → fractions
+    assert f["sector"] == "Banks" and f["peers"] == 3
+    assert f["sector_median"] == {"pe": 5.0, "eps_growth": pytest.approx(0.12)}   # debt: only 2 banks report it
+    assert dividends.company_numbers(conn, "NONE", sectors) is None
+
+
+def test_company_results_count_only_once_they_were_known(tmp_path):
+    """The model sees a quarter's results only Q_LAG days after it ends (Y_LAG for the fiscal year's last quarter)."""
+    conn = db.connect(tmp_path / "egx.db")
+    ts = lambda day: int(pd.Timestamp(day, tz="UTC").timestamp())         # noqa: E731
+    ni = [30, 20, 25, 20, 15, 10, 12, 10, 9, 8]                            # quarterly profit, newest (Q2 2026) first
+    dividends.save(conn, [{**_row("AIH", None), "fiscal_period_end_fq": ts("2026-06-30"),
+                           "fiscal_period_end_fy": ts("2025-12-31"), "total_shares_outstanding": 10,
+                           "net_income_fq_h": ni, "earnings_per_share_diluted_fq_h": [v / 10 for v in ni],
+                           "total_revenue_fq_h": [100] * 10, "total_assets_fq_h": [1000] * 10}, _row("NONE", None)])
+    days = pd.to_datetime(["2026-06-30", "2026-10-27", "2026-10-28"])
+    ds = pd.DataFrame({"date": days, "symbol": "AIHC", "close": 10.0, "liquid": True})    # the agent's own symbol
+    f = fundamentals.features(ds, fundamentals.reports(conn))
+    # 30 Jun: Q4 2025 (known 150 days after the year ended), 27 Oct: Q1 2026, 28 Oct: Q2 2026 (120 days after)
+    assert f["f_ey"].tolist() == pytest.approx([0.70, 0.80, 0.95])        # the last 4 quarters' profit ÷ the price
+    assert f["f_ni_growth"].iloc[2] == pytest.approx(95 / 47 - 1)          # against the 4 quarters a year before
+    assert f["f_q_yoy"].iloc[2] == pytest.approx(30 / 15 - 1) and f["f_profit"].tolist() == [1, 1, 1]
+    assert fundamentals.features(ds, None)["f_ey"].isna().all()           # no history downloaded: empty, not an error
+
+
+def test_company_results_in_brief_for_the_signal_cards(tmp_path):
+    conn = db.connect(tmp_path / "egx.db")
+    ts = lambda day: int(pd.Timestamp(day, tz="UTC").timestamp())         # noqa: E731
+    q = lambda ni, rev, eps: {"fiscal_period_end_fq": ts("2026-06-30"), "net_income_fq_h": ni,   # noqa: E731
+                              "total_revenue_fq_h": rev, "earnings_per_share_diluted_fq_h": eps}
+    dividends.save(conn, [
+        {**_row("AIH", None), **q([30, 20, 25, 20, 15, 10, 12, 10], [100] * 4 + [80] * 4, [0.3, 0.2, 0.25, 0.2] * 2)},
+        {**_row("LOSS", None), **q([-5, -5, -5, -5, 2, 2, 2, 2], [50] * 8, [-0.1] * 8)}])
+    for sym, close in (("AIHC", 9.5), ("LOSS", 3.0)):
+        conn.execute("INSERT INTO prices(symbol, date, open, high, low, close, volume) VALUES (?, '2026-09-30', ?, ?, ?, ?, 1e6)",
+                     (sym, close, close, close, close))
+    brief = views.company_brief(views.Data(conn, dict(config.DEFAULTS), views.Cache()))
+    # the last 4 quarters against the 4 before: TradingView's AIH is the agent's AIHC; P/E = the close ÷ a year's
+    # profit per share; a company losing money gets no P/E (the page says it lost money instead of its growth)
+    assert brief["AIHC"] == {"growth": pytest.approx(95 / 47 - 1, abs=1e-4), "sales": 0.25, "margin": 0.2375,
+                             "pe": pytest.approx(9.5 / 0.95, abs=1e-4)}
+    assert brief["LOSS"] == {"growth": -3.5, "sales": 0.0, "margin": -0.1}      # -20 on 200 of sales
+
+
+def test_analysts_targets_come_with_the_dividends(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    covered = {**_row("COMI", 4.7), "price_target_average": 177.2, "price_target_low": 150, "price_target_high": 244.6,
+               "recommendation_total": 7, "recommendation_buy": 4, "recommendation_over": 1, "recommendation_hold": 2,
+               "recommendation_under": 0, "recommendation_sell": 0, "currency": "EGP"}
+    dollars = {**covered, "name": "VLMR", "currency": "USD"}           # a dollar line: its targets mix currencies
+    dividends.save(conn, [covered, dollars])
+    a = dividends.analyst_targets(conn, "COMI")
+    assert (a["avg"], a["low"], a["high"], a["n"], a["buy"], a["hold"], a["sell"]) == (177.2, 150, 244.6, 7, 5, 2, 0)
+    assert dividends.analyst_targets(conn, "VLMR") is None
+    dividends.save(conn, [_row("COMI", 4.7)])                          # no longer covered
+    assert dividends.analyst_targets(conn, "COMI") is None

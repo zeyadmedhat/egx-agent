@@ -76,7 +76,7 @@ export function AdminPage() {
           days. Download one to your Mac now and then as well: it has every portfolio and all the prices.</p>
         <a class="btn" href="/api/admin/backup" download><${Icon} name="download" />${t('Download a backup')}</a>
         <p class="faint" style="font-size:12px;margin-top:12px">Scans, the Kashif data, the strategy and the Telegram bot
-          are in <a href="#/settings">Settings</a>. The prediction model is on <a href="#/predict">Predict</a>.</p>
+          are in <a href="#/settings">Settings</a>. The prediction model is on <a href="#/predict">Picks → Rankings</a>.</p>
       </div>
     </div>
 

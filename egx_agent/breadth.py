@@ -18,9 +18,12 @@ MIN_BARS = 50          # a stock needs this many sessions before it counts
 ACTIVE_WITHIN = 10     # ... and must have traded in the last this-many sessions
 SESSIONS = 460         # enough for a 200-day average plus a year of history
 
-# The market switch for the prediction model's picks. Walk-forward 2016–2026 (top 5 picks every 2 weeks): 27% → 34%
-# a year and the worst drop −62% → −22%; every cut-off from 30% to 50% helped about as much, so these aren't tuned.
-# A model-based switch did no better. The BUY rules keep their own EGX30 rule (the switch changed them little).
+# The market switch. Walk-forward 2016–2026 for the model's own test portfolio (top 5 picks every 2 weeks): 27% →
+# 34% a year and the worst drop −62% → −22%; every cut-off from 30% to 50% helped about as much, so these aren't
+# tuned. Since Oct 2026 "off" stops every new BUY, like EGX30 under its 50-day average (scan, backtest.prepare).
+# The rules plus the model's 2 picks, 8 walk-forward runs: 32.0% a year against 30.9%, 46.4% of trades won against
+# 45.6%, and a worst drop of −17.5% against −24.7%. The drop was smaller in all 8 runs; it came in the 2021–22
+# slide, while EGX30 was often above its average. Cut-offs of 35% and 45% did about as well.
 SWITCH_OFF_BELOW = 0.40
 SWITCH_HALF_BELOW = 0.50
 
@@ -45,6 +48,19 @@ def _pct_above(c: pd.DataFrame, n: int, counted: pd.DataFrame) -> pd.Series:
     return above.sum(axis=1) / ok.sum(axis=1).replace(0, np.nan)
 
 
+def _counted(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Closes with a few skipped sessions filled, and which stocks count each day: traded lately, enough history."""
+    c = raw.ffill(limit=5)           # a stock that skipped a few sessions keeps its last price
+    traded = raw.notna().rolling(ACTIVE_WITHIN, min_periods=1).max().astype(bool)
+    return c, traded & (raw.notna().cumsum() >= MIN_BARS) & c.notna()
+
+
+def above50_daily(closes: pd.DataFrame) -> pd.Series:
+    """The share of stocks above their 50-day average on each day (the switch's measure), from sessions × stocks."""
+    c, counted = _counted(closes)
+    return _pct_above(c, 50, counted)
+
+
 def compute(closes: pd.DataFrame, index_close: pd.Series, sectors: pd.Series, history: int = 250) -> dict | None:
     """Breadth today and over the last `history` sessions, plus a sector table.
 
@@ -53,9 +69,7 @@ def compute(closes: pd.DataFrame, index_close: pd.Series, sectors: pd.Series, hi
     if closes.empty or len(closes) < 30:
         return None
     raw = closes
-    c = raw.ffill(limit=5)           # a stock that skipped a few sessions keeps its last price
-    traded = raw.notna().rolling(ACTIVE_WITHIN, min_periods=1).max().astype(bool)
-    counted = traded & (raw.notna().cumsum() >= MIN_BARS) & c.notna()
+    c, counted = _counted(raw)
 
     p20, p50, p200 = (_pct_above(c, n, counted) for n in (20, 50, 200))
     today = counted.iloc[-1]

@@ -67,6 +67,24 @@ def test_bonus_shares_flag_then_update_a_position(client):  # noqa: F811
     assert client.post(f"/api/portfolio/{pos['id']}/adjust", headers=H, json={"event_id": ev, "shares": 1250}).status_code == 409
 
 
+def test_a_rights_issue_asks_for_the_shares_and_what_the_new_ones_cost(client):  # noqa: F811
+    client.post("/api/portfolio/buy", headers=H, json={"symbol": "AAA", "date": "2025-02-02", "price": 6.5, "shares": 1000})
+    conn = db.connect(client.app_db)
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective, note, first_seen) "
+                 "VALUES ('AAA', 'rights', 'Capital Increase - Rights Issue', '2025-02-20', '2025-03-02', '', 'x')")
+    conn.commit()
+    db.add_price_event(conn, "AAA", "2025-03-02", 1.848)
+    pos = client.get("/api/portfolio").json()["positions"][0]
+    assert pos["status"] == "ADJUST" and pos["adjust"]["rights"] and pos["reason"].startswith("Rights issue")
+    ev = pos["adjust"]["event_id"]
+    url = f"/api/portfolio/{pos['id']}/adjust"
+    assert client.post(url, headers=H, json={"event_id": ev, "shares": 1900}).status_code == 400   # no price given
+    r = client.post(url, headers=H, json={"event_id": ev, "shares": 1900, "paid": 0.205})
+    assert r.status_code == 200, r.text
+    t = conn.execute("SELECT shares, entry_price FROM trades WHERE id=?", (pos["id"],)).fetchone()
+    assert t["shares"] == 1900 and t["entry_price"] == pytest.approx((pos["avg_price"] * 1000 + 900 * 0.205) / 1900)
+
+
 def test_shares_unchanged_keeps_the_position(client):  # noqa: F811
     client.post("/api/portfolio/buy", headers=H, json={"symbol": "AAA", "date": "2025-02-02", "price": 12, "shares": 100})
     conn = db.connect(client.app_db)
@@ -88,6 +106,19 @@ def test_paper_trades_follow_bonus_shares_by_themselves(tmp_path):
     t = conn.execute("SELECT * FROM trades").fetchone()
     assert (t["shares"], t["entry_price"], t["stop"], t["target"]) == (500, 8, 7.2, 9.6)
     assert corporate.apply_paper(conn) == 0      # only once
+
+
+def test_open_pnl_is_counted_like_the_broker(client):  # noqa: F811
+    """Like Thndr: market value minus what you paid with the buy fees, no selling fee until you sell. A price copied
+    from the broker's average cost (fees_in) already has the fees in it, so none are added."""
+    client.post("/api/portfolio/buy", headers=H, json={"symbol": "AAA", "date": "2025-02-02", "price": 12, "shares": 100})
+    p = client.get("/api/portfolio").json()["positions"][0]
+    assert p["fees"] > 0 and p["pnl"] == pytest.approx((p["last"] - 12) * 100 - p["fees"])
+    assert p["pnl_pct"] == pytest.approx(p["pnl"] / (1200 + p["fees"]))
+    client.post("/api/portfolio/buy", headers=H, json={"symbol": "BBB", "date": "2025-02-02", "price": 20, "shares": 50,
+                                                      "fees_in": True})
+    q = next(x for x in client.get("/api/portfolio").json()["positions"] if x["symbol"] == "BBB")
+    assert q["fees"] == 0 and q["pnl"] == pytest.approx((q["last"] - 20) * 50)
 
 
 # ------------------------------------------------------------------ dividends
@@ -158,6 +189,173 @@ def test_breadth_counts_stocks_above_their_averages():
     assert [s["sector"] for s in b["sectors"]] == ["Banks", "Real Estate"]
     assert b["sectors"][0]["above50"] == 1.0 and len(b["history"]["time"]) == 250
     assert breadth.verdict(b, index_risk_off=False)["tone"] == "ok"
+
+
+def _mood_market(last: np.ndarray) -> dict:
+    """1,000 sessions: a calm, slowly rising market, then `last` daily moves of EGX30 that the stocks follow and
+    small caps (EGX70) follow 1.5 times over; gold stays flat."""
+    rng = np.random.default_rng(7)
+    moves = np.r_[0.0005 + rng.normal(0, 0.01, 1000 - len(last)), last]
+    days = pd.bdate_range("2022-01-02", periods=1000, freq="C", weekmask="Sun Mon Tue Wed Thu")
+    index = pd.Series(1000 * np.cumprod(1 + moves), index=days)
+    close = pd.DataFrame({f"S{k}": index * (k + 1) * (1 + rng.normal(0, 0.002, 1000)) for k in range(5)}, index=days)
+    return {"close": close, "volume": pd.DataFrame(1e6, index=days, columns=close.columns), "index": index,
+            "gold": pd.Series(100.0, index=days), "egx70": pd.Series(500 * np.cumprod(1 + 1.5 * moves), index=days)}
+
+
+def test_market_mood_is_fear_after_a_fall_and_greed_after_a_steady_climb():
+    from egx_agent import mood
+    fall = mood.compute(_mood_market(np.tile([-0.05, 0.01], 10)))
+    climb = mood.compute(_mood_market(np.full(20, 0.015)))
+    assert fall["score"] < 25 and fall["label"] == "Extreme fear"
+    assert climb["score"] >= 76 and climb["label"] == "Extreme greed"
+    assert [p["key"] for p in fall["parts"]] == list(mood.PARTS)
+    assert fall["past"][-1]["label"] == "Any mood" and len(fall["history"]["time"]) == 250
+    assert [mood.label(s) for s in (0, 24.9, 25, 50, 56, 75.9, 76, 100)] == [
+        "Extreme fear", "Extreme fear", "Fear", "Neutral", "Greed", "Greed", "Extreme greed", "Extreme greed"]
+
+
+def test_the_daily_statement_is_read_for_each_groups_net_buying():
+    from egx_agent.data import flows
+    read = lambda text: {k: round(v, 2) for k, v in (flows.parse(text) or {}).items()}   # noqa: E731
+    assert read("اتجه المستثمرون العرب والأجانب نحو البيع بصافي بلغ 65.41 مليون جنيه و142.7 مليون جنيه على التوالي، "
+                "فيما اتجه المستثمرون المصريون نحو الشراء بصافي تعاملات بلغ نحو 208.1 مليون جنيه.") == {
+        "arabs": -65.41, "foreigners": -142.7, "egyptians": 208.1}
+    # the second group after a comma, not "فيما"
+    assert read("توجه المستثمرون المصريون والعرب نحو البيع بصافي قيمة بلغت 12.8 مليون جنيه و20.5 مليون على التوالي، "
+                "قصد الاجانب الشراء بصافي قيمة بلغت 33.4 مليون جنيه") == {"egyptians": -12.8, "arabs": -20.5, "foreigners": 33.4}
+    # only two named (the Arabs about even); millions written for billions; full pounds written as millions
+    assert read("اتجهت تعاملات المصريين نحو البيع بصافي بلغ 7.15 مليون جنيه، اتجه الاجانب نحو الشراء بصافي 7.154 مليون جنيه")[
+        "arabs"] == 0.0
+    assert read("توجه المستثمرون المصريون والعرب نحو البيع بصافي قيمة بلغت 8.03 مليار جنيه، و574.2 مليون على التوالي، "
+                "في حين قصد الاجانب الشراء بصافي قيمة بلغت 8.6 مليون جنيه")["foreigners"] == 8600.0
+    assert read("اتجهت تعاملات الاجانب والعرب نحو البيع بصافي بلغ 329517932 مليون جنيه 189314398 مليونا على التوالي، "
+                "فيما اتجه المصريين نحو الشراء بصافي 518832330 مليون جنيه")["foreigners"] == -329.52
+    # a monthly report: two groups both buying, and the year's totals after them, isn't a session
+    assert flows.parse("وسجل المستثمرون الأجانب صافي شراء بقيمة نحو 350.9 مليون جنيه خلال الشهر، فيما سجل المستثمرون العرب "
+                       "صافي شراء بنحو 3.222 مليار جنيه. وسجل الأجانب منذ بداية العام صافي بيع بنحو 11.213 مليار جنيه") is None
+
+
+def test_each_session_takes_its_closing_report_even_in_ramadan():
+    from egx_agent.data import flows
+    say = lambda e, a, f: f"اتجه المصريون نحو {'الشراء' if e > 0 else 'البيع'} بصافي {abs(e)} مليون جنيه، فيما اتجه العرب " \
+        f"والأجانب نحو {'البيع' if e > 0 else 'الشراء'} بصافي {abs(a)} مليون جنيه و{abs(f)} مليون جنيه على التوالي"  # noqa: E731
+    posts = [  # Wednesday in Ramadan: midday, then the close at 13:50; Thursday: close at 15:05, then the weekly sum
+        {"date": "2026-03-04T12:10:00", "title": {"rendered": "البورصة تواصل الصعود في منتصف التعاملات"}, "content": {"rendered": say(5, 2, 3)}},
+        {"date": "2026-03-04T13:50:00", "title": {"rendered": "البورصة المصرية تُغلق تعاملات الأربعاء"}, "content": {"rendered": say(50, 20, 30)}},
+        {"date": "2026-03-05T15:05:00", "title": {"rendered": "صعود البورصة بختام تعاملات الخميس"}, "content": {"rendered": say(-40, 10, 30)}},
+        {"date": "2026-03-05T19:00:00", "title": {"rendered": "حصاد الأسبوع"}, "content": {"rendered": say(900, 400, 500)}},
+    ]
+
+    class Feed:
+        headers: dict = {}
+
+        def get(self, url, params=None, timeout=None):
+            return type("R", (), {"status_code": 200, "headers": {"X-WP-TotalPages": "1"},
+                                  "raise_for_status": lambda self: None, "json": lambda self: posts})()
+    got = flows.fetch("2026-03-01", session=Feed())
+    assert got == {"2026-03-04": {"egyptians": 50.0, "arabs": -20.0, "foreigners": -30.0},
+                   "2026-03-05": {"egyptians": -40.0, "arabs": 10.0, "foreigners": 30.0}}
+
+
+def test_each_groups_individuals_and_institutions_are_read():
+    from egx_agent.data import flows
+    got = flows.parse_split(
+        "ومالت صافي تعاملات الأفراد العرب والمؤسسات المصرية والعربية والأجنبية للبيع بقيمة 7.7 مليون جنيه، 275.4 مليون جنيه، "
+        "57.7 مليون جنيه، 148 مليون جنيه، على الترتيب، فيما مالت تعاملات الأفراد المصريين والأجانب للشراء بقيمة 483.5 مليون "
+        "جنيه، 5.3 مليون جنيه، على الترتيب. تراجع مؤشر إيجي إكس 30 بنسبة 0.48%")
+    assert got == {"egyptians": {"individuals": 483.5, "institutions": -275.4},
+                   "arabs": {"individuals": -7.7, "institutions": -57.7},
+                   "foreigners": {"individuals": 5.3, "institutions": -148.0}}
+    # "الأفراد والمؤسسات المصرية والعربية": individuals first, then institutions, of each group named
+    got = flows.parse_split(
+        "ومالت صافي تعاملات الافراد والمؤسسات الاجنبية للبيع بقيمة 814.4 الف جنيه، 940.8 مليون جنيه، على الترتيب، فيما مالت "
+        "تعاملات الافراد والمؤسسات المصرية والعربية للشراء بقيمة 523.5 مليون جنيه، 487 الف جنيه، 387.3 مليون جنيه، 30.4 مليون جنيه")
+    assert got["foreigners"] == {"individuals": -0.8144, "institutions": -940.8}
+    assert got["egyptians"] == {"individuals": 523.5, "institutions": 387.3} and got["arabs"]["individuals"] == 0.487
+    # thousands written for millions: the one fix that evens the six; a report that can't be evened isn't used
+    got = flows.parse_split(
+        "ومالت صافي تعاملات المؤسسات العربية والاجنبية للبيع بقيمة 39.7 مليون جنيه، 254.5 الف جنيه، على الترتيب، فيما مالت "
+        "تعاملات الافراد المصريين والعرب والاجانب والمؤسسات المصرية للشراء بقيمة 120.8 مليون جنيه، 33.1 مليون جنيه، 1.9 مليون "
+        "جنيه، 138.3 مليون جنيه، على الترتيب")
+    assert got["foreigners"]["institutions"] == -254.5
+    assert flows.parse_split("ومالت صافي تعاملات الافراد المصريين والعرب والمؤسسات المصرية والعربية للشراء بقيمة 10 مليون جنيه، "
+                             "20 مليون جنيه، 30 مليون جنيه، 40 مليون جنيه") is None
+
+
+def test_the_split_fills_new_sessions_then_two_years_back_a_little_each_run(tmp_path):
+    from datetime import datetime
+    from egx_agent.data import flows
+    conn = db.connect(tmp_path / "t.db")
+    days = make_ohlcv(np.ones(30), start="2026-08-30").index
+    db.upsert_prices(conn, "EGX30", _frame(np.full(30, 1000.0), start="2026-08-30"))
+    say = ("ومالت صافي تعاملات المؤسسات الاجنبية للبيع بقيمة 100 مليون جنيه، على الترتيب، فيما مالت تعاملات الافراد "
+           "المصريين والعرب والمؤسسات المصرية والعربية للشراء بقيمة 40 مليون جنيه، 10 مليون جنيه، 30 مليون جنيه، 20 مليون جنيه")
+    asked = []
+
+    class Youm7:
+        headers: dict = {}
+
+        def get(self, url, timeout=None):
+            asked.append(url)
+            ok = lambda text: type("R", (), {"status_code": 200, "ok": True, "text": text})()   # noqa: E731
+            if "/Sitemap/" in url:
+                return ok(f"<loc>https://www.youm7.com/story/x/{flows.ROUNDUP}-x/1</loc><loc>https://www.youm7.com/story/x/other/2</loc>")
+            return ok(say)
+    db.upsert_macro(conn, "flow_foreign", pd.DataFrame({"date": [str(days[-1].date())], "close": [999.0]}))  # Amwal's
+    now = datetime.fromisoformat(f"{days[-1].date()}T16:00:00")
+    flows.SPLIT_BACK_PER_RUN, back = 5, flows.SPLIT_BACK_PER_RUN
+    try:
+        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 3 + 5      # the newest 3, then 5 older ones
+        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 5          # 5 more each run
+    finally:
+        flows.SPLIT_BACK_PER_RUN = back
+    rows = flows.recent_split(conn, 100)
+    assert len(rows) == 13 and rows[-1]["date"] == str(days[-1].date())
+    assert rows[-1]["foreigners"] == {"individuals": 0.0, "institutions": -100.0}
+    assert flows.load(conn).iloc[-1].to_dict() == {"egyptians": 70.0, "arabs": 30.0, "foreigners": -100.0}   # replaces 999
+    assert not any("/other/" in u for u in asked)
+
+
+def test_past_rights_issues_are_measured_from_the_close_before_the_ex_date(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    days = make_ohlcv(np.ones(120), start="2026-01-04").index
+    db.upsert_prices(conn, "EGX30", _frame(np.full(120, 1000.0)))
+    for k in range(11):          # +5% on the ex-date (R10's history wasn't re-based: −50%, left out)
+        sym = f"R{k:02d}"
+        db.upsert_prices(conn, sym, _frame(np.r_[np.full(40, 10.0), np.full(80, 10.5 if k < 10 else 5.0)]))
+        conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective) VALUES (?, 'rights', 'R', ?, ?)",
+                     (sym, str(days[10].date()), str(days[40].date())))
+    h = corporate.rights_history(conn, today="2026-12-31")
+    assert h["n"] == 10 and h["ex_day"] == {"median": pytest.approx(0.05), "up": 1.0}
+    assert h["quarter"]["beat"] == 1.0 and h["announced"]["beat"] == 1.0 and h["after"]["up"] == 0.0
+    assert corporate.rights_history(conn, today=str(days[40].date())) is None     # not past its ex-date yet
+
+
+def test_the_rights_check_splits_past_issues_by_their_last_week(tmp_path):
+    """Rights issues whose share fell over its last 5 sessions with the rights go in 'better', those that rose in
+    'weaker'; each group's 3 months against EGX30, and a coming one checked on its sessions so far."""
+    conn = db.connect(tmp_path / "t.db")
+    days = make_ohlcv(np.ones(120), start="2026-01-04").index
+    db.upsert_prices(conn, "EGX30", _frame(np.full(120, 1000.0)))
+    for k in range(24):
+        fell, sym = k < 12, f"R{k:02d}"
+        before = np.r_[np.full(35, 10.0), np.full(5, 9.5 if fell else 10.5)]        # sessions 35–39: the last week
+        after = np.linspace(before[-1], before[-1] * (1.1 if fell else 0.95), 80)   # ex-date (40) on: +10% / −5%
+        db.upsert_prices(conn, sym, _frame(np.r_[before, after]))
+        conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective) VALUES (?, 'rights', 'R', ?, ?)",
+                     (sym, str(days[10].date()), str(days[40].date())))
+    conn.execute("INSERT INTO corp_actions(symbol, kind, type, announced, effective) "
+                 "VALUES ('R00', 'rights', 'R', '2026-06-01', '2026-12-20')")                 # coming up
+    s = corporate.rights_study(conn, today="2026-06-10")
+    assert s["n"] == 24 and s["checks"]["better"]["n"] == 12 and s["checks"]["better"]["beat"] == 1.0
+    assert s["checks"]["weaker"]["beat"] == 0.0 and s["factors"][0] == {"label": "The share's last 5 days", "hi": 0.0, "lo": 1.0}
+    assert [g["n"] for g in s["stages"]] == [0, 12, 12] and s["stages"][0]["ex_day"] is None   # none fell 10%+
+    assert s["stages"][2]["trade_weeks"] == {"up": 0.0, "median": pytest.approx(10.5 * (1 - 0.05 * 10 / 79) / 10.5 - 1)}
+    (c,) = s["coming"]
+    assert c["symbol"] == "R00" and c["check"] == "weaker" and c["last_day"] == "2026-12-17"     # still rising; Thu before Sun 20
+    p = next(x for x in s["past"] if x["symbol"] == "R00")
+    assert p["path"]["stock"][corporate.PATH_BEFORE] == 100.0 and p["check"] == "better"
 
 
 def test_market_page_loads(client):  # noqa: F811
@@ -262,12 +460,12 @@ def test_daily_scan_install_and_remove(tmp_path, monkeypatch):
 
 
 def test_daily_scan_leaves_the_work_to_an_open_dashboard(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")     # never your own settings and bot
     monkeypatch.setattr(daily, "dashboard_open", lambda url=None: True)
     ok, msg = daily.run(tmp_path / "t.db")
     assert ok and "dashboard is open" in msg
     monkeypatch.setattr(daily, "dashboard_open", lambda url=None: False)
-    monkeypatch.setattr(daily.scan, "scan_is_stale", lambda conn: False)
-    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    monkeypatch.setattr(daily.scan, "scan_is_stale", lambda conn, *_: False)
     ok, msg = daily.run(tmp_path / "t.db")
     assert ok and msg == "Prices are up to date. Telegram: off."
 

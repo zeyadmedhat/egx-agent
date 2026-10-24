@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from egx_agent import engine
 from tests.conftest import bar
@@ -29,10 +30,19 @@ def test_target_hit(cfg):
 
 def test_breakeven_after_one_r(cfg):
     p = pos()
-    assert engine.process_bar(p, bar("2026-01-05", 105, 111, 104, 110, ema50=90, atr14=6), cfg) is None
+    plain = {**cfg, "breakeven_pct": 0.0}
+    assert engine.process_bar(p, bar("2026-01-05", 105, 111, 104, 110, ema50=90, atr14=6), plain) is None
     assert p.stop == 100.0                    # closed at +1R: stop moves to entry (trail 110 - 12 = 98 is lower)
-    price, reason = engine.process_bar(p, bar("2026-01-06", 101, 102, 99, 100, ema50=90, atr14=6), cfg)
+    price, reason = engine.process_bar(p, bar("2026-01-06", 101, 102, 99, 100, ema50=90, atr14=6), plain)
     assert price == 100.0 and reason == "Breakeven stop"
+
+
+def test_breakeven_keeps_a_little_profit(cfg):
+    p = pos()                                 # the default: entry + 1.5%, so a trade that comes back still wins
+    engine.process_bar(p, bar("2026-01-05", 105, 111, 104, 110, ema50=90, atr14=6), cfg)
+    assert p.stop == pytest.approx(101.5)
+    price, _ = engine.process_bar(p, bar("2026-01-06", 103, 104, 100, 101, ema50=90, atr14=6), cfg)
+    assert price == pytest.approx(101.5) and price * (1 - 0.0025) > 100 * (1 + 0.0025)
 
 
 def test_trailing_stop_rises(cfg):

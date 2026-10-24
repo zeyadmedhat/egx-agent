@@ -1,17 +1,17 @@
 # The website: after every EGX close, download prices, scan, and publish the encrypted site to GitHub Pages.
 # Secrets (Settings → Secrets and variables → Actions): SITE_PASSWORD (required), TELEGRAM_TOKEN (optional: the
 # bot that messages each friend who pressed Connect Telegram) and OWNER_TELEGRAM (optional: your Telegram @username,
-# so the alarms reach you when something breaks). The logs are public, so the job only prints counts.
+# so the alarms reach you when something breaks), WORKER_URL and WORKER_KEY (optional: the Cloudflare Worker that
+# answers the bot at once, worker/bot.js). The logs are public, so the job only prints counts.
 # The data is kept in GitHub's cache between runs and backed up once a day (locked; see app/backup.py).
 name: Daily scan and website
 
 on:
-  schedule:                     # UTC. EGX closes 14:30 Cairo (UTC+3 in summer, UTC+2 in winter); prices are
-    - cron: "50 12 * * 0-4"     # usually there an hour later. The later runs catch late prices; a run with
-    - cron: "55 13 * * 0-4"     # nothing new only rebuilds the site.
-    - cron: "20 16 * * 0-4"
-    - cron: "20 19 * * 0-4"
-    - cron: "40 */3 * * *"      # every 3 hours, every day: connects friends who pressed Start in Telegram
+  schedule:                     # UTC, trading days (Sun–Thu): 9:30 Cairo before the open and 15:30 after the close
+    - cron: "30 6 * * 0-4"      # (EGX closes 14:30; its closing prices count as final from 15:30, scan.DATA_READY).
+    - cron: "30 7 * * 0-4"      # Each has a summer (UTC+3) and a winter (UTC+2) time; the "when" job lets only the
+    - cron: "30 12 * * 0-4"     # one at 9:30 or 15:30 Cairo go on. During the session the Telegram bot asks for a
+    - cron: "30 13 * * 0-4"     # run every half hour, 10:30–14:00, and backs these two up (worker/bot.js scanDue).
   workflow_dispatch:            # "Run workflow": the Run scan button on the site opens this page for the owner
     inputs:
       force_scan:
@@ -20,7 +20,7 @@ on:
         default: true
   push:
     branches: [main]
-    paths: ["app/**", "egx_agent/**", "site/**", "requirements.txt", ".github/workflows/site.yml"]
+    paths: ["app/**", "egx_agent/**", "site/**", "requirements*.txt", "constraints.txt", ".github/workflows/site.yml"]
 
 permissions:
   contents: write     # the keep-alive commit
@@ -33,7 +33,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  when:
+    # A scheduled run goes on only at 9:30–10:29 or 15:30–16:29 Cairo (GitHub often starts late); every other run does.
+    runs-on: ubuntu-24.04
+    outputs:
+      go: ${{ steps.t.outputs.go }}
+    steps:
+      - id: t
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          now=$(TZ=Africa/Cairo date +%H%M)
+          if { [ "$now" -ge 930 ] && [ "$now" -lt 1030 ]; } || { [ "$now" -ge 1530 ] && [ "$now" -lt 1630 ]; }; then go=true; else go=false; fi
+          echo "Cairo time $now: go=$go"
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: when
+    if: needs.when.outputs.go == 'true'
     runs-on: ubuntu-24.04   # pinned: "latest" moves to a new Ubuntu by itself, which could break a run overnight
     timeout-minutes: 60
     outputs:
@@ -55,7 +71,7 @@ jobs:
           restore-keys: state-
 
       - name: Install
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -c constraints.txt
 
       - name: If the data is gone, bring back the latest backup
         if: steps.restore.outputs.cache-matched-key == ''
@@ -75,6 +91,51 @@ jobs:
           rm -rf _restore
           [ -f state/egx.db ] || echo "No backup to bring back: starting fresh."
 
+      # The AI models' forecasts for every stock (egx_agent/ai_forecast.py): once a day, from the last final close, before
+      # the site is built so it shows them. Only this step needs torch (CPU-only) and the models; a failure here never
+      # stops the site.
+      - name: Are the AI models' forecasts due?
+        id: ai
+        continue-on-error: true
+        env:
+          TZ: Africa/Cairo
+        run: python -m egx_agent.ai_forecast due --db state/egx.db >> "$GITHUB_OUTPUT"
+
+      # The EGX-trained Chronos-2 (478 MB) is a release file, not in the code: downloaded once, then kept in the cache.
+      - name: The EGX-trained Chronos-2
+        if: steps.ai.outputs.due != ''
+        continue-on-error: true
+        uses: actions/cache@v6
+        with:
+          path: _models/chronos2-egx
+          key: chronos2-egx-1
+
+      - name: The AI models' forecasts
+        if: steps.ai.outputs.due != ''
+        continue-on-error: true
+        timeout-minutes: 30
+        env:
+          HF_HUB_DISABLE_PROGRESS_BARS: "1"
+          TZ: Africa/Cairo
+        run: |
+          mkdir -p _models/chronos2-egx
+          for f in config.json model.safetensors; do
+            [ -s "_models/chronos2-egx/$f" ] || curl -fsSL --retry 3 -o "_models/chronos2-egx/$f" \
+              "https://github.com/${{ github.repository }}/releases/download/chronos2-egx-1/$f" || rm -f "_models/chronos2-egx/$f"
+          done
+          pip install -q --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -q -r requirements-ai.txt
+          python -m egx_agent.ai_forecast run --db state/egx.db
+
+      - name: The Mac's Mubasher file
+        # The Mac's Mubasher stock news and owners lists, locked (app/macfeed.py). Missing or old, the run reads the
+        # owners itself as before.
+        continue-on-error: true
+        run: |
+          mkdir -p _macfeed
+          curl -fsSL --retry 3 -o _macfeed/mubasher.egxm \
+            "https://github.com/${{ github.repository }}/releases/download/mac-feed/mubasher.egxm" || rm -f _macfeed/mubasher.egxm
+
       - id: pages
         uses: actions/configure-pages@v6
 
@@ -84,12 +145,14 @@ jobs:
           EGX_SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           OWNER_TELEGRAM: ${{ secrets.OWNER_TELEGRAM }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          WORKER_KEY: ${{ secrets.WORKER_KEY }}
           SITE_URL: ${{ steps.pages.outputs.base_url }}
           FORCE_SCAN: ${{ inputs.force_scan }}
           TZ: Africa/Cairo
         run: >-
           python -m app.site_daily --db state/egx.db --config site/strategy.yaml --out _site
-          --backup _backup/state.egxb
+          --backup _backup/state.egxb --mac-feed _macfeed/mubasher.egxm
 
       - name: Tell the owner on Telegram that this run failed
         if: failure()

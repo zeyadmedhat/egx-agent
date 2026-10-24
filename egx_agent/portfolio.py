@@ -5,7 +5,7 @@ import sqlite3
 
 import pandas as pd
 
-from . import corporate, db, engine
+from . import config, corporate, db, engine, holidays, levels
 from .indicators import add_indicators
 from .strategy import initial_stop
 
@@ -29,10 +29,23 @@ def trades_df(conn: sqlite3.Connection, account: str, statuses: tuple[str, ...] 
 
 # ---------------------------------------------------------------- real account
 
-def _levels(price: float, atr: float | None, cfg: dict, stop: float | None = None) -> tuple[float, float]:
-    """Stop (typed by you, or the ATR rule) and the matching target for an entry/average price."""
-    stop = float(stop) if stop else float(initial_stop(price, atr, cfg))
-    return stop, price + cfg["target_r"] * (price - stop)
+def _levels(price: float, atr: float | None, cfg: dict, stop: float | None = None,
+            chart: dict | None = None) -> tuple[float, float]:
+    """Stop and target for an entry/average price. The stop is the one you typed, else the chart's support
+    (levels.chart_plan on the buy date, when it's under a support and between stop_min_pct and stop_max_pct below the
+    price), else the ATR rule. The target is the chart's resistance when it pays at least the risk, else target_r ×
+    the risk."""
+    if stop:
+        stop = float(stop)
+    elif (chart and chart.get("method") != "atr"
+          and cfg["stop_min_pct"] / 100 <= 1 - chart["stop"] / price <= cfg["stop_max_pct"] / 100):
+        stop = float(chart["stop"])
+    else:
+        stop = float(initial_stop(price, atr, cfg))
+    risk = price - stop
+    if chart and chart["target"] >= price + risk:
+        return stop, float(chart["target"])
+    return stop, price + cfg["target_r"] * risk
 
 
 def _add_fill(conn: sqlite3.Connection, trade_id: int, symbol: str, date: str, side: str, shares: int,
@@ -55,7 +68,7 @@ def fills_df(conn: sqlite3.Connection, trade_id: int) -> pd.DataFrame:
 
 
 def _merge_buy(conn: sqlite3.Connection, cfg: dict, pos: sqlite3.Row, date: str, price: float, shares: int,
-               fee: float, atr: float | None, stop: float | None, notes: str) -> None:
+               fee: float, atr: float | None, stop: float | None, notes: str, chart: dict | None = None) -> None:
     """Add shares to an open position at the share-weighted average price.
 
     The stop and target are recalculated from the new average (unless a stop is given). The position keeps its
@@ -63,7 +76,7 @@ def _merge_buy(conn: sqlite3.Connection, cfg: dict, pos: sqlite3.Row, date: str,
     """
     total = int(pos["shares"]) + int(shares)
     avg = (pos["entry_price"] * pos["shares"] + price * shares) / total
-    new_stop, target = _levels(avg, atr, cfg, stop)
+    new_stop, target = _levels(avg, atr, cfg, stop, chart)
     note = "; ".join(x for x in (pos["notes"], notes) if x)
     conn.execute(
         """UPDATE trades SET entry_date=?, entry_price=?, shares=?, initial_stop=?, stop=?, target=?,
@@ -74,12 +87,15 @@ def _merge_buy(conn: sqlite3.Connection, cfg: dict, pos: sqlite3.Row, date: str,
 
 
 def add_real_buy(conn: sqlite3.Connection, cfg: dict, symbol: str, date: str, price: float, shares: int,
-                 atr: float, sector: str = "", stop: float | None = None, notes: str = "") -> int:
-    """Log a buy. If you already hold this stock, the shares join that position at the average price."""
-    fee = price * shares * cfg["fee_pct_per_side"] / 100
+                 atr: float, sector: str = "", stop: float | None = None, notes: str = "",
+                 chart: dict | None = None, fees_in: bool = False) -> int:
+    """Log a buy. If you already hold this stock, the shares join that position at the average price. chart: the
+    stock's chart levels on the buy date (levels.plan_at), for the automatic stop and target. fees_in: the price is
+    your broker's average cost, which already has the fees in it (Thndr's does), so none are added."""
+    fee = 0.0 if fees_in else config.order_fee(price * shares, cfg)
     pos = open_position(conn, "real", symbol)
     if pos is None:
-        new_stop, target = _levels(price, atr, cfg, stop)
+        new_stop, target = _levels(price, atr, cfg, stop, chart)
         cur = conn.execute(
             """INSERT INTO trades(account, status, symbol, sector, entry_date, entry_price, shares, initial_stop, stop,
                    target, highest_close, fees, notes)
@@ -89,7 +105,7 @@ def add_real_buy(conn: sqlite3.Connection, cfg: dict, symbol: str, date: str, pr
         trade_id = int(cur.lastrowid)
     else:
         trade_id = int(pos["id"])
-        _merge_buy(conn, cfg, pos, date, price, shares, fee, atr, stop, notes)
+        _merge_buy(conn, cfg, pos, date, price, shares, fee, atr, stop, notes, chart)
     _add_fill(conn, trade_id, symbol, date, "buy", shares, price, fee, notes)
     conn.commit()
     return trade_id
@@ -108,7 +124,7 @@ def sell_real(conn: sqlite3.Connection, cfg: dict, trade_id: int, date: str, pri
     shares = int(shares)
     if not 0 < shares <= pos["shares"]:
         raise ValueError(f"You can sell between 1 and {pos['shares']:,} shares.")
-    sell_fee = price * shares * cfg["fee_pct_per_side"] / 100
+    sell_fee = config.order_fee(price * shares, cfg)
     _add_fill(conn, trade_id, pos["symbol"], date, "sell", shares, price, sell_fee, reason)
     if shares == pos["shares"]:
         close_trade(conn, cfg, trade_id, date, price, reason)
@@ -179,7 +195,7 @@ def migrate_real_positions(conn: sqlite3.Connection, cfg: dict) -> int:
 
 def close_trade(conn: sqlite3.Connection, cfg: dict, trade_id: int, date: str, price: float, reason: str) -> None:
     row = conn.execute("SELECT shares, fees FROM trades WHERE id=?", (trade_id,)).fetchone()
-    fees = (row["fees"] or 0) + price * row["shares"] * cfg["fee_pct_per_side"] / 100
+    fees = (row["fees"] or 0) + config.order_fee(price * row["shares"], cfg)
     conn.execute(
         "UPDATE trades SET status='closed', exit_date=?, exit_price=?, exit_reason=?, fees=? WHERE id=?",
         (date, price, reason, fees, trade_id),
@@ -196,8 +212,42 @@ def delete_trade(conn: sqlite3.Connection, trade_id: int) -> None:
     conn.commit()
 
 
+BIG_LOSS = 0.30      # a position this far under its average price at the last close, when the rules say sell…
+BOUNCE_DAYS = 20     # …is sold at its first close back above its 20-day average, or after this many sessions without one
+# Walk-forward 2016–2026 (2026-10), stocks 30–50% under their 60-day high and under their 20-day average: waiting for
+# the first close back above it (at most 20 sessions) beat selling at once 68% of the time (median +3.6%, mean +1.3%);
+# 50%+ under it: 64%, +5.7%, +4.3%. For 10–30% falls the mean gain was about nothing (+0.3%): normal stops stay.
+
+
+def on_bounce(row: pd.Series, ind: pd.DataFrame, st: dict) -> dict:
+    """The rules say sell a position 30%+ under its average price: sell it on the first bounce instead (BOUNCE)."""
+    entry = float(row["entry_price"])
+    deep = entry * (1 - BIG_LOSS)
+    close = ind["close"]
+    if st["status"] != "EXIT" or close.iloc[-1] > deep:
+        return st
+    loss = close.iloc[-1] / entry - 1
+    # the plan starts at the first close after the buy 30%+ under it (the last close, for an old buy logged later)
+    hit = ((ind.index > pd.Timestamp(row["entry_date"])) & (close <= deep).to_numpy()).nonzero()[0]
+    start = int(hit[0]) if len(hit) else len(ind) - 1
+    tail = ind.iloc[start:]
+    up = tail.index[tail["close"] > tail["ema20"]]
+    if len(up):
+        return {**st, "reason": f"Big loss ({loss:.1%}): back above its 20-day average on {up[0].date()}: "
+                                "sell at the next open"}
+    if len(ind) - 1 - start >= BOUNCE_DAYS:
+        return {**st, "reason": f"Big loss ({loss:.1%}): no close above its 20-day average in {BOUNCE_DAYS} sessions: "
+                                "sell at the next open"}
+    level, by = float(ind["ema20"].iloc[-1]), str((ind.index[start] + BOUNCE_DAYS * holidays.session_day()).date())
+    return {**st, "status": "BOUNCE", "bounce_level": level, "bounce_by": by,
+            "reason": f"Big loss ({loss:.1%}): sell at the first close above its 20-day average ({level:.2f} now), "
+                      f"by {by} at the latest"}
+
+
 def real_status(row: pd.Series, ind: pd.DataFrame | None, cfg: dict) -> dict:
-    """What the exit rules say about one open real trade today."""
+    """What the exit rules say about one open real trade today. With stop_moves "mine" its stop stays where it was set."""
+    if cfg.get("stop_moves") == "mine":
+        cfg = {**cfg, "freeze_stops": True}
     if ind is None or ind.empty:
         return {"status": "NO DATA", "reason": "No price data for this symbol", "stop": row["stop"],
                 "days_held": 0, "last_close": None}
@@ -206,7 +256,7 @@ def real_status(row: pd.Series, ind: pd.DataFrame | None, cfg: dict) -> dict:
         shares=int(row["shares"]), initial_stop=float(row["initial_stop"]), stop=float(row["initial_stop"]),
         target=float(row["target"]), highest_close=float(row["entry_price"]), sector=row.get("sector") or "",
     )
-    st = engine.replay_status(pos, ind, cfg)
+    st = on_bounce(row, ind, engine.replay_status(pos, levels.with_support(ind, cfg, row["entry_date"]), cfg))
     st["last_close"] = float(ind["close"].iloc[-1])
     return st
 
@@ -222,9 +272,16 @@ def account_summary(conn: sqlite3.Connection, account: str, cfg: dict, last_clos
     realized += dividends
     cost = float((open_.entry_price * open_.shares + open_.fees).sum()) if len(open_) else 0.0
     cash = start + realized - cost
-    # A position still waiting for its bonus-share update holds the old share count at old prices.
-    factor = {t: e["factor"] for t, e in corporate.pending(conn, account).items()}
-    market = sum(last_close.get(r.symbol, r.entry_price) * r.shares * factor.get(r.id, 1.0) for r in open_.itertuples())
+    # A position still waiting for its bonus-share update holds the old share count at old prices; one waiting after
+    # a rights issue holds its shares at the new price and the rights beside them (corporate.rights_holding).
+    pend = corporate.pending(conn, account)
+
+    def worth(r) -> float:
+        e, last = pend.get(r.id), last_close.get(r.symbol, r.entry_price)
+        rights = corporate.rights_holding(e, r.shares)
+        return last * r.shares + rights["value"] if rights else last * r.shares * (e["factor"] if e else 1.0)
+
+    market = sum(worth(r) for r in open_.itertuples())
     equity = cash + market
     return {
         "start": start, "cash": cash, "equity": equity, "realized": realized, "dividends": dividends,
@@ -309,6 +366,7 @@ def process_paper(conn: sqlite3.Connection, cfg: dict, ind: dict[str, pd.DataFra
         if frame is None:
             continue
         start = pd.Timestamp(r.last_bar_date) if r.last_bar_date else pd.Timestamp(r.entry_date) - pd.Timedelta(days=1)
+        frame = levels.with_support(frame, cfg, start)
         bars = frame.loc[(frame.index > start) & (frame.index <= upto)]
         pos = engine.Position(
             symbol=r.symbol, entry_date=r.entry_date, entry_price=r.entry_price, shares=int(r.shares),

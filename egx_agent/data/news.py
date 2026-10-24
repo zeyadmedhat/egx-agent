@@ -46,6 +46,15 @@ FEEDS = {                     # source: (url, language, the categories kept: Non
 }
 SOURCES = {"mubasher": "Mubasher", "alborsa": "Al Borsa News", "dne": "Daily News Egypt", **TV_PROVIDERS}
 BUDGET_S = 240                # time for Mubasher's stock pages per run (about 45 pages)
+MUBASHER_PAGE = 25            # headlines on one of a stock's news pages
+MUBASHER_PAGES = 3            # a stock's older pages are read too while every headline on one was new (the first time)
+SOON_DAYS = 30                # a stock with a dividend, bonus shares or a rights issue going ex this soon is read early
+REREAD_H = 12                 # ... unless its pages were read in the last 12 hours
+# A few stocks' pages are always an error on Mubasher's side (AMII, ANFI, GOUR in Oct 2026): they go to the back of
+# the queue. Before, three of them in a row stopped every run as if the site were down, from 29 Sep 2026.
+BROKEN = (404, 500)
+BROKEN_RUN = 10               # ... unless this many in a row are: then the site is down
+MAC_FRESH = timedelta(days=3)  # how long a Mac file stands in for Mubasher's owners lists (app/macfeed.py)
 KEEP_DAYS = 730               # market news older than this is dropped; a stock's own news is kept
 
 # Corporate actions: Mubasher's English type -> our kind (anything else is "other")
@@ -300,10 +309,38 @@ def save_corporate_actions(conn: sqlite3.Connection, rows: list[dict]) -> int:
     return conn.execute("SELECT COUNT(*) FROM corp_actions").fetchone()[0] - before
 
 
+# Announced by the regulator (FRA) but not on Mubasher's corporate-actions list yet, which runs weeks behind.
+# effective: the first session without the right (holders at the close before get it).
+# ponytail: kept by hand; add one when a stock you hold announces it, drop it once Mubasher lists it.
+KNOWN_ACTIONS = [
+    {"symbol": "KORA", "type": "Capital Increase - Rights Issue", "kind": "rights", "announced": "2026-10-04",
+     "effective": "2026-10-14",
+     "note": "0.9 new share for each share held, at 0.205 EGP each (0.20 + 0.005 fees). Subscription 18 Oct to "
+             "10 Nov 2026 (first round to 1 Nov at QNB, 29 Oct on Thndr); the rights trade on their own 18 to 27 Oct, between Egyptians only.",
+     # the rights page's milestones (Thndr's, Amwal Al Ghad / Al Mal News 12–13 Oct 2026): [day, Cairo time, what,
+     # what the shares did then, their close (raw, before TradingView's re-base)]
+     "schedule": [["2026-10-04", "", "Announced", "KORA closed at 6.87", 6.87],
+                  ["2026-10-13", "14:30", "Last day to get the rights", "KORA fell 20% to 4.65", 4.65],
+                  ["2026-10-14", "10:00", "Rights split off the shares",
+                   "KORA opened at 2.53 and closed at 2.92. The rights were priced at 2.32", 2.92],
+                  ["2026-10-18", "10:00", "Rights trading starts"],
+                  ["2026-10-27", "14:30", "Rights trading ends"],
+                  ["2026-10-29", "14:30", "Last day to subscribe on Thndr"],
+                  ["2026-11-01", "", "Round 1 ends"],
+                  ["2026-11-10", "", "Subscription closes"]]},
+]
+
+
 def update_actions(conn: sqlite3.Connection, fetcher: Fetcher | None = None) -> int:
     """Only the corporate actions (all of them the first time, about a minute): the prediction model needs them."""
     full = conn.execute("SELECT COUNT(*) FROM corp_actions").fetchone()[0] == 0
-    return save_corporate_actions(conn, fetch_corporate_actions(fetcher or Fetcher(), 20 if full else 1))
+    return save_corporate_actions(conn, fetch_corporate_actions(fetcher or Fetcher(), 20 if full else 1) + KNOWN_ACTIONS)
+
+
+def mac_sends(conn: sqlite3.Connection) -> bool:
+    """Has the Mac sent Mubasher's owners lists lately (app/macfeed.py)? The website's run then leaves them to it."""
+    at = db.get_meta(conn, "mac_feed")
+    return bool(at) and datetime.now() - datetime.fromisoformat(at) < MAC_FRESH
 
 
 def _checked(conn) -> dict:
@@ -345,16 +382,24 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
         if page:
             res["new"] += save_news(conn, parse_mubasher(page, lang))
 
-    # Each stock's own pages: today's signals first, then the ones read longest ago. The first time a stock is
-    # read, its year of Reuters/Zawya news comes too (TradingView doesn't ask for a pause).
+    # Each stock's own pages: today's signals and the stocks with a dividend, bonus shares or a rights issue going ex
+    # soon first (unless read in the last few hours), then the ones read longest ago. The first time a stock is read,
+    # its year of Reuters/Zawya news comes too (TradingView doesn't ask for a pause). Every stock that traded in the
+    # month to the last close is read: one whose download failed once is still listed.
+    today = _now().date()
     symbols = [r[0] for r in conn.execute(
-        "SELECT symbol FROM stocks WHERE price_missing_since IS NULL AND symbol IN (SELECT DISTINCT symbol FROM prices)")]
+        "SELECT symbol FROM stocks WHERE symbol IN (SELECT DISTINCT symbol FROM prices "
+        "WHERE date >= date((SELECT MAX(date) FROM prices), '-30 days'))")]
+    soon = [r[0] for r in conn.execute(
+        "SELECT DISTINCT symbol FROM corp_actions WHERE kind IN ('dividend', 'bonus', 'split', 'rights') "
+        "AND effective BETWEEN ? AND ? ORDER BY effective", (today.isoformat(), (today + timedelta(days=SOON_DAYS)).isoformat()))]
     checked = _checked(conn)
-    first = [s for s in dict.fromkeys(first) if s in symbols]
+    recent = (datetime.now() - timedelta(hours=REREAD_H)).isoformat(timespec="seconds")
+    first = [s for s in dict.fromkeys([*first, *soon]) if s in symbols and checked.get(s, {}).get("mubasher", "") < recent]
     order = first + sorted((s for s in symbols if s not in first),
                            key=lambda s: checked.get(s, {}).get("mubasher", ""))
     start = time.monotonic()
-    misses = 0
+    misses = broke = 0
     for sym in order:
         if time.monotonic() - start > budget_s:
             break
@@ -365,17 +410,30 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
             if items is not None:
                 res["new"] += save_news(conn, items)
                 state["tv"] = datetime.now().isoformat(timespec="seconds")
-        ok = True
+        ok, bad = True, False
         for lang in ("ar", "en"):
-            r = attempt("Mubasher stock pages", lambda: f.get(f"{MUBASHER[lang]}/markets/EGX/stocks/{sym}/news"))
-            if r is None or r.status_code != 200:
-                ok = False
-                continue
-            res["new"] += save_news(conn, parse_mubasher(r.text, lang), sym)
-        if ok:
+            for page in range(1, MUBASHER_PAGES + 1):      # .../news, .../news/2, ...
+                url = f"{MUBASHER[lang]}/markets/EGX/stocks/{sym}/news" + (f"/{page}" if page > 1 else "")
+                r = attempt("Mubasher stock pages", lambda: f.get(url))
+                if r is None or r.status_code != 200:
+                    bad = bad or (r is not None and page == 1 and r.status_code in BROKEN)
+                    ok = ok and page > 1
+                    break
+                items = parse_mubasher(r.text, lang)
+                new = save_news(conn, items, sym)
+                res["new"] += new
+                if len(items) < MUBASHER_PAGE or new < len(items):     # the last page, or it reached what we have
+                    break
+        if ok or bad:                  # a page Mubasher can't show goes to the back of the queue, like a read one
             state["mubasher"] = datetime.now().isoformat(timespec="seconds")
+        if ok:
             res["stocks"] += 1
-            misses = 0
+            misses = broke = 0
+        elif bad:
+            broke += 1
+            if broke >= BROKEN_RUN:    # every page an error: the site is down after all
+                res["failed"].append("Mubasher stock pages")
+                break
         else:
             misses += 1
             if misses >= 3:            # the site isn't answering: try again next run
@@ -387,7 +445,9 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
     conn.commit()
     res["failed"] = sorted(set(res["failed"]))
     res["tried"] = sorted(set(res["tried"]))
-    db.set_meta(conn, "news_updated", datetime.now().isoformat(timespec="seconds"))
+    # When the news last changed: a run that found nothing new leaves the site as it was (static_site's stamp)
+    if res["new"] or res["actions"] or not db.get_meta(conn, "news_updated"):
+        db.set_meta(conn, "news_updated", datetime.now().isoformat(timespec="seconds"))
     return res
 
 
@@ -459,11 +519,67 @@ def _rows(cur) -> list[dict]:
     return out
 
 
-def stock_news(conn: sqlite3.Connection, symbol: str, limit: int = 30) -> list[dict]:
+def stock_news(conn: sqlite3.Connection, symbol: str, limit: int = 50) -> list[dict]:
     """A stock's headlines, newest first."""
     return _rows(conn.execute(
         "SELECT id, source, lang, published, title, url, tags, tone FROM news WHERE symbol = ? "
         "ORDER BY published DESC LIMIT ?", (symbol, limit)))
+
+
+# ------------------------------------------------------------------ big deals (a block of the stock's own shares)
+# A headline about one trade of a block of shares: "تنفيذ صفقة على أسهم …", "مساهم يرفع حصته … بصفقة قيمتها …",
+# "… Block Traded For EGP …". Not a company's business deal (an acquisition, a contract): those are left out.
+_DEAL_RE = (re.compile(r"block[- ]trad", re.I),
+            re.compile(r"تنفيذ\s+صفق|بصفق|عبر\s+صفق|صفقات\s+بيع\s+وشراء|(ير|تر)فع\s+(حصت|ملكيت)|(يخ|تخ)فض\s+(حصت|ملكيت)"))
+_NOT_DEAL = re.compile(r"استحواذ|العدول|تقييم|القيمة\s+العادلة|احتفال|acqui", re.I)
+_SELLS = re.compile(r"خفض|يبيع|تبيع|بيع|\bsells?\b|\bsold\b|cuts?\s+stake", re.I)
+_BUYS = re.compile(r"يرفع|ترفع|يشتري|تشتري|شراء|\bbuys?\b|\bbought\b|raises?\s+stake", re.I)
+_VALUE_RE = (re.compile(r"([\d.,]+)\s*(مليون|ملايين|مليار)\s*جنيه"),
+             re.compile(r"EGP\s*([\d.,]+)\s*(mln|bln|mn|bn|million|billion)\b", re.I))
+_WHO = (("staff", re.compile(r"إثابة|تحفيز|incentive", re.I)),
+        ("insider", re.compile(r"الرئيس\s+التنفيذي|رئيس\s+مجلس|عضو\s+مجلس|العضو\s+المنتدب|\bCEO\b|chairman", re.I)),
+        ("fund", re.compile(r"صندوق|\bfund\b", re.I)),
+        ("company", re.compile(r"(^|\s)(تبيع|تخفض|ترفع|تشتري)\s|^\S*\s*شركة|company\s+(sells|buys)", re.I)),
+        ("shareholder", re.compile(r"مساهم|shareholder", re.I)))
+DEAL_SAME = 0.05              # two headlines a day or less apart within 5% of each other's value are the same deal
+
+
+def deal_of(title: str) -> dict | None:
+    """What a headline says about a block of the stock's shares changing hands: {side: buy | sell | None (just
+    "changed hands"), value: EGP or None, who: insider | fund | company | shareholder | None}. None when it isn't one."""
+    t = title.replace("ّ", "")
+    if not any(r.search(t) for r in _DEAL_RE) or _NOT_DEAL.search(t):
+        return None
+    sell, buy = bool(_SELLS.search(t)), bool(_BUYS.search(t))
+    value = None
+    for r in _VALUE_RE:
+        if m := r.search(t):
+            value = float(m.group(1).replace(",", "")) * (1e9 if m.group(2).lower() in ("مليار", "bln", "bn", "billion") else 1e6)
+            break
+    side = "sell" if sell and not buy else "buy" if buy and not sell else None
+    who = next((w for w, r in _WHO if r.search(t)), None)
+    if who is None and side and not re.match(r"\W*(تنفيذ|ال?بورصة|بورصة)", t):
+        who = "company"       # a named buyer or seller ("جهاز مستقبل مصر يرفع حصته…", "Quantum Investment BV raises…")
+    return {"side": side, "value": value, "who": who}
+
+
+def big_deals(conn: sqlite3.Connection, symbol: str, since: str) -> list[dict]:
+    """A stock's block deals from its own headlines since `since`, newest first, one per deal (Mubasher and Reuters
+    often both report the same one: the one that says more is kept)."""
+    out: list[dict] = []
+    for n in _rows(conn.execute("SELECT published, title, url, source FROM news WHERE symbol = ? AND published >= ? "
+                                "ORDER BY published DESC", (symbol, since))):
+        if not (d := deal_of(n["title"])):
+            continue
+        d = {**n, **d}
+        day = datetime.fromisoformat(d["published"][:10])
+        same = next((o for o in out if abs((datetime.fromisoformat(o["published"][:10]) - day).days) <= 1 and (
+            o["title"] == d["title"] or (o["value"] and d["value"] and abs(o["value"] - d["value"]) <= DEAL_SAME * o["value"]))), None)
+        if same is None:
+            out.append(d)
+        elif sum(v is not None for v in (d["side"], d["who"])) > sum(v is not None for v in (same["side"], same["who"])):
+            out[out.index(same)] = d
+    return out
 
 
 def recent_news(conn: sqlite3.Connection, days: int = 30, limit: int = 1500) -> list[dict]:
@@ -515,7 +631,10 @@ def cautions(conn: sqlite3.Connection, symbol: str, today: str, hold_days: int =
                                 "more shares, so it isn't a loss."})
         else:
             out.append({"kind": "rights", "date": a["effective"], "level": "info",
-                        "text": f"Rights issue, ex-date {a['effective']}: the price usually adjusts that day."})
+                        "text": f"Rights issue, ex-date {a['effective']}: holders at the close before can subscribe to "
+                                f"new shares{': ' + a['note'].rstrip('.') if a.get('note') else ''}. That morning the "
+                                "price drops by the right's value, which isn't a loss. Subscribe or sell the rights in "
+                                "time, or their value is lost."})
     if div and div.get("ex_date") and tomorrow <= div["ex_date"] <= end:
         exes[div["ex_date"]] = div.get("amount")
     for ex, amount in sorted(exes.items()):

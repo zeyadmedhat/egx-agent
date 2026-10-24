@@ -68,11 +68,13 @@ def note(conn: sqlite3.Connection, failed: Iterable[str], checked: Iterable[str]
 
 
 def sessions_behind(data_date: str, expected: date) -> int:
-    """Trading sessions (Sunday–Thursday) after data_date up to the one whose close should be out by now."""
+    """Trading sessions after data_date up to the one whose close should be out by now."""
+    from egx_agent import holidays
+
     d, n = date.fromisoformat(data_date), 0
     while d < expected:
         d += timedelta(days=1)
-        n += d.weekday() in (6, 0, 1, 2, 3)
+        n += holidays.is_session(d)
     return n
 
 

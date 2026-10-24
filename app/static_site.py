@@ -28,7 +28,7 @@ from pathlib import Path
 import yaml
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from egx_agent import breadth, config, db, scan
+from egx_agent import breadth, config, corporate, db, holidays, record, scan
 from egx_agent.data import dividends, prices, shariah
 
 from . import views
@@ -39,8 +39,10 @@ ITERATIONS = 600_000        # PBKDF2 rounds: each guess costs about a second on 
 SERIES_TAIL = 750           # about 3 years of daily bars per stock page
 MIN_PASSWORD = 10
 MAC_ONLY_KEYS = ("paper_capital", "auto_paper")     # settings for the Mac's paper account
+SITE_DEFAULTS = {"shariah_filter": "kashif", "broker": "thndr"}   # friends start with Kashif stocks only, on Thndr
 WORKFLOW = "site.yml"       # the GitHub job that scans and publishes the site (.github/workflows/)
-STOCK_COLS = views.SERIES_COLS + ("atr14",)   # the exit rules in the browser need the ATR too
+# the exit rules in the browser need the ATR and the stop under support too, and a logged buy the chart's target
+STOCK_COLS = views.SERIES_COLS + ("atr14", "sup", "ptgt")
 UNSTAMPED = {"core": ("built",), "news": ("updated",)}   # when a file was built or checked, not what's in it
 
 
@@ -107,6 +109,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         high = d.prices(r["symbol"])["high"].tail(20)
         r["trigger"] = float(high.max()) if len(high) else None
         r["to_trigger"] = r["trigger"] / r["close"] - 1 if r["trigger"] and r["close"] else None
+        if r["action"] != "BUY":                 # Picks' Getting close boxes: the best way in (views.best_entry)
+            r["best_in"] = views.best_entry(d, r["symbol"])
 
     index_ind = d.indicators(prices.INDEX_SYMBOL)
     spark = index = None
@@ -118,61 +122,114 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         index = {"time": [str(t.date()) for t in long.index], "close": views.column(long["close"], 2)}
     m = views.market_info(conn)
     b = views.breadth_data(d)
-    events = [{"id": f"{r['symbol']}:{r['ex_date']}", "symbol": r["symbol"], "ex_date": r["ex_date"], "factor": r["factor"]}
-              for r in conn.execute("SELECT symbol, ex_date, factor FROM price_events ORDER BY ex_date, id")]
+    events = corporate.events(conn)
     core = {
         "v": 1, "built": datetime.now().isoformat(timespec="seconds"), "scan_date": scan_date, "market": m or None,
         "final": scan.scan_is_final(conn),     # False: scanned during the session, again after the close
-        "signals": signals, "stocks": views.stocks_list(d), "predictions": views.predictions(d),
+        "holidays": dict(holidays.HOLIDAYS),   # EGX's announced holidays: the browser counts sessions without them
+        "signals": signals, "stocks": views.stocks_list(d), "rights": views.rights_list(d), "rights_past": views.rights_past(d), "predictions": views.predictions(d),
         "spark": spark, "index": index or {"time": [], "close": []},
         "breadth_today": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
-                          **breadth.verdict(b, m.get("risk_off") if m else None)} if b else None,
+                          **breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None)} if b else None,
+        "mood_today": views.mood_brief(d),
+        "changes": views.stock_changes(d),     # Home picks the stocks you hold
         "strategy": strategy_settings(cfg),
-        "personal_defaults": {k: config.DEFAULTS[k] for k in personal_keys()},
+        "personal_defaults": {k: SITE_DEFAULTS.get(k, config.DEFAULTS[k]) for k in personal_keys()},
         "sections": site_sections(),
         "events": events, "data_status": views.settings_view(d)["data"],
         "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,
         "scan_url": scan_url, "cautions": views.cautions_map(d),
         # each stock's next cash dividend: a holder lowers the stop by it before the ex-date (views.exdiv_item)
         "dividends_coming": dividends.coming(conn, scan_date or datetime.now().date().isoformat()),
+        # every BUY published so far and how it went, and what the rules' past signals did by score (record.py)
+        "record": views.signal_record(d), "odds": record.public_odds(record.stored_odds(conn)),
+        # the dollar, gold, interest rate and inflation now: the zakat and certificate calculators
+        "money": views.money_rates(conn),
+        "company": views.company_brief(d),     # each company's results in brief: the BUY cards and Close to a BUY
     }
-    out: dict[str, object] = {"core": core, "market": views.market_view(d), "predict": views.predict_public(d),
+    out: dict[str, object] = {"core": core, "market": views.market_view(d), "egx30": views.index_view(d),
+                              "predict": views.predict_public(d),
                               "screener": views.screener(d), "history": views.history_data(d),
-                              "dividends": views.dividend_calendar(d), "news": views.news_feed(d)}
+                              "dividends": views.dividend_calendar(d), "news": views.news_feed(d),
+                              "rights": corporate.rights_study(conn)}   # the Rights issues page, loaded when opened
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
+    hourly = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM intraday")}
     for sym in d.table.index:
         if sym in with_prices:
             out[f"stock/{sym}"] = views.stock_public(d, sym, STOCK_COLS, SERIES_TAIL)
+        if sym in hourly:      # the 1-hour and 4-hour charts, loaded only when someone picks them
+            out[f"intraday/{sym}"] = views.stock_intraday(d, sym)
     return out
 
 
 # ------------------------------------------------------------------ the page itself
-def _csp(page: str) -> str:
+def _csp(page: str, connect: str = "") -> str:
     hashes = " ".join(f"'sha256-{base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()}'"
                       for s in re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", page, flags=re.S) if s.strip())
     return ("default-src 'self'; script-src 'self' " + hashes + "; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; "
-            "frame-src https://s.tradingview.com https://www.tradingview-widget.com; "
+            f"img-src 'self' data:; connect-src 'self'{' ' + connect if connect else ''}; font-src 'self'; "
+            "object-src 'none'; base-uri 'self'; frame-src https://s.tradingview.com https://www.tradingview-widget.com; "
             "form-action 'self'")
 
 
-def index_html() -> str:
-    """The Mac's index.html with relative paths (the site lives under /<repository>/), marked as the static site."""
+def _origin(url: str | None) -> str:
+    m = re.match(r"^https://[A-Za-z0-9.-]+", url or "")
+    return m.group(0) if m else ""
+
+
+def code_version() -> str:
+    """A fingerprint of the page's code: its files are published under static/<this>/, so a browser can't keep using
+    an old copy after an update (it would otherwise, for up to hours on some browsers and phones)."""
+    h = hashlib.sha256()
+    for f in sorted(STATIC.rglob("*")):
+        if f.is_file() and f.name != ".DS_Store":
+            h.update(str(f.relative_to(STATIC)).encode() + f.read_bytes())
+    return h.hexdigest()[:10]
+
+
+def index_html(worker: str | None = None, version: str = "") -> str:
+    """The Mac's index.html with relative paths (the site lives under /<repository>/), marked as the static site.
+    `worker`: the Telegram bot's Worker, the one other address the page may send to (your portfolio, if you link it)."""
     page = (STATIC / "index.html").read_text(encoding="utf-8")
-    page = page.replace('"/static/', '"./static/').replace('<html lang="en" data-theme="dark">',
-                                                           '<html lang="en" data-theme="dark" data-mode="static">')
+    page = page.replace('"/static/', f'"./static/{version + "/" if version else ""}').replace('<html lang="en" data-theme="light">',
+                                                           '<html lang="en" data-theme="light" data-mode="static">')
     extra = ('  <meta name="robots" content="noindex, nofollow">\n'
              '  <meta name="referrer" content="no-referrer">\n'
              '  <meta name="apple-mobile-web-app-capable" content="yes">\n'
              '  <meta name="apple-mobile-web-app-title" content="EGX Agent">\n'
-             '  <link rel="manifest" href="manifest.webmanifest">\n')
+             '  <link rel="manifest" href="manifest.webmanifest">\n' + RELOAD_ON_OLD_PAGE)
     page = page.replace('  <title>', extra + '  <title>', 1)
-    csp = f'  <meta http-equiv="Content-Security-Policy" content="{_csp(page)}">\n'
+    csp = f'  <meta http-equiv="Content-Security-Policy" content="{_csp(page, _origin(worker))}">\n'
     return page.replace('  <meta charset="utf-8">\n', '  <meta charset="utf-8">\n' + csp, 1)
 
 
+# A browser may keep the front page for 10 minutes (GitHub Pages' rule) and ask for page code an update has removed:
+# then it gets a fresh front page and reloads, once a minute at most, instead of showing an empty screen.
+RELOAD_ON_OLD_PAGE = """  <script>
+    addEventListener('error', function (e) {
+      var src = e.target && (e.target.src || e.target.href) || '';
+      if (src.indexOf('static/') < 0) return;
+      try {
+        if (Date.now() - (+sessionStorage.getItem('egx-reloaded') || 0) < 60000) return;
+        sessionStorage.setItem('egx-reloaded', String(Date.now()));
+      } catch (x) { return; }
+      fetch('./', { cache: 'reload' }).then(function () { location.reload(); }, function () {});
+    }, true);
+  </script>
+"""
+SERVICE_WORKER = Path(__file__).resolve().parent / "sw.js"
+
+
+def service_worker(version: str, out: Path) -> str:
+    """app/sw.js with this version's page code listed, so it's kept on the device for offline use."""
+    files = sorted(f"static/{version}/{p.relative_to(out / 'static' / version).as_posix()}"
+                   for p in (out / "static" / version).rglob("*") if p.is_file())
+    return (SERVICE_WORKER.read_text(encoding="utf-8").replace("__VERSION__", version)
+            .replace("__FILES__", json.dumps(files)))
+
+
 MANIFEST = {"name": "EGX Trading Agent", "short_name": "EGX Agent", "start_url": "./", "scope": "./",
-            "display": "standalone", "background_color": "#0f1115", "theme_color": "#0f1115",
+            "display": "standalone", "background_color": "#f3ece0", "theme_color": "#f3ece0",
             "icons": [{"src": "static/favicon.svg", "sizes": "any", "type": "image/svg+xml"}]}
 
 
@@ -185,9 +242,12 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
     out = Path(out)
     if out.exists():
         shutil.rmtree(out)
-    shutil.copytree(STATIC, out / "static", ignore=shutil.ignore_patterns("index.html", ".DS_Store"))
-    (out / "index.html").write_text(index_html(), encoding="utf-8")
-    (out / "manifest.webmanifest").write_text(json.dumps(MANIFEST), encoding="utf-8")
+    ver = code_version()
+    shutil.copytree(STATIC, out / "static" / ver, ignore=shutil.ignore_patterns("index.html", ".DS_Store"))
+    (out / "index.html").write_text(index_html((telegram or {}).get("worker"), ver), encoding="utf-8")
+    manifest = {**MANIFEST, "icons": [{**MANIFEST["icons"][0], "src": f"static/{ver}/favicon.svg"}]}
+    (out / "manifest.webmanifest").write_text(json.dumps(manifest), encoding="utf-8")
+    (out / "sw.js").write_text(service_worker(ver, out), encoding="utf-8")
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")
 
@@ -206,8 +266,9 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
         path = out / "data" / f"{name}.bin"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(seal(body, key))
+    # worker: the Telegram bot's address (already in the page's security header), for opening inside Telegram
     info = {"v": 1, "salt": base64.b64encode(salt).decode(), "iter": ITERATIONS, "stamp": stamp,
-            "built": files["core"]["built"]}
+            "built": files["core"]["built"], "worker": (telegram or {}).get("worker")}
     (out / "data" / "site.json").write_text(json.dumps(info), encoding="utf-8")
     return {"stamp": stamp, "files": len(plain), "stocks": sum(1 for n in plain if n.startswith("stock/")),
             "bytes": sum(p.stat().st_size for p in (out / "data").rglob("*.bin"))}

@@ -9,7 +9,7 @@ import pytest
 
 from app import jobs
 from egx_agent import breadth, config, db, predict
-from egx_agent.data import macro, news, prices
+from egx_agent.data import fundamentals, macro, news, prices
 from tests.conftest import make_ohlcv
 from tests.test_api import H
 from tests.test_prices import FakeProvider
@@ -107,9 +107,19 @@ def _market(tmp_path, n=1300, stocks=10):
 @pytest.fixture
 def fast_model(monkeypatch):
     from lightgbm import LGBMClassifier
-    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: LGBMClassifier(n_estimators=15, min_child_samples=40,
-                                                                               verbose=-1))
+    monkeypatch.setattr(predict, "new_model", lambda n=0, hz=10: predict.Seeds(
+        [LGBMClassifier(n_estimators=15, min_child_samples=40, random_state=s, verbose=-1) for s in (1, 2)]))
     monkeypatch.setattr(macro, "update", lambda conn, provider=None: list(macro.SERIES))   # no downloads in tests
+
+
+def test_each_model_is_its_seed_copies_averaged():
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(rng.normal(size=(400, 3)), columns=["ret1", "ret5", "rsi14"])
+    y = (X["ret1"] + rng.normal(size=400) > 0).astype(int)
+    m = predict.new_model(len(X)).fit(X, y)
+    assert [c.random_state for c in m.models] == list(predict.SEEDS)
+    assert np.allclose(m.predict_proba(X), np.mean([c.predict_proba(X) for c in m.models], axis=0))
+    assert len(predict.explain(m, X.head(2))) == 2
 
 
 def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, fast_model):
@@ -118,22 +128,28 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
     root = tmp_path / "models"
     assert predict.model_dir(conn) == root
     assert (root / "prediction.joblib").exists() and (root / "prediction.json").exists()
-    assert meta["stocks"] == 10 and set(meta["horizons"]) == {"10", "20", "5"}     # 5: the paper experiment
+    assert meta["stocks"] == 10 and set(meta["horizons"]) == {"10", "20", "5"}     # 5: the week
     r = meta["horizons"]["10"]
     assert r["years"] and r["all"]["n"] > 1000 and r["grade"] in ("good", "weak", "none")
     # the honest extras: its test portfolio with and without extra costs, and whether its chances beat the average
     assert set(r["portfolio"]) == {"cagr", "max_drawdown", "sharpe"}
     assert r["portfolio_cost"]["cagr"] < r["portfolio"]["cagr"] and r["top_ret_cost"] == r["top"]["ret"] - 0.005
     assert r["chances"] == {}              # one test year here: nothing earlier to calibrate on (tested below)
-    assert "hold" in meta["horizons"]["5"] and "hold" not in r
+    week = meta["horizons"]["5"]["week"]          # the week's tests in the page's words (predict.week_eval)
+    assert "week" not in r and {"bands", "strong", "all", "weak_top", "years", "good_years"} <= set(week)
     # the BUY rules replayed with and without the model, on its test years only
     combo = meta["combo"]
     assert "error" not in combo, combo
-    assert set(combo) >= {"rules", "ordered", "with_picks", "from", "to", "picks"} and combo["picks"] == 3
+    assert set(combo) >= {"rules", "ordered", "with_picks", "from", "to", "picks"} and combo["picks"] == 2
     assert set(combo["rules"]) == {"all", "first", "second"} and "cagr" in combo["with_picks"]["all"]
 
     lt = predict.latest(conn)
     assert len(lt) == 10 and lt["p10"].between(0, 1).all() and set(lt["rank10"]) <= set(range(1, 11))
+    # what trades it scored like this averaged in its tests: never higher for a lower-ranked stock
+    assert lt["exp10"].notna().all() and lt.sort_values("rank10")["exp10"].is_monotonic_decreasing
+    # the week: an honest chance per stock, ranked by it, with its own target and stop (±1.5 × the daily range)
+    assert lt["p5"].between(0, 1).all() and (lt["move5"] > 0).all() and set(lt["level"]) <= {"good", "other", "weak"}
+    assert lt.sort_values("rank5")["p5"].is_monotonic_decreasing
     day = lt["date"].iloc[0]
     assert conn.execute("SELECT COUNT(*) FROM predictions WHERE resolved IS NULL").fetchone()[0] == 30
     # why it scored each stock as it did: plain words, up and down
@@ -154,8 +170,8 @@ def test_train_saves_next_to_the_database_predicts_and_resolves(tmp_path, cfg, f
     assert predict.resolve(conn, cfg) == 30
     live = predict.live_record(conn)
     assert live["10"]["n"] == 10 and live["10"]["all"]["hit"] == 1.0   # a steady doubling reaches every target
-    assert live["5"]["n"] == 10 and live["5"]["all"]["hit"] == 1.0 and live["5"]["picks"]["n"] == 5   # sold on day 5
-    assert live["5"]["all"]["ret"] > 0.1
+    assert live["5"]["n"] == 10 and live["5"]["all"]["hit"] == 1.0 and live["5"]["picks"]["n"] == 5
+    assert live["5"]["all"]["ret"] > 0 and "strong" in live["5"]
 
 
 def test_chances_are_judged_against_last_years_average():
@@ -247,6 +263,8 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
         assert page["model"]["stocks"] == 10 and len(page["rows"]) == 10
         row = page["rows"][0]
         assert {"p10", "p20", "rank10", "rank20", "stop", "target", "info"} <= set(row)
+        assert {"p5", "rank5", "move5", "target5", "stop5", "level", "why5"} <= set(row) and row["stop5"] < row["target5"]
+        assert page["week"]["test"]["strong"]["n"] >= 0 and page["week"]["weak"] in (True, False)
         assert page["base"]["10"] is not None
         assert page["top_n"] == 1 and sum(r["top10"] for r in page["rows"]) == 1   # its best 10% of 10 stocks
         assert page["model"]["live_since"] == page["model"]["data_to"]
@@ -267,7 +285,26 @@ def test_predict_page_before_and_after_training(tmp_path, monkeypatch, fast_mode
         assert saved["symbols"] == ["S01", "S02"] and c.get("/api/watchlist").json()["symbols"] == ["S01", "S02"]
         assert c.put("/api/watchlist", json={"symbols": []}).status_code == 403     # only the dashboard can change it
         market = c.get("/api/market").json()
+        idx = c.get("/api/egx30").json()     # the EGX30 page: its returns come from its own closes
+        close, per = idx["series"]["close"], {r["key"]: r for r in idx["periods"]}
+        assert idx["has_data"] and idx["years"][0]["partial"] and per["1Y"]["usd"] is None
+        assert per["1Y"]["egp"] == pytest.approx(close[-1] / close[-251] - 1, rel=1e-6)
         assert len(market["movers"]["ret5"]["up"]) <= 6
+    # the bot's /week, stock card and /egx30 say what those pages say; its evening message names next week's best
+    from app import alerts, views
+    conn = db.connect(tmp_path / "egx.db")
+    info = alerts.bot_info(conn, config.DEFAULTS)
+    s = info["stocks"][row["symbol"]]
+    assert s["w"] == pytest.approx(row["p5"], abs=1e-3) and s["wr"] == row["rank5"] and s["wl"] == row["level"]
+    assert s["c"] * (1 + s["wm"]) == pytest.approx(row["target5"], rel=1e-3)
+    assert info["week"]["top"] == 1 and info["week"]["weak"] == page["week"]["weak"]
+    assert info["x30"]["r"]["1Y"] == pytest.approx(per["1Y"]["egp"], abs=1e-4) and info["x30"]["u"]["1Y"] is None
+    for x in info["stocks"].values():       # the best way in (the stock page's Where to buy it): [d|b, price, stop, target, rr]
+        if "be" in x:
+            how, price, stop, target, rr = x["be"]
+            assert how in ("d", "b") and stop < price < target and rr == pytest.approx((target - price) / (price - stop), abs=0.06)
+    line = alerts._week_line(views.Data(conn, config.DEFAULTS, views.Cache()))
+    assert line.startswith("Next week") and line.endswith("(/week).")
 
 
 def test_monthly_retrain_runs_after_a_scan_only_when_due(tmp_path, cfg, fast_model):
@@ -332,14 +369,17 @@ def test_egypt_download_takes_everything_once_then_only_new_values(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     p = MacroProvider()
     assert macro.update(conn, p) == ["inflation"]                          # the old values stay; it's retried
-    assert {(s, e) for s, e, _ in p.calls} == {(v[0], v[1]) for v in macro.SERIES.values()}
+    assert {(s, e) for s, e, _ in p.calls} == {(v[0], v[1]) for v in {**macro.SERIES, **macro.EXTRA}.values()}
     assert {n for _, _, n in p.calls} == {macro.FULL_BARS}
     p.calls.clear()
     macro.update(conn, p)
     assert dict((s, n) for s, _, n in p.calls) == {"USDEGP": macro.UPDATE_BARS, "EGINBR": macro.UPDATE_BARS,
-                                                   "EGIRYY": macro.FULL_BARS, "EGX70EWI": macro.UPDATE_BARS}
+                                                   "EGIRYY": macro.FULL_BARS, "EGX70EWI": macro.UPDATE_BARS,
+                                                   "XAUUSD": macro.UPDATE_BARS}
     raw = db.load_macro(conn)
-    assert set(raw.columns) == {"usdegp", "interbank", "egx70"} and raw["usdegp"].iloc[-1] == 2.0
+    assert set(raw.columns) == {"usdegp", "interbank", "egx70", "gold"} and raw["usdegp"].iloc[-1] == 2.0
+    # gold is for your returns and the zakat nisab, not the model: without inflation the Egypt data isn't ready
+    assert not predict.egypt_data_ready(conn)
 
 
 def test_the_20_session_model_uses_egypt_data_and_an_older_design_is_retrained(tmp_path, cfg, fast_model):
@@ -347,10 +387,10 @@ def test_the_20_session_model_uses_egypt_data_and_an_older_design_is_retrained(t
     _add_macro(conn, start="2020-12-01")
     meta = predict.train(conn, cfg)
     assert meta["version"] == predict.MODEL_VERSION
-    both = len(predict.FEATURES) + len(macro.FEATURES) + len(news.EVENT_FEATURES)
+    both = len(predict.FEATURES) + len(macro.FEATURES) + len(news.EVENT_FEATURES) + len(fundamentals.FEATURES)
     assert meta["horizons"]["10"]["features"] == meta["horizons"]["20"]["features"] == both
     bundle = predict.load_models(tmp_path / "models")
-    assert all("fx_ret63" in bundle["features"][hz] and "div_ex_ahead" in bundle["features"][hz] for hz in (10, 20))
+    assert all({"fx_ret63", "div_ex_ahead", "f_ey"} <= set(bundle["features"][hz]) for hz in (10, 20))
     assert predict.predict_latest(conn, cfg) == 10
     assert meta["egypt_data"] and not predict.needs_training(conn, cfg)
     meta["version"] = 1                                                     # a model from before this design

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import holidays
 from .config import DB_PATH
 
 # Shared by everyone: prices, stock info, scans, bonus-share events, the prediction model's numbers.
@@ -21,6 +22,33 @@ CREATE TABLE IF NOT EXISTS prices (
     date   TEXT NOT NULL,            -- YYYY-MM-DD
     open REAL, high REAL, low REAL, close REAL, volume REAL,
     PRIMARY KEY (symbol, date)
+);
+CREATE TABLE IF NOT EXISTS rights_prices (    -- a rights issue's rights while they trade (KORA_r1: TradingView's
+    symbol TEXT NOT NULL,                      -- KORAR1), kept: TradingView drops them once the issue is over
+    date   TEXT NOT NULL,
+    open REAL, high REAL, low REAL, close REAL, volume REAL,
+    PRIMARY KEY (symbol, date)
+);
+CREATE TABLE IF NOT EXISTS fundamentals (
+    symbol TEXT PRIMARY KEY,        -- the company's numbers from TradingView (data/dividends.py FUNDAMENTALS)
+    data TEXT NOT NULL,             -- JSON: market_cap, pe, pb, eps_growth, revenue_growth, net_margin, roe, debt_equity
+    updated TEXT
+);
+CREATE TABLE IF NOT EXISTS analyst_targets (
+    symbol TEXT PRIMARY KEY,        -- analysts' 12-month targets from TradingView (data/dividends.py ANALYSTS)
+    data TEXT NOT NULL,             -- JSON: avg, low, high, n, buy, hold, sell
+    updated TEXT
+);
+CREATE TABLE IF NOT EXISTS fin_history (
+    symbol TEXT PRIMARY KEY,        -- each company's past quarters and years from TradingView (data/fundamentals.py)
+    data TEXT NOT NULL,             -- JSON: q_end, y_end (timestamps), shares, q/y: {ni, rev, ...: lists, newest first}
+    updated TEXT
+);
+CREATE TABLE IF NOT EXISTS intraday (
+    symbol TEXT NOT NULL,           -- hourly bars for the 1-hour and 4-hour charts (data/prices.py update_intraday)
+    ts     TEXT NOT NULL,           -- YYYY-MM-DD HH:MM, Cairo time, the bar's start
+    open REAL, high REAL, low REAL, close REAL, volume REAL,
+    PRIMARY KEY (symbol, ts)
 );
 CREATE TABLE IF NOT EXISTS stocks (
     symbol TEXT PRIMARY KEY,
@@ -65,7 +93,7 @@ CREATE TABLE IF NOT EXISTS price_events (
 CREATE TABLE IF NOT EXISTS predictions (
     date TEXT NOT NULL,             -- the session the prediction was made after (its close)
     symbol TEXT NOT NULL,
-    horizon INTEGER NOT NULL,       -- sessions allowed to reach the target (10 or 20)
+    horizon INTEGER NOT NULL,       -- sessions allowed to reach the target (5 = the week, 10 or 20)
     prob REAL NOT NULL,             -- the model's chance of target before stop (calibrated)
     raw REAL,                       -- the model's raw score, used to rank stocks on the same day
     close REAL,
@@ -77,8 +105,22 @@ CREATE TABLE IF NOT EXISTS predictions (
     resolved TEXT,                  -- 'done' or 'cancelled' (opened below the stop, or couldn't be bought that day)
     PRIMARY KEY (date, symbol, horizon)
 );
+CREATE TABLE IF NOT EXISTS ai_forecasts (   -- what each AI model forecast after a close (egx_agent/ai_forecast.py)
+    made TEXT NOT NULL,             -- the close it started from
+    symbol TEXT NOT NULL,
+    model TEXT NOT NULL,            -- chronos2 | timesfm | tirex | kronos
+    p1 REAL, p5 REAL, p20 REAL,     -- the price it forecast 1, 5 and 20 sessions later
+    PRIMARY KEY (made, symbol, model)
+);
+CREATE TABLE IF NOT EXISTS ai_paths (       -- each model's latest forecast, session by session, for the chart
+    symbol TEXT NOT NULL,
+    model TEXT NOT NULL,
+    made TEXT NOT NULL,
+    path TEXT NOT NULL,             -- JSON: the next 20 sessions' prices
+    PRIMARY KEY (symbol, model)
+);
 CREATE TABLE IF NOT EXISTS macro (
-    series TEXT NOT NULL,           -- usdegp | interbank | inflation | egx70 (see data/macro.py)
+    series TEXT NOT NULL,           -- usdegp | interbank | inflation | egx70 | gold (see data/macro.py)
     date   TEXT NOT NULL,           -- YYYY-MM-DD, as the source dates it
     value  REAL NOT NULL,
     PRIMARY KEY (series, date)
@@ -130,6 +172,21 @@ CREATE TABLE IF NOT EXISTS dividend_history (
     ex_date TEXT NOT NULL,          -- first session without it (data/dividends.py)
     yield REAL NOT NULL,            -- the dividend ÷ the close the session before (the price drop it explains)
     PRIMARY KEY (symbol, ex_date)
+);
+CREATE TABLE IF NOT EXISTS ownership (
+    symbol TEXT PRIMARY KEY,        -- each company's owners from Mubasher's profile page (data/ownership.py)
+    holders TEXT NOT NULL,          -- JSON: [[name, percent], ...] as listed
+    free_float REAL,                -- 1 - the holders of 5% or more; NULL without a usable list
+    updated TEXT
+);
+CREATE TABLE IF NOT EXISTS owner_changes (
+    symbol TEXT NOT NULL,           -- a big owner's stake moving between two owners lists (data/ownership.py save)
+    holder TEXT NOT NULL,
+    before REAL,                    -- % on the list before (NULL: new on the list)
+    after REAL,                     -- % now (NULL: no longer on the list)
+    seen TEXT NOT NULL,             -- when the newer list was read
+    source TEXT,                    -- arabfinance or mubasher
+    PRIMARY KEY (symbol, holder, seen)
 );
 CREATE TABLE IF NOT EXISTS earnings (
     symbol TEXT PRIMARY KEY,        -- when each company's results come, from TradingView (data/dividends.py)
@@ -235,10 +292,14 @@ def _add_columns(conn: sqlite3.Connection, pairs) -> None:
 
 
 # scans.priority: the model's rank that day (1 = its best), the order BUYs get money in; scans.source: why it's a
-# BUY (rules | model); predictions.why: what pushed the model's score up or down; stocks.listed_by: where the stock
-# came from (NULL = Kashif, tradingview = TradingView's EGX list, for stocks Kashif doesn't cover)
+# BUY (rules | model); predictions.why: what pushed the model's score up or down; predictions.exp_ret: what trades it
+# scored like that averaged in its tests (predict.ret_calibrator); predictions.level: the week's state
+# (predict.week_state: good | other | weak); stocks.listed_by: where the stock
+# came from (NULL = Kashif, tradingview = TradingView's EGX list, for stocks Kashif doesn't cover); ownership.af_*:
+# Arab Finance's owners list and its free float (data/ownership.py)
 MARKET_COLUMNS = (("stocks", "price_note"), ("stocks", "listed_by"), ("scans", "priority", "REAL"),
-                  ("scans", "source"), ("predictions", "why"))
+                  ("scans", "source"), ("predictions", "why"), ("predictions", "exp_ret", "REAL"),
+                  ("predictions", "level"), ("ownership", "af_holders"), ("ownership", "af_free_float", "REAL"))
 
 
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
@@ -250,6 +311,7 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
         # these used to live in meta; now they're yours (user_meta), so bring over the old values once
         conn.execute("INSERT OR IGNORE INTO user_meta(key, value) SELECT key, value FROM meta WHERE key=?", (key,))
     conn.commit()
+    holidays.load(conn)
     return conn
 
 
@@ -258,6 +320,7 @@ def connect_market(path: Path | str) -> sqlite3.Connection:
     conn = _open(path)
     conn.executescript(MARKET_SCHEMA)
     _add_columns(conn, MARKET_COLUMNS)
+    holidays.load(conn)
     return conn
 
 
@@ -308,12 +371,22 @@ def save_personal_settings(conn: sqlite3.Connection, values: dict) -> None:
 
 
 def add_price_event(conn: sqlite3.Connection, symbol: str, ex_date: str, factor: float) -> None:
-    """Remember that a stock's history was re-based (bonus shares or a split) from ex_date on."""
+    """Remember that a stock's history was re-based (bonus shares or a split) from ex_date on. The AI models'
+    forecasts from before it are in the old prices: they move to the new ones with the history (ai_forecast.py)."""
+    old = conn.execute("SELECT factor FROM price_events WHERE symbol=? AND ex_date=?", (symbol, ex_date)).fetchone()
     conn.execute(
         """INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES (?,?,?,?)
            ON CONFLICT(symbol, ex_date) DO UPDATE SET factor=excluded.factor""",
         (symbol, ex_date, float(factor), datetime.now().isoformat(timespec="seconds")),
     )
+    k = float(factor) / (old[0] if old else 1.0)          # found again with another factor: only the difference
+    if abs(k - 1) > 1e-9:
+        conn.execute("UPDATE ai_forecasts SET p1=p1/?, p5=p5/?, p20=p20/? WHERE symbol=? AND made<?",
+                     (k, k, k, symbol, ex_date))
+        for model, path in conn.execute("SELECT model, path FROM ai_paths WHERE symbol=? AND made<?",
+                                        (symbol, ex_date)).fetchall():
+            conn.execute("UPDATE ai_paths SET path=? WHERE symbol=? AND model=?",
+                         (json.dumps([float(f"{v / k:.5g}") for v in json.loads(path)]), symbol, model))
     conn.commit()
 
 
@@ -343,6 +416,24 @@ def load_prices(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
     )
     df["date"] = pd.to_datetime(df["date"])
     return df.set_index("date")
+
+
+def replace_intraday(conn: sqlite3.Connection, symbol: str, df: pd.DataFrame) -> int:
+    """A stock's hourly bars, replaced as a whole (a bonus share re-bases them all)."""
+    conn.execute("DELETE FROM intraday WHERE symbol=?", (symbol,))
+    conn.executemany(
+        "INSERT OR REPLACE INTO intraday(symbol, ts, open, high, low, close, volume) VALUES (?,?,?,?,?,?,?)",
+        [(symbol, ts, float(r.open), float(r.high), float(r.low), float(r.close), float(r.volume))
+         for ts, r in zip(df["ts"], df.itertuples(index=False))])
+    conn.commit()
+    return len(df)
+
+
+def load_intraday(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
+    df = pd.read_sql_query("SELECT ts, open, high, low, close, volume FROM intraday WHERE symbol=? ORDER BY ts",
+                           conn, params=(symbol,))
+    df["ts"] = pd.to_datetime(df["ts"])
+    return df.set_index("ts")
 
 
 def last_price_date(conn: sqlite3.Connection, symbol: str) -> str | None:

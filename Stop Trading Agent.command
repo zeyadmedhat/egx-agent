@@ -3,8 +3,8 @@
 cd "$(dirname "$0")" || exit 1
 
 stopped=""
-# The dashboard, plus the old Streamlit version in case it is still running.
-for pattern in "python -m app.server" "streamlit run app/main.py"; do
+# The dashboard.
+for pattern in "python -m app.server"; do
   if pkill -f "$pattern"; then
     stopped=1
     for _ in 1 2 3 4 5; do

@@ -61,9 +61,10 @@ export const store = {
   tick: 0,           // bumped after anything you change, so pages reload
   stocks: null,      // all stocks for search and pickers
   watchlist: null,   // the stocks you starred (kept with your portfolio)
+  bells: null,       // the stocks whose BUY you get on Telegram (ui.js useBells); null: not linked to the bot
   toasts: [],
   offline: false,
-  theme: document.documentElement.dataset.theme || 'dark',
+  theme: document.documentElement.dataset.theme || 'light',
   lang: document.documentElement.lang === 'ar' ? 'ar' : 'en',   // set before start from localStorage (index.html)
   me: null,          // /api/me: { multi_user, user } (on your Mac: you, as admin, no login)
   auth: null,        // the website only: 'login' or 'terms' while that screen is needed
@@ -208,6 +209,8 @@ export async function startJob(path, body) {
 
 export async function loadStocks() {
   try { setStore({ stocks: await api('/stocks') }); } catch { /* retried on next version change */ }
+  try { setStore({ rights: await api('/rights') }); } catch { /* a site built before the rights list */ }
+  try { setStore({ rightsPast: await api('/rights/past') }); } catch { /* the same */ }
   try { setStore({ watchlist: (await api('/watchlist')).symbols }); } catch { /* the same */ }
 }
 
@@ -221,7 +224,19 @@ export async function toggleWatch(symbol) {
   } catch (e) {
     setStore({ watchlist: before });
     toast(e.message, 'error');
+    return;
   }
+  // A new star turns its bell on too (a Telegram message when it gets a BUY), on a browser linked to the bot.
+  // Taking the star off leaves the bell as it is.
+  if (!STATIC || next.length < before.length) return;
+  try {
+    const local = await import('./local/api.js');
+    const bells = store.bells || await local.bells();
+    if (!bells || bells.includes(symbol)) { if (bells) setStore({ bells }); return; }
+    setStore({ bells: await local.setBell(symbol, true) });
+    const { t } = await import('./i18n.js');
+    toast(t("{sym}: bell on. You'll get a Telegram message when it gets a BUY.", { sym: symbol }));
+  } catch { /* the star is saved; the bell can be turned on by hand */ }
 }
 
 // ------------------------------------------------------------------ routing (#/page/arg?query)
@@ -259,7 +274,7 @@ export const fmt = {
   num: (v, d = 2) => (bad(v) ? '–' : minus(nf(d).format(v))),
   int: v => (bad(v) ? '–' : minus(nf(0).format(Math.round(v)))),
   signed: (v, d = 0) => (bad(v) ? '–' : (v > 0 ? '+' : '') + minus(nf(d).format(v))),
-  egp: (v, d = 0) => (bad(v) ? '–' : `${minus(nf(d).format(v))} EGP`),
+  egp: (v, d = 0) => (bad(v) ? '–' : `${minus(nf(d).format(v))} ${store.lang === 'ar' ? 'جنيه' : 'EGP'}`),
   short(v) {
     if (bad(v)) return '–';
     const a = Math.abs(v);
@@ -274,6 +289,7 @@ export const fmt = {
     const d = new Date(String(s).slice(0, 10) + 'T00:00:00');
     return d.toLocaleDateString(dateLocale(), withYear ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
   },
+  month: s => (s ? new Date(`${String(s).slice(0, 7)}-01T00:00:00`).toLocaleDateString(dateLocale(), { month: 'short', year: 'numeric' }) : '–'),
   datetime(s) {
     if (!s) return '–';
     const d = new Date(s);
@@ -289,7 +305,8 @@ export const todayISO = () => {
 export const cls = (...xs) => xs.filter(Boolean).join(' ');
 
 // ------------------------------------------------------------------ language (Arabic reads right to left)
-export function setLang(lang) {
+export async function setLang(lang) {
+  if (lang === 'ar') await (await import('./i18n.js')).loadArabic();     // its words come first, then the switch
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   try { localStorage.setItem('egx-lang', lang); } catch { /* private mode */ }
@@ -299,7 +316,7 @@ export function setLang(lang) {
 // ------------------------------------------------------------------ theme
 export function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  try { localStorage.setItem('egx-theme', theme); } catch { /* private mode */ }
+  try { localStorage.setItem('egx-look', theme); } catch { /* private mode */ }
   setStore({ theme });
 }
 export function cssVar(name) {

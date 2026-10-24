@@ -4,6 +4,8 @@ from __future__ import annotations
 import math
 from collections import Counter
 
+from . import config
+
 
 def size_position(entry: float, stop: float, equity: float, cash: float, avg_value20: float,
                   open_risk: float, cfg: dict) -> dict:
@@ -18,7 +20,7 @@ def size_position(entry: float, stop: float, equity: float, cash: float, avg_val
         budget = max(0.0, heat_left)
         note = f"reduced: total open risk limit ({cfg['max_open_risk_pct']:g}%)"
     shares = math.floor(budget / per_share)
-    fee = cfg["fee_pct_per_side"] / 100
+    fee = config.fee_pct(cfg) / 100
     caps = {
         f"max {cfg['max_position_pct']:g}% of account per stock": equity * cfg["max_position_pct"] / 100 / entry,
         f"liquidity: {cfg['max_pct_of_adv']:g}% of daily traded value": avg_value20 * cfg["max_pct_of_adv"] / 100 / entry,
@@ -48,7 +50,7 @@ def allocate(candidates: list[dict], equity: float, cash: float, positions: list
     sectors = Counter(p.get("sector") for p in positions)
     held = {p["symbol"] for p in positions}
     risk_now = open_risk(positions)
-    fee = cfg["fee_pct_per_side"] / 100
+    fee = config.fee_pct(cfg) / 100
     out = []
     for c in candidates:
         res = dict(c)

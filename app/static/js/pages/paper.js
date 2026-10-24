@@ -27,7 +27,7 @@ export function PaperPage() {
       { key: 'entry_price', label: 'Entry', align: 'r', fmt: v => fmt.price(v) },
       { key: 'shares', label: 'Shares', align: 'r', fmt: v => fmt.int(v) },
       { key: 'last', label: 'Last', align: 'r', fmt: v => fmt.price(v) },
-      { key: 'pnl_pct', label: 'P&L', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v)}</span>` },
+      { key: 'pnl_pct', label: 'Profit / loss', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v)}</span>` },
       { key: 'stop', label: 'Stop', align: 'r', fmt: v => html`<span class="down">${fmt.price(v)}</span>` },
       { key: 'target', label: 'Target', align: 'r', fmt: v => html`<span class="up">${fmt.price(v)}</span>` },
       { key: 'days_held', label: 'Day', align: 'r' },
@@ -48,7 +48,7 @@ export function PaperPage() {
       { key: 'exit_price', label: 'Exit', align: 'r', fmt: v => fmt.price(v) },
       { key: 'days_held', label: 'Days', align: 'r' },
       { key: 'return_pct', label: 'Return', align: 'r', fmt: v => html`<span class=${tone(v)}>${fmt.pct(v)}</span>` },
-      { key: 'pnl', label: 'P&L (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
+      { key: 'pnl', label: 'Profit / loss (EGP)', align: 'r', fmt: v => html`<b class=${tone(v)}>${fmt.signed(v)}</b>` },
       { key: 'exit_reason', label: 'Reason', render: r => html`<span class="muted">${r.exit_reason}</span>` },
     ],
     cancelled: [
@@ -73,7 +73,7 @@ export function PaperPage() {
   };
 
   return html`
-    <${PageHead} title="Paper Trading"
+    <${PageHead} title="Practice account"
       sub=${`A virtual ${fmt.egp(data.paper_capital)} account. After every scan the agent buys each BUY signal at the next open (skipping gaps above Buy up to) and sells by the same exit rules you get.`} />
     ${!data.auto_paper && html`<div style="margin-bottom:14px"><${Callout} tone="warn">Automatic paper trading is off.
       <a href="#/settings">Turn it on in Settings.</a><//></div>`}

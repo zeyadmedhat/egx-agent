@@ -9,24 +9,23 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import corporate, db, portfolio, predict, risk, strategy
-from .data import dividends, macro, news, prices, shariah, universe
+from . import breadth, corporate, db, holidays, levels, portfolio, predict, risk, strategy
+from .data import dividends, flows, macro, news, ownership, prices, shariah, universe
 from .indicators import add_indicators
 
 CAIRO = ZoneInfo("Africa/Cairo")
 DATA_READY = time(15, 30)       # EGX closes ~14:30 Cairo; give data providers an hour
-TRADING_WEEKDAYS = {6, 0, 1, 2, 3}  # Sunday–Thursday
 PRICES_FAILING = 0.25           # the price download counts as broken when over a quarter of the stocks got nothing
 
 
 def expected_session_date(now: datetime | None = None) -> date:
-    """Most recent EGX session whose closing data should be available by now (holidays ignored)."""
+    """Most recent EGX session whose closing data should be available by now (the announced holidays skipped)."""
     now = now or datetime.now(CAIRO)
     d = now.date()
-    if d.weekday() in TRADING_WEEKDAYS and now.time() >= DATA_READY:
+    if holidays.is_session(d) and now.time() >= DATA_READY:
         return d
     d -= timedelta(days=1)
-    while d.weekday() not in TRADING_WEEKDAYS:
+    while not holidays.is_session(d):
         d -= timedelta(days=1)
     return d
 
@@ -42,7 +41,22 @@ def scan_is_final(conn: sqlite3.Connection) -> bool:
     return not (t.date().isoformat() == data_date and t.time() < DATA_READY)
 
 
-def scan_is_stale(conn: sqlite3.Connection) -> bool:
+SESSION = (time(10, 15), time(14, 45))   # EGX trades 10:00–14:30 Cairo; prices come about 15 minutes late
+
+
+def session_scan_due(conn: sqlite3.Connection, now: datetime | None = None,
+                     every: timedelta = timedelta(minutes=25)) -> bool:
+    """During a session, a scan of the live prices every half hour (the site's runs ask about every 30 minutes). It
+    isn't final (scan_is_final), so it's scanned again after the close and Telegram waits for that one."""
+    now = now or datetime.now(CAIRO)
+    if not holidays.is_session(now.date()) or not SESSION[0] <= now.time() <= SESSION[1]:
+        return False
+    finished = json.loads(db.get_meta(conn, "market") or "{}").get("finished")
+    return not finished or now - datetime.fromisoformat(finished).astimezone(CAIRO) >= every
+
+
+def scan_is_stale(conn: sqlite3.Connection, retry: timedelta = timedelta(hours=2)) -> bool:
+    """Is a newer close due than the last scan? A try that found no new close waits `retry` before the next one."""
     data_date = db.get_meta(conn, "scan_data_date")
     expected = expected_session_date().isoformat()
     if data_date and (data_date > expected or data_date == expected and scan_is_final(conn)):
@@ -52,7 +66,7 @@ def scan_is_stale(conn: sqlite3.Connection) -> bool:
         tried = datetime.fromisoformat(attempted)
         # Only a try after this close's data was due counts: a scan during the session doesn't hold back the one after.
         due = datetime.combine(date.fromisoformat(expected), DATA_READY, CAIRO).astimezone().replace(tzinfo=None)
-        if tried >= due and tried > datetime.now() - timedelta(hours=2):
+        if tried >= due and tried > datetime.now() - retry:
             return False  # tried recently; probably a holiday or data not published yet
     return True
 
@@ -147,12 +161,29 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             conn, syms, years=cfg["history_years"], aliases=cfg.get("symbol_aliases"),
             progress=lambda d, t, s: say(0.05 + 0.75 * d / t, f"Downloading prices {d}/{t} ({s})"),
         )
-        if res["failed"]:
+        if len(res["failed"]) > 8:     # a few names, not a screenful of them
+            warnings.append(f"No price data from TradingView for {len(res['failed'])} stocks: "
+                            f"{', '.join(res['failed'][:5])}, and {len(res['failed']) - 5} more")
+        elif res["failed"]:
             warnings.append(f"No price data from TradingView for: {', '.join(res['failed'])}")
         checked.append("TradingView prices")
         if prices.INDEX_SYMBOL in res["failed"] or len(res["failed"]) > PRICES_FAILING * len(syms):
             failed.append(checked[-1])
         events = res.get("events", [])
+        say(0.805, "Downloading hourly prices for the 1-hour and 4-hour charts…")
+        checked.append("TradingView hourly prices")
+        try:
+            hourly = prices.update_intraday(conn, [s for s in syms if s != prices.INDEX_SYMBOL],
+                                            aliases=cfg.get("symbol_aliases"))
+            if hourly["failed"] and len(hourly["failed"]) > PRICES_FAILING * len(syms):
+                failed.append(checked[-1])
+        except Exception as exc:  # only the hourly charts need them: they show what was downloaded before
+            warnings.append(f"Hourly prices not updated ({type(exc).__name__})")
+            failed.append(checked[-1])
+        try:
+            prices.update_rights(conn)        # KORA_r1 and the like, while they trade: kept for their chart
+        except Exception as exc:
+            warnings.append(f"Rights prices not updated ({type(exc).__name__})")
         say(0.81, "Downloading the dollar rate, interest rates and inflation…")
         try:
             missed = macro.update(conn)
@@ -163,10 +194,21 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         checked += ["Egypt data (TradingView)", "Dividends (TradingView)"]
         failed += ["Egypt data (TradingView)"] if missed else []
         try:
+            flows.update(conn)
+        except Exception as exc:  # the market mood uses the flows it has
+            warnings.append(f"Foreign / Arab / Egyptian buying not updated ({type(exc).__name__})")
+        try:
             dividends.update(conn)
         except Exception as exc:  # the dividend pages show what was downloaded before
             warnings.append(f"Dividend data not updated ({type(exc).__name__})")
             failed.append("Dividends (TradingView)")
+        try:   # free float's second source, a few stocks a run (the Mac's file brings them, app/macfeed.py)
+            if not news.mac_sends(conn):
+                ownership.update(conn, [r[0] for r in conn.execute(
+                    "SELECT DISTINCT symbol FROM prices WHERE symbol != ? AND date >= date('now', '-30 days')",
+                    (prices.INDEX_SYMBOL,))])
+        except Exception as exc:  # the site shows the free floats it has
+            warnings.append(f"Owners (Mubasher) not updated ({type(exc).__name__})")
         say(0.812, "Reading past dividends from TradingView…")
         failed += history_step(conn, checked)
         say(0.815, "Downloading news, dividends and bonus shares…")
@@ -193,7 +235,12 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     scan_ts = index_ind.index[-1]
     scan_date = str(scan_ts.date())
     idx_row = index_ind.iloc[-1]
-    risk_off = strategy.is_risk_off(idx_row)
+    # a weak market, no new BUYs: EGX30 under its 50-day average, or too few stocks above theirs (breadth.switch)
+    egx30_off = strategy.is_risk_off(idx_row)
+    closes = pd.DataFrame({s: f["close"] for s, f in ind.items()}).reindex(index_ind.index)
+    above50 = breadth.above50_daily(closes).iloc[-1]
+    weak_breadth = bool(above50 < breadth.SWITCH_OFF_BELOW)
+    risk_off = egx30_off or weak_breadth
     threshold = strategy.buy_threshold(cfg, risk_off)
 
     # The prediction model first: its rank orders the BUYs and its best picks are BUYs too (config model_picks).
@@ -209,12 +256,14 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     model_health = predict.health(conn)["status"] if model else "none"
 
     say(0.88, "Scoring stocks…")
-    rows = {}
+    rows, plans = {}, {}
     for sym, frame in ind.items():
         if frame.index[-1] != scan_ts:
             continue  # didn't trade on the scan date
-        sf = strategy.signal_frame(frame, cfg)
+        sf = levels.apply(frame, strategy.signal_frame(frame, cfg), cfg)   # the chart's stop and target
         rows[sym] = (frame.iloc[-1], sf.iloc[-1], prices.sanity_flags(frame, scan_ts))
+        if cfg.get("levels_mode") == "chart" and sf.iloc[-1]["trend_ok"]:
+            plans[sym] = levels.plan_at(frame, cfg)
     eligible_ret = pd.Series({s: r[0]["ret63"] for s, r in rows.items() if r[1]["eligible"] and not r[2]})
     ranks = strategy.rs_rank(eligible_ret)
 
@@ -227,7 +276,7 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             "score": round(float(strategy.score(sr["base_score"], rank_pct)), 1), "setup": sr["setup"] or "",
             "close": float(ir["close"]), "entry_high": float(sr["entry_high"]), "entry_limit": float(sr["entry_high"]),
             "stop": float(sr["stop"]), "target": float(sr["target"]), "atr": float(ir["atr14"]),
-            "avg_value": float(ir["value_avg20"]), "reasons": strategy.explain(ir, sr, rank_pct),
+            "avg_value": float(ir["value_avg20"]), "reasons": strategy.explain(ir, sr, rank_pct) + levels.describe(plans.get(sym)),
             "priority": round(m["pct"], 4) if m else None, "source": "rules",
         }
 
@@ -240,8 +289,8 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             buys.append({**item, "action": "BUY"})
         elif item["score"] >= cfg["watch_score"]:
             watches.append({**item, "action": "WATCH"})
-    # The model's own BUYs: its best-ranked stocks that pass the same liquidity and uptrend checks, none while EGX30
-    # is under its 50-day average, and none while its live results show no edge (predict.health).
+    # The model's own BUYs: its best-ranked stocks that pass the same liquidity and uptrend checks, none in a weak
+    # market (risk_off), and none while its live results show no edge (predict.health).
     n_picks = int(cfg.get("model_picks", 0) or 0) if model_health != "bad" else 0
     added = 0
     if n_picks and not risk_off:
@@ -281,6 +330,9 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         "egx30_change": float(index_ind["close"].pct_change().iloc[-1]),
         "egx30_ema50": float(idx_row["ema50"]),
         "risk_off": risk_off,
+        "egx30_off": egx30_off,
+        "weak_breadth": weak_breadth,
+        "above50": None if pd.isna(above50) else float(above50),
         "buy_threshold": threshold,
         "buys": len(buys),
         "model_picks": added,
