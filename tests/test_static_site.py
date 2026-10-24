@@ -509,6 +509,10 @@ def test_site_is_encrypted_and_holds_nothing_private(tmp_path, cfg):
     assert core["signals"][0]["symbol"] == "AAA" and core["signals"][0]["trigger"]
     assert {s["symbol"] for s in core["stocks"]} == {"AAA", "BBB"}
     assert all(s["scope"] == "personal" for s in core["sections"])
+    # the group's rules, shown locked on Settings: every field has its value, and none is anyone's own number
+    assert [s["title"] for s in core["rules"]] == ["Which stocks", "Entries", "Exits"]
+    assert all(f["key"] in core["strategy"] and f["key"] not in config.PERSONAL_KEYS
+               for s in core["rules"] for f in s["fields"])
     # No paper trading or backtest on the site: those stay on the Mac.
     assert "scans" not in core and "backtest.bin" not in files
     fields = {f["key"] for s in core["sections"] for f in s["fields"]}

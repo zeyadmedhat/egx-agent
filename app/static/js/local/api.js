@@ -464,6 +464,7 @@ function settingsView(c) {
     defaults: Object.fromEntries(keys.map(k => [k, c.core.personal_defaults[k]])),
     sections: c.core.sections, multi_user: true, is_admin: false, static: true, data: c.core.data_status,
     telegram: c.core.telegram || null, scan_url: c.core.scan_url || null,
+    rules: c.core.rules || [], rule_values: c.core.strategy || {},     // the group's rules: shown, not changed here
   };
 }
 

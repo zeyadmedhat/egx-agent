@@ -138,6 +138,7 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
         "strategy": strategy_settings(cfg),
         "personal_defaults": {k: SITE_DEFAULTS.get(k, config.DEFAULTS[k]) for k in personal_keys()},
         "sections": site_sections(),
+        "rules": [sec for sec in views.SETTINGS_SECTIONS if sec["scope"] == "strategy"],   # Settings shows them locked
         "events": events, "data_status": views.settings_view(d)["data"],
         "kashif_url": shariah.stock_url(""), "sell_reasons": views.SELL_REASONS, "telegram": telegram,
         "scan_url": scan_url, "cautions": views.cautions_map(d),

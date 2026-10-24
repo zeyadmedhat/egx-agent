@@ -1371,6 +1371,8 @@ export const AR = {
   "Max total risk of open positions": "أقصى مخاطرة إجمالية للمراكز المفتوحة",
   "The sum of all possible stop-loss losses.": "مجموع كل خسائر الوقف المحتملة.",
   "Max positions in one sector": "أقصى عدد مراكز في قطاع واحد",
+  "The same for everyone": "واحدة للجميع",
+  "The group's rules: they make everyone's signals. The person who runs the site changes them on their Mac.": "قواعد المجموعة: منها تأتي إشارات الجميع. يغيّرها من يدير الموقع من جهاز الماك الخاص به.",
   "Loss brake": "مكابح الخسارة",
   "% in 30 days": "% خلال 30 يومًا",
   "When your trades closed in the last 30 days lost this much of your account, Picks and the Calculator say to take a break from new buys. 0 turns it off.": "عندما تخسر صفقاتك المغلقة خلال آخر 30 يومًا هذه النسبة من حسابك، تنصحك صفحة الترشيحات والحاسبة بالتوقف عن الشراء الجديد لفترة. 0 يوقفها.",

@@ -620,6 +620,8 @@ kbd { font: 600 11px var(--mono); color: var(--text-3); border: 1px solid var(--
 .settings-section { scroll-margin-top: 84px; }
 .settings-section .fields { display: grid; gap: 18px 20px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .settings-section .fields .wide { grid-column: 1 / -1; }
+.settings-section fieldset.fields { border: 0; padding: 0; margin: 0; min-width: 0; }   /* the website's locked rules */
+.settings-section fieldset.locked { opacity: .8; }
 .savebar {
   position: sticky; bottom: 16px; z-index: 15; margin-top: 18px; display: flex; align-items: center; gap: 12px;
   padding: 12px 16px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--accent); box-shadow: var(--shadow);

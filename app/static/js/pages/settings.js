@@ -90,7 +90,7 @@ export function SettingsPage() {
     <div class="settings-layout">
       <nav class="settings-nav">
         <a role="button" onClick=${() => scrollTo('sec-alerts')}>${t(data.static ? 'This device' : 'Alerts')}</a>
-        ${data.sections.map(s => html`<a role="button" onClick=${() => scrollTo(slug(s.title))}>${t(s.title)}</a>`)}
+        ${[...data.sections, ...(data.rules || [])].map(s => html`<a role="button" onClick=${() => scrollTo(slug(s.title))}>${t(s.title)}</a>`)}
         <a role="button" onClick=${() => scrollTo('sec-data')}>${t('Data')}</a>
       </nav>
       <div class="stack">
@@ -106,6 +106,7 @@ export function SettingsPage() {
         ${dirty && html`<div class="savebar"><span class="msg"><${Icon} name="info" size=${15} /> ${t('You have unsaved changes.')}</span>
           <button class="btn ghost" onClick=${() => { setDraft(original); setErrors({}); }}>${t('Discard')}</button>
           <button class="btn primary" disabled=${saving} onClick=${save}><${Icon} name="check" />${t('Save settings')}</button></div>`}
+        ${(data.rules || []).length > 0 && html`<${Rules} sections=${data.rules} values=${data.rule_values} />`}
         <${DataCard} d=${data.data} running=${running} admin=${admin} />
       </div>
     </div>
@@ -115,6 +116,18 @@ export function SettingsPage() {
         : data.static ? 'Your risk limits and Shariah filter go back to the defaults. Your capital and fees are kept.'
         : 'Your risk limits, Shariah filter and paper-trading choice go back to the defaults. Your capital and fees are kept.'}
       onConfirm=${restore} onClose=${() => setConfirmReset(false)} />`}`;
+}
+
+// The website's view of the group's rules (static_site.public_data): the same sections as the Mac's Settings, locked.
+// The person who runs the site changes them on their Mac, then Publish website.command.
+function Rules({ sections, values }) {
+  const draft = toDraft(values, sections);
+  return sections.map(s => html`<div class="card settings-section" id=${slug(s.title)}>
+    <div class="card-title" style="font-size:14px;color:var(--text)">${t(s.title)}
+      <span class="scope-tag everyone"><${Icon} name="shield" size=${11} /> ${t('The same for everyone')}</span></div>
+    <p class="faint" style="font-size:12.5px;margin:0 0 10px">${t("The group's rules: they make everyone's signals. The person who runs the site changes them on their Mac.")}</p>
+    <fieldset disabled class="fields locked">${s.fields.map(f => html`<${SettingField} f=${f} value=${draft[f.key]} onChange=${() => {}} />`)}</fieldset>
+  </div>`);
 }
 
 function SettingField({ f, value, onChange, error }) {
