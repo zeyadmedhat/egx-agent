@@ -17,6 +17,21 @@ def test_parse_kashif_page():
     assert egas["name_ar"] and egas["sector_ar"] and "متوافق" in egas["kashif_label"]
 
 
+def test_parse_kashif_cards():
+    """Kashif's page since Oct 2026: a card a stock, no table (the old reader found 0 stocks)."""
+    card = """<div class="stock-card"><h5 class="stock-card-title">شركة {sym}</h5><span class="stock-ticker">‎{sym}</span>
+      <span class="status-badge">متوافق</span>
+      <div class="stock-meta-row"><span class="meta-label">القطاع</span><span class="meta-value">بنوك</span></div>
+      <div class="stock-meta-row"><span class="meta-label">نسبة التطهير</span><span class="meta-value purity-rate">{pct}</span></div>
+      <div class="stock-meta-row"><span class="meta-label">درجة النقاء</span><div class="meta-value"><span class="badge">شرعي مختلط C</span></div></div>
+      <div class="review-date"><span>تاريخ إصدار القوائم المالية:</span><strong>30/06/2026</strong></div></div>"""
+    rows = shariah.parse_rows(card.format(sym="ETEL", pct="0.2٪") + card.format(sym="MISR", pct="-"))
+    assert [r["symbol"] for r in rows] == ["ETEL", "MISR"]
+    assert rows[0] == {"symbol": "ETEL", "name_ar": "شركة ETEL", "sector_ar": "بنوك", "kashif_label": "متوافق",
+                       "purity": "شرعي مختلط C", "purification_pct": "0.20%", "statements_date": "30/06/2026"}
+    assert rows[1]["purification_pct"] is None
+
+
 def test_clean_symbol_strips_rtl_marks():
     assert shariah.clean_symbol("‎RAKT‎") == "RAKT"
     assert shariah.clean_symbol(" comi ") == "COMI"

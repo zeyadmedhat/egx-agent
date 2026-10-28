@@ -39,10 +39,30 @@ def clean_symbol(raw: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", raw.upper())
 
 
+def _pct(text: str | None) -> str | None:
+    """Kashif's purification share as the site shows it ("0.2٪" → "0.20%"); None for "-" or nothing."""
+    m = re.search(r"\d+(?:\.\d+)?", (text or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩٫", "0123456789.")))
+    return f"{float(m[0]):.2f}%" if m else None
+
+
 def parse_rows(html: str) -> list[dict]:
-    """Parse one Kashif results page into row dicts."""
+    """Parse one Kashif results page into row dicts: its stock cards (since Oct 2026), or its old table."""
     soup = BeautifulSoup(html, "html.parser")
     rows = []
+    for card in soup.select(".stock-card"):
+        text = lambda q: (el.get_text(" ", strip=True) if (el := card.select_one(q)) else "")  # noqa: E731
+        sym = clean_symbol(text(".stock-ticker"))
+        if not sym:
+            continue
+        sector = next((r.select_one(".meta-value").get_text(" ", strip=True) for r in card.select(".stock-meta-row")
+                       if "القطاع" in r.get_text() and r.select_one(".meta-value")), "")
+        badges = " ".join(b.get_text(" ", strip=True) for b in card.select(".stock-meta-row .badge"))
+        rows.append({"symbol": sym, "name_ar": text(".stock-card-title"), "sector_ar": sector,
+                     "kashif_label": text(".status-badge"), "purity": badges or None,
+                     "purification_pct": _pct(text(".purity-rate")),
+                     "statements_date": text(".review-date strong") or None})
+    if rows:
+        return rows
     for tr in soup.select("table tbody tr"):
         tds = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
         if len(tds) < 7 or not clean_symbol(tds[0]):
