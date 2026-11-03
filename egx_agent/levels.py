@@ -192,6 +192,61 @@ def nearby(ind: pd.DataFrame, n: int = 6) -> dict | None:
             "at": _public(at) if at else None, "fib": _fib_leg(o)}
 
 
+RECENT = 60          # sessions: a level touched since then counts as recent
+
+
+def test_zones(ind: pd.DataFrame, zones: list[dict]) -> list[dict]:
+    """Each zone with how it was tested over the last year: the video's 5 signs of a strong level (the 7 layers,
+    layers.py). touched 3+ times; more shares traded at the touches than usual; also a turning point of the weekly
+    chart; touched in the last RECENT sessions; held more often than it broke. And `flip`: the last break turned it
+    from a ceiling into a floor ("up") or a floor into a ceiling ("down"), the video's golden rule."""
+    w = ind.tail(LOOKBACK)
+    hi, lo, cl, vol = (w[k].to_numpy(float) for k in ("high", "low", "close", "volume"))
+    n, atr = len(cl), float(w["atr14"].iloc[-1])
+    if n < 20 or not np.isfinite(atr):
+        return zones
+    wk = w.resample("W-THU").agg({"high": "max", "low": "min"}).dropna()
+    wk_levels = [wk["high"].iloc[j] for j in _swings(wk["high"].to_numpy(float), 2, False)] + \
+                [wk["low"].iloc[j] for j in _swings(wk["low"].to_numpy(float), 2, True)]
+    usual = np.nanmean(vol) or np.nan
+    out = []
+    for z in zones:
+        a, b = z["low"] - atr / 3, z["high"] + atr / 3
+        touch = (lo <= b) & (hi >= a)
+        at = np.flatnonzero(touch)
+        runs = np.split(at, np.flatnonzero(np.diff(at) > 1) + 1) if len(at) else []
+        held = broke = 0
+        flip, role = None, None                           # role: the side it last held from (True: as a floor)
+        for r in runs:
+            if r[0] == 0 or r[-1] + 1 >= n:
+                continue                                  # no close before it, or still touching it now
+            before, after = cl[r[0] - 1] > z["price"], cl[r[-1] + 1] > z["price"]
+            if before == after:
+                held, role = held + 1, before
+            else:
+                broke += 1
+                # a ceiling it had held under, broken upward (or a floor broken down), in the last 2×RECENT sessions
+                flip = ("up" if after else "down") if role == before and n - 1 - r[-1] <= 2 * RECENT else None
+                role = None
+        ago = int(n - 1 - at[-1]) if len(at) else None
+        v = float(np.nanmean(vol[touch]) / usual) if len(at) and usual > 0 else None
+        signs = {"touches": len(runs) >= 3, "volume": v is not None and v >= 1.2,
+                 "weekly": any(a <= x <= b for x in wk_levels), "recent": ago is not None and ago <= RECENT,
+                 "held": held > broke}
+        side_now = cl[-1] > z["price"]
+        out.append({**z, "test": {"score": sum(signs.values()), "touches": len(runs), "held": held, "broke": broke,
+                                  "volume": None if v is None else round(v, 2), "ago": ago, **{f"is_{k}": ok for k, ok in signs.items()},
+                                  "flip": flip if flip and (flip == "up") == side_now else None}})
+    return out
+
+
+def with_tests(ind: pd.DataFrame, plan: dict | None) -> dict | None:
+    """A chart plan (plan_at) with its supports and resistances tested (test_zones): the stock page's level list."""
+    if not plan:
+        return plan
+    return {**plan, "supports": test_zones(ind, plan["supports"]), "resistances": test_zones(ind, plan["resistances"])}
+
+
 def _public(z: dict) -> dict:
     return {"price": z["price"], "low": z["low"], "high": z["high"], "strength": round(z["strength"], 1),
             "sources": z["sources"][:4]}

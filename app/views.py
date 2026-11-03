@@ -11,7 +11,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from egx_agent import (ai_forecast, breadth, config, corporate, db, holidays, levels, mood, portfolio, predict, ranges,
+from egx_agent import (ai_forecast, breadth, config, corporate, db, holidays, layers, levels, mood, portfolio, predict, ranges,
                        record, risk, scan, strategy)
 from egx_agent.data import dividends, flows, fundamentals, macro, news, ownership, prices, shariah, universe
 from egx_agent.indicators import add_indicators
@@ -655,6 +655,10 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     # stop-loss and target from the chart's support and resistance, with the levels behind them (every stock)
     out["chart"] = levels.plan_at(ind, cfg)
     out["entries"] = levels.entries(ind, cfg, out["chart"])   # buying on a dip to support or on a breakout instead
+    out["chart"] = levels.with_tests(ind, out["chart"])        # each level's 5 signs of strength
+    out["layers"] = layers.check(ind)                          # the 7 layers (egx_agent/layers.py)
+    if out["layers"]:
+        out["layers"]["study"] = layers_study(d)               # what 10 years of EGX said about the score
     k = rule_checks(ind, cfg, sf)
     out["checklist"] = [   # shown when the stock has no signal today
         {"ok": k["liquid"], "text": f"Liquid & clean data (≥ {cfg['min_avg_value_egp'] / 1e6:g}M EGP/day, "
@@ -691,6 +695,11 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
         paid = shown["div"][shown["div"] > 0]
         out["series"]["divs"] = {str(t.date()): round(float(v), 6) for t, v in paid.items()}
     return out
+
+
+def layers_study(d: Data) -> dict | None:
+    """The 7 layers over the weekly 10-year replay (layers.study, kept with the BUY odds), without the per-day rows."""
+    return d.cache.get(d.version, ("layers_study",), lambda: (record.stored_odds(d.conn) or {}).get("layers"))
 
 
 def rule_checks(ind: pd.DataFrame, cfg: dict, sf: pd.Series | None = None) -> dict:
@@ -753,6 +762,7 @@ def screener(d: Data) -> dict:
                 **{k: p.get(k) for k in ("p10", "p20", "top10", "top20", "rating")},
                 "yield": y / 100 if y is not None else None, "action": action.get(sym),
                 "pe": (firms.get(sym) or {}).get("pe"), "exdiv": (coming.get(sym) or {}).get("ex_date"),
+                "layers": int(layers.frame(ind)["score"].iloc[-1]) if len(ind) >= 120 else None,
             })
         return clean({"date": str(d.indicators(prices.INDEX_SYMBOL).index[-1].date()) if rows else None,
                       "min_value": d.cfg["min_avg_value_egp"], "rows": rows})

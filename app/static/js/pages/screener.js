@@ -6,12 +6,13 @@ import { t, tn } from '../i18n.js';
 
 const DEFAULTS = {
   q: '', sector: '', trend: 'any', rsi: 'any', volume: 'any', high: 'any', model: 'any', shariah: 'any',
-  signal: 'any', yield: 'any', rating: 'any', exdiv: 'any', pe: 'any', liquid: true, sort: null,
+  signal: 'any', yield: 'any', rating: 'any', exdiv: 'any', pe: 'any', layers: 'any', liquid: true, sort: null,
 };
 const BY_RATING = { key: 'rating', dir: 'desc' };
 // Ready-made lists: one tap sets the filters (and the order) for a common question.
 const PRESETS = [
   ['Best rated', { rating: '91' }],
+  ['7 layers: 6/7 or more', { layers: '6', sort: { key: 'layers', dir: 'desc' } }],
   ['Shariah and close to a BUY', { shariah: 'compliant', signal: 'signal' }],
   ['Ex-dividend in the next 30 days', { exdiv: '30', sort: { key: 'exdiv', dir: 'asc' } }],
   ['At a 1-year high', { high: 'at' }],
@@ -36,6 +37,7 @@ const OPTIONS = {
   rating: [['any', 'Any rating'], ['91', 'Rating 91–100 (the model\'s top 10%)'], ['71', 'Rating 71 or more']],
   exdiv: [['any', 'Any ex-dividend date'], ['30', 'Ex-dividend in the next 30 days']],
   pe: [['any', 'Any P/E'], ['profit', 'Profitable (P/E above 0)'], ['cheap', 'P/E under 10 (profitable)']],
+  layers: [['any', 'Any 7-layer score'], ['6', '7 layers: 6/7 or more'], ['4', '7 layers: 4/7 or more']],
 };
 
 function loadFilters() {
@@ -54,6 +56,7 @@ const TESTS = {
   yield: { 3: r => r.yield >= 0.03, 6: r => r.yield >= 0.06, 10: r => r.yield >= 0.10 },
   rating: { 91: r => r.rating >= 91, 71: r => r.rating >= 71 },
   pe: { profit: r => r.pe > 0, cheap: r => r.pe > 0 && r.pe < 10 },
+  layers: { 6: r => r.layers >= 6, 4: r => r.layers >= 4 },
 };
 const DAY = 86400000;
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -87,7 +90,7 @@ export function ScreenerPage() {
   const pick = k => html`<select class="input" value=${f[k]} onChange=${set(k)}>
     ${OPTIONS[k].map(([v, label]) => html`<option value=${v}>${t(label)}</option>`)}</select>`;
 
-  const MORE = ['rating', 'trend', 'rsi', 'volume', 'high', 'model', 'yield', 'exdiv', 'pe'];
+  const MORE = ['rating', 'layers', 'trend', 'rsi', 'volume', 'high', 'model', 'yield', 'exdiv', 'pe'];
   const more = MORE.filter(k => f[k] !== 'any').length + (f.liquid ? 0 : 1);
   return html`<${PageHead} title="Screener"
       sub=${t("Every stock's numbers from the {date} close. Filter, sort, and tap a stock for its chart.", { date: fmt.date(data.date) })} />
@@ -104,7 +107,7 @@ export function ScreenerPage() {
         ${pick('signal')}${pick('shariah')}
       </div>
     </div>
-    <${Fold} title="More filters" hint=${more ? t('{n} on', { n: more }) : t('Rating, trend, RSI, volume, 1-year high, dividend, P/E')}>
+    <${Fold} title="More filters" hint=${more ? t('{n} on', { n: more }) : t('Rating, 7 layers, trend, RSI, volume, 1-year high, dividend, P/E')}>
       <div class="form-grid">${MORE.map(pick)}</div>
       <label class="check" style="margin-top:12px"><input type="checkbox" checked=${f.liquid} onChange=${set('liquid')} />
         Only actively traded stocks that traded recently (at least ${fmt.short(data.min_value)} EGP a day, like the BUY rules)</label><//>
@@ -130,6 +133,9 @@ const COLUMNS = [
   { key: 'trend', label: 'Above avg', sortValue: r => (r.vs_ema20 > 0) + (r.vs_ema50 > 0) + (r.vs_ema200 > 0),
     title: 'Above (green) or below (red) its 20-, 50- and 200-day averages',
     render: r => html`<span class="trend-dots">${above(r.vs_ema20, 20)}${above(r.vs_ema50, 50)}${above(r.vs_ema200, 200)}</span>` },
+  { key: 'layers', label: '7 layers', align: 'r', sortValue: r => r.layers ?? -1,
+    title: 'How many of the 7 layers pass (trend, momentum, volume, volatility, squeeze, week and month, smart money)',
+    render: r => (r.layers == null ? html`<span class="faint">–</span>` : html`<b class=${r.layers >= 6 ? 'up' : ''}>${r.layers}</b><span class="faint">/7</span>`) },
   { key: 'rsi', label: 'RSI', align: 'r', fmt: v => html`<span class=${v > 70 ? 'warn' : v < 30 ? 'down' : ''}>${fmt.num(v, 0)}</span>` },
   { key: 'p10', label: 'Model 2 wk', align: 'r', sortValue: r => (r.top10 ? r.p10 : -1),
     title: "The model's chance of target before stop, shown for its top 10% each day",

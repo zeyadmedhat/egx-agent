@@ -132,6 +132,7 @@ function StockMain({ route }) {
           ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} rg=${data.range} />`}
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
           ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
+          ${data.layers && html`<${LayersCard} l=${data.layers} />`}
           ${(data.fundamentals || data.free_float) && html`<${CompanyPanel} f=${data.fundamentals || { values: {} }} ff=${data.free_float} />`}
           ${data.analysts && html`<${AnalystPanel} a=${data.analysts} close=${st.close} />`}
           ${data.owner_moves && data.owner_moves.length > 0 && html`<${OwnerMoves} list=${data.owner_moves} />`}
@@ -282,6 +283,58 @@ function Checklist({ list }) {
       <span class=${c.ok ? 'ok' : 'no'}><${Icon} name=${c.ok ? 'checkCircle' : 'xCircle'} /></span><span>${c.text}</span></li>`)}</ul><//>`;
 }
 
+// The 7 layers (egx_agent/layers.py): GrowthX's "Market mirror" checklist, built from standard formulas, at the last
+// close, 7 on top like the video's building, with what 10 years of EGX said about the score. Checks, not advice.
+const LAYER_NAMES = { trend: 'Trend', momentum: 'Momentum', volume: 'Volume', volatility: 'Volatility', squeeze: 'Squeeze',
+  timeframes: 'Week & month', smart_money: 'Smart money' };
+
+function layerLine(x, brk) {
+  const pct = v => fmt.pct(v, 1, false);
+  switch (x.key) {
+    case 'trend': return x.ok ? t('Price above its 50-day average, the 20-day above it')
+      : x.vs_ema50 < 0 ? t('Price {v} under its 50-day average', { v: pct(-x.vs_ema50) }) : t('The 20-day average is still under the 50-day');
+    case 'momentum': return x.rsi > 70 ? t('RSI {v}: overbought', { v: fmt.num(x.rsi, 0) })
+      : x.rsi < 50 ? t('RSI {v}: weak', { v: fmt.num(x.rsi, 0) })
+      : !x.macd_up ? t('RSI {v}, but MACD is falling', { v: fmt.num(x.rsi, 0) }) : t('RSI {v}: rising, not overbought', { v: fmt.num(x.rsi, 0) });
+    case 'volume': return x.ok ? t('More shares traded on up days ({v}×)', { v: fmt.num(x.updown, 1) }) : t('More shares traded on down days');
+    case 'volatility': return t(x.ok ? 'Daily swing {v}: normal for it' : 'Daily swing {v}: among its wildest of the year', { v: pct(x.atr_pct) });
+    case 'squeeze': return t(x.on ? 'Coiled: a tight range, a move may come' : x.released_up ? 'Just left a tight range, upward' : 'Not coiled');
+    case 'timeframes': return t(x.week_up && x.month_up ? 'The week and the month are both up' : x.week_up ? 'The week is up, the month is down'
+      : x.month_up ? 'The month is up, the week is down' : 'The week and the month are both down');
+    case 'smart_money': {
+      const b = brk && (brk.up ? (brk.kind === 'CHoCH' ? 'Turned up: broke its last high ({date})' : 'Breaking higher highs ({date})')
+        : (brk.kind === 'CHoCH' ? 'Turned down: broke its last low ({date})' : 'Breaking lower lows ({date})'));
+      return `${b ? t(b, { date: fmt.date(brk.date, false) }) : t('No clear break yet')} · ${t(x.cmf > 0 ? 'money flowing in' : 'money flowing out')}`;
+    }
+    default: return '';
+  }
+}
+
+function LayersCard({ l }) {
+  const s = l.study, pass = l.score >= l.pass_at;
+  const rows = l.items.map((x, i) => ({ x, i })).reverse();
+  const hi = s && s.periods && s.periods.since_2022, lo = s && s.periods && s.periods.before_2022;
+  const all = s && s.by_score.filter(r => r.n >= 500);
+  return html`<${Fold} open title=${html`<span>${t('7 layers')} · <b class=${pass ? 'up' : ''}>${l.score}/7</b></span>`}
+      hint=${t(pass ? 'At the video’s 6/7' : 'Under the video’s 6/7')}>
+    <div class="layers">${rows.map(({ x, i }) => html`<div class=${cls('layer', `l${i + 1}`, x.ok ? 'ok' : 'no')}>
+      <span class="n">${i + 1}</span><div class="lw"><b>${t(LAYER_NAMES[x.key])}</b><span>${layerLine(x, l.last_break)}</span></div>
+      <${Icon} name=${x.ok ? 'checkCircle' : 'xCircle'} size=${17} /></div>`)}</div>
+    ${s && html`<div class="card-sub" style="margin:14px 0 6px;font-weight:650;font-size:13px">${t('Did it work on EGX? Beat EGX30 over the next month, by score')}</div>
+      <div class="rt-bars">${all.map(r => html`<div class="rt-hist">
+        <div class="rt-hist-l"><b>${r.score}/7</b> <span class="faint">(${t('{n} days', { n: fmt.short(r.n) })})</span></div>
+        <div class="rt-bar half"><span class=${cls('seg', r.score >= s.pass_at ? 'share' : 'low')} style=${`width:${r.beat * 100}%`}></span></div>
+        <span class="rt-bar-v">${fmt.pct(r.beat, 0, false)}</span></div>`)}</div>
+      <ul class="reasons" style="margin-top:10px">
+        <li>${t('Since 2022, 6/7 or more did a little better than lower scores ({a} against {b}). Before 2022 it did worse ({c} against {d}).', {
+          a: fmt.pct(hi.pass.beat, 0, false), b: fmt.pct(hi.rest.beat, 0, false), c: fmt.pct(lo.pass.beat, 0, false), d: fmt.pct(lo.rest.beat, 0, false) })}</li>
+        <li>${t('Taking only the BUYs at 6/7 or more would have made {a} a year instead of {b} (winners {c} instead of {d}). So the BUY rules don’t use it.', {
+          a: fmt.pct(s.strict.cagr, 0, false), b: fmt.pct(s.rules.cagr, 0, false), c: fmt.pct(s.strict.wins, 0, false), d: fmt.pct(s.rules.wins, 0, false) })}</li>
+      </ul>`}
+    <${More} label="What the 7 layers are"><p>${t('A checklist from GrowthX’s “Market mirror” video, built here from standard formulas on daily prices: 1 trend (50-day average), 2 momentum (RSI and MACD), 3 volume (up days against down days), 4 volatility (the daily swing, ATR), 5 squeeze (Bollinger bands inside the Keltner channel), 6 the week and the month (each above its own average), 7 smart money (the last break of a swing high or low, and money flow). The video trades only at 6/7 or more. Tested on EGX since {date}. The past, not a promise.', { date: s ? fmt.date(s.from, false) : '2016' })}</p><//>
+  <//>`;
+}
+
 function SignalPanel({ data }) {
   const s = data.signal;
   const buy = s.action === 'BUY';
@@ -368,16 +421,25 @@ async function stopAt(pos, price) {
 function ZoneList({ c, pos, atr }) {
   // a support between your stop and the price can become your stop
   const canStop = z => STATIC && pos && pos.id && pos.stop != null && z.price > pos.stop + 1e-6 && z.price < c.close;
+  // the level's 5 signs of strength (levels.test_zones): the dots, a line of how it was tested, and a flip tag
+  const tested = k => (!k.touches ? t('Not reached in the last year') : [
+    k.touches === 1 ? t('1 touch') : t('{n} touches', { n: k.touches }),
+    k.held + k.broke > 0 && t('held {h} of {m}', { h: k.held, m: k.held + k.broke }), k.is_weekly && t('a weekly level'),
+    k.ago === 0 ? t('touched in the last session') : k.ago != null && t('last touched {n} sessions ago', { n: k.ago }),
+  ].filter(Boolean).join(' · '));
   const zone = (z, down) => html`<div class=${cls('zone', down ? 'down' : 'up')}><span class="p">${fmt.price(z.price)}
       <small><span dir="ltr">${fmt.pct(z.price / c.close - 1, 1)}</span></small></span>
-    <span class="s" title=${t('Strength')}>${'●'.repeat(Math.min(5, Math.round(z.strength / 1.5)) || 1)}</span>
-    <span class="w">${sources(z.sources)}${tagFor(z, down, c, pos, atr)}${down && canStop(z) && html`
+    <span class="s" title=${t('Strength')}>${z.test ? '●'.repeat(z.test.score) + '○'.repeat(5 - z.test.score) : '●'.repeat(Math.min(5, Math.round(z.strength / 1.5)) || 1)}</span>
+    <span class="w">${sources(z.sources)}${tagFor(z, down, c, pos, atr)}${z.test && z.test.flip && html` <span class="tag">${t(z.test.flip === 'up' ? 'Was a ceiling, now a floor' : 'Was a floor, now a ceiling')}</span>`}
+      ${z.test && html`<div class="faint" style="font-size:11.5px">${tested(z.test)}</div>`}${down && canStop(z) && html`
       <button type="button" class="btn sm ghost zone-stop" onClick=${() => stopAt(pos, z.price)}>${t('Stop here')}</button>`}</span></div>`;
   return html`<div class="zone-list">
       ${(c.resistances || []).slice().reverse().map(z => zone(z, false))}
       <div class="zone now"><span class="p">${fmt.price(c.close)}</span><span>${t('Last close')}</span></div>
       ${(c.supports || []).map(z => zone(z, true))}</div>
-    <p class="faint" style="font-size:12px;margin-top:8px">${t('More dots: more tools agree on the level.')}</p>`;
+    <p class="faint" style="font-size:12px;margin-top:8px">${t((c.supports || []).concat(c.resistances || []).some(z => z.test)
+      ? 'Dots: the level’s 5 signs of strength. Touched 3+ times, busy trading at it, a weekly level too, touched in the last 3 months, held more often than it broke.'
+      : 'More dots: more tools agree on the level.')}</p>`;
 }
 
 // Stop-loss and target from the chart's support and resistance (egx_agent/levels.py), for every stock. When you hold

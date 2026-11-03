@@ -14,7 +14,7 @@ from typing import Callable
 
 import pandas as pd
 
-from . import backtest, db, engine, levels
+from . import backtest, db, engine, layers, levels
 from .data import prices, universe
 
 ODDS_KEY = "signal_odds"
@@ -177,7 +177,7 @@ def refresh_odds(conn: sqlite3.Connection, cfg: dict, today: date | None = None)
     or when the strategy changed. Returns True when it ran."""
     old = stored_odds(conn)
     today = today or date.today()
-    if old and old.get("settings") == _fingerprint(cfg) and "stocks" in old and \
+    if old and old.get("settings") == _fingerprint(cfg) and "stocks" in old and "layers" in old and \
             today - date.fromisoformat(old["built"][:10]) < ODDS_MAX_AGE:
         return False
     table = universe.stock_table(conn, cfg.get("egx33_extra"))
@@ -191,7 +191,9 @@ def refresh_odds(conn: sqlite3.Connection, cfg: dict, today: date | None = None)
     out = {**odds_from_trades(res["trades"]), "from": str(prep.index_ind.index[prep.index_ind.index >= start][0].date()),
            "to": str(end.date()), "built": datetime.now().isoformat(timespec="seconds"), "settings": _fingerprint(cfg),
            "cagr": res["metrics"]["cagr"], "max_drawdown": res["metrics"]["max_drawdown"],
-           "stocks": by_stock(prep, cfg, start)}
+           "stocks": by_stock(prep, cfg, start),
+           # the 7 layers on the same years: stock-days by score, and the rules taking only 6/7+ BUYs (layers.study)
+           "layers": layers.study(prep, cfg, start, res, backtest.run)}
     db.set_meta(conn, ODDS_KEY, json.dumps(out))
     return True
 

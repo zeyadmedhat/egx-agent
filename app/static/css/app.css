@@ -1571,3 +1571,15 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .rt-cell.good { background: var(--up-soft); } .rt-cell.good b { color: var(--up); }
 .rt-cell.bad { background: var(--down-soft); } .rt-cell.bad b { color: var(--down); }
 .rt-grid .mine { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* the 7 layers (pages/stock.js LayersCard): the video's coloured floors, 7 on top */
+.layers { display: flex; flex-direction: column; gap: 4px; }
+.layer { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r); border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--lc) 12%, var(--panel)); }
+.layer .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--lc); color: #fff; flex: none; }
+.layer .lw { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.layer .lw span { font-size: 12px; color: var(--text-2); }
+.layer.ok > svg { color: var(--up); } .layer.no > svg { color: var(--down); } .layer.no { opacity: .78; }
+.layer.l1 { --lc: var(--up); } .layer.l2 { --lc: var(--info); } .layer.l3 { --lc: var(--warn); } .layer.l4 { --lc: var(--violet); }
+.layer.l5 { --lc: #b08a12; } .layer.l6 { --lc: var(--down); } .layer.l7 { --lc: var(--accent); }
