@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import requests
 
-from egx_agent import breadth, config, db, holidays, levels, portfolio, predict, scan
+from egx_agent import breadth, config, db, holidays, layers, levels, portfolio, predict, scan
 from egx_agent.data import news
 
 from . import views
@@ -605,8 +605,8 @@ def _reply(token: str, chat_id: str, text: str) -> None:
 
 
 # Alerts for the stocks a friend follows: sent after a close, when the stock gets a BUY signal or closes past a price.
-WATCH_RE = re.compile(r"^/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?|levels))?\s*$", re.I)
-UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+(buy|levels))?\s*$", re.I)   # a kind: only that alert
+WATCH_RE = re.compile(r"^/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?|levels|layers))?\s*$", re.I)
+UNWATCH_RE = re.compile(r"^/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+(buy|levels|layers))?\s*$", re.I)   # a kind: only that alert
 LIST_RE = re.compile(r"^/(?:list|alerts)(?:@\w+)?\s*$", re.I)
 WEEKLY_RE = re.compile(r"^/weekly(?:@\w+)?\s+(on|off)\s*$", re.I)
 QUIET_RE = re.compile(r"^/quiet(?:@\w+)?(?:\s+(on|off))?\s*$", re.I)
@@ -626,6 +626,7 @@ HELP = ("<b>Alerts for the stocks you follow</b>, checked after each close:\n"
         "/watch COMI 45: when COMI closes above 45 (or below, if 45 is under today's price)\n"
         "/watch COMI levels: when COMI closes near a strong support (a place to buy) or reaches resistance "
         "(a place to take profit)\n"
+        "/watch COMI layers: when COMI reaches 6 of the 7 layers (a checklist, not a BUY signal)\n"
         "/unwatch COMI: stop COMI's alerts (/unwatch all: every alert)\n"
         "/list: your alerts\n"
         "/weekly off: no Thursday summary (/weekly on to have it again)\n"
@@ -656,6 +657,8 @@ def _alert_text(a) -> str:
         return f"{a['symbol']}: a BUY signal"
     if a["kind"] == "levels":
         return f"{a['symbol']}: near support or resistance"
+    if a["kind"] == "layers":
+        return f"{a['symbol']}: reaches 6 of the 7 layers"
     return f"{a['symbol']}: a close {a['kind']} {views.px(a['price'])}"
 
 
@@ -694,6 +697,9 @@ def watch_command(conn: sqlite3.Connection, chat_id: str, text: str) -> str | No
         kind, price = "levels", None
         reply = (f"OK: I'll tell you when {sym} closes near a strong support or reaches resistance "
                  "(the levels on its page on the website).")
+    elif m.group(2).lower() == "layers":
+        kind, price = "layers", None
+        reply = f"OK: I'll tell you when {sym} reaches 6 of the 7 layers at a close (a checklist, not a BUY signal)."
     else:
         price = float(m.group(2).replace(",", "."))
         if last is None:
@@ -745,6 +751,30 @@ def level_touch(d: views.Data, symbol: str, data_date: str, lang: str = "en") ->
     return None
 
 
+LAYER_AR = {"trend": "الاتجاه", "momentum": "الزخم", "volume": "حجم التداول", "volatility": "التذبذب",
+            "squeeze": "الانضغاط", "timeframes": "الأسبوع والشهر", "smart_money": "الأموال الذكية"}
+
+
+def layers_reached(d: views.Data, symbol: str, data_date: str, lang: str = "en") -> dict | None:
+    """Did the close on `data_date` take the stock to 6/7 layers or more, from under it the session before
+    (layers.py)? {key, text}: the key is the day, so one crossing is told once."""
+    ind = d.indicators(symbol)
+    if len(ind) < 121 or str(ind.index[-1].date()) != data_date:
+        return None
+    f = layers.frame(ind)
+    now, before = int(f["score"].iloc[-1]), int(f["score"].iloc[-2])
+    if now < layers.PASS or before >= layers.PASS:
+        return None
+    miss = [k for k in layers.LAYERS if not f[k].iloc[-1]]
+    if lang == "ar":
+        rest = f"ينقصه: {'، '.join(LAYER_AR[k] for k in miss)}" if miss else "الطبقات السبع كلها ناجحة"
+        return {"key": data_date, "text": f"🔔 <b>{_e(symbol)}</b> · {now}/7 من الطبقات السبع\nعند إغلاق "
+                f"{_date(data_date, 'ar')}، {rest}.\nقائمة فحص، وليست إشارة شراء."}
+    rest = f"misses {', '.join(k.replace('_', ' ') for k in miss)}" if miss else "all 7 pass"
+    return {"key": data_date, "text": f"🔔 <b>{_e(symbol)}</b> · {now}/7 layers\nAt the {views.nice_date(data_date)} "
+            f"close, {rest}.\nA checklist, not a BUY signal."}
+
+
 def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str, cfg: dict | None = None) -> int:
     """After a close: tell each connected friend about the stocks they follow. A BUY alert stays (it fires once per
     close with a BUY); a price alert is done once it fires. Returns how many were sent."""
@@ -769,6 +799,11 @@ def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str, cfg:
                         f"<b>{lv[0]}</b>\nالوقف {lv[1]} · الهدف {lv[2]}\n\n<i>عدد الأسهم على الموقع. {stop_these}</i>" if ar else
                         f"🔔 <b>{_e(a['symbol'])}</b> · BUY signal\nAt the {views.nice_date(data_date)} close: buy up to "
                         f"<b>{lv[0]}</b>\nStop {lv[1]} · target {lv[2]}\n\n<i>Your share count is on the website. {stop_these}</i>")
+        elif a["kind"] == "layers":
+            hit = layers_reached(views.Data(conn, cfg or config.DEFAULTS, cache), a["symbol"], data_date,
+                                 "ar" if ar else "en")
+            if hit and a["fired"] != hit["key"]:
+                text = hit["text"] + f"\n\n<i>{stop_these}</i>"
         elif a["kind"] == "levels":
             hit = level_touch(views.Data(conn, cfg or config.DEFAULTS, cache), a["symbol"], data_date,
                               "ar" if ar else "en")
@@ -788,7 +823,7 @@ def fire_watch_alerts(conn: sqlite3.Connection, token: str, data_date: str, cfg:
         except TelegramError:
             continue            # tried again after the next run
         sent += 1
-        if a["kind"] in ("buy", "levels"):      # standing alerts: remember what was sent, so it isn't sent twice
+        if a["kind"] in ("buy", "levels", "layers"):      # standing alerts: remember what was sent, not twice
             conn.execute("UPDATE watch_alerts SET fired=? WHERE chat_id=? AND symbol=? AND kind=?",
                          (data_date if a["kind"] == "buy" else hit["key"], *_alert_key(a)))
         else:

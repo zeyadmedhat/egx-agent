@@ -154,7 +154,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
                               "predict": views.predict_public(d),
                               "screener": views.screener(d), "history": views.history_data(d),
                               "dividends": views.dividend_calendar(d), "news": views.news_feed(d),
-                              "rights": corporate.rights_study(conn)}   # the Rights issues page, loaded when opened
+                              "rights": corporate.rights_study(conn),   # the Rights issues page, loaded when opened
+                              "layers": views.layers_view(d)}           # Picks → 7 Layers
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
     hourly = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM intraday")}
     for sym in d.table.index:

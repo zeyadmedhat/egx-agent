@@ -496,6 +496,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def screener_page(d: views.Data = Depends(get_data)):
         return JSON(views.screener_view(d))
 
+    @app.get("/api/layers")
+    def layers_page(d: views.Data = Depends(get_data)):
+        return JSON(views.layers_view(d))
+
     @app.get("/api/calc")
     def calc(d: views.Data = Depends(get_data)):
         return JSON(views.calc_view(d))

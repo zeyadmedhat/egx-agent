@@ -44,3 +44,23 @@ def test_the_card_and_the_levels():
         k = z["test"]
         assert 0 <= k["score"] <= 5 and k["score"] == sum(k[f"is_{s}"] for s in ("touches", "volume", "weekly", "recent", "held"))
         assert k["flip"] in (None, "up", "down")
+
+
+def test_the_live_record_and_the_alert(tmp_path):
+    """Each day's 6/7 list is kept and followed against EGX30; /watch COMI layers is a standing alert."""
+    import pandas as pd
+
+    from app import alerts
+    from egx_agent import db
+    conn = db.connect(tmp_path / "l.db")
+    days = pd.bdate_range("2026-09-06", periods=30, freq="C", weekmask="Sun Mon Tue Wed Thu")
+    assert layers.save_day(conn, str(days[0].date()), [("AAA", 6, 10.0), ("BBB", 5, 5.0)]) == 1   # only 6/7+ is kept
+    stock = pd.Series(np.linspace(10, 12, 30), index=days)            # +20% over the month
+    index = pd.Series(np.linspace(100, 105, 30), index=days)          # EGX30 +5%
+    rec = layers.live_record(conn, lambda s: stock if s == "AAA" else None, index)
+    assert rec["since"] == str(days[0].date()) and rec["so_far"]["n"] == 1 and rec["so_far"]["beat"] == 1.0
+    assert rec["month"]["n"] == 1 and rec["recent"][0]["ret"] > rec["recent"][0]["egx30"]
+    conn.execute("INSERT INTO stocks(symbol, name_ar, sector_ar) VALUES ('AAA', 'أ', 'بنوك')")
+    assert "6 of the 7 layers" in alerts.watch_command(conn, "1", "/watch AAA layers")
+    assert conn.execute("SELECT kind FROM watch_alerts WHERE chat_id='1'").fetchone()[0] == "layers"
+    assert "1 alert" in alerts.watch_command(conn, "1", "/unwatch AAA layers")

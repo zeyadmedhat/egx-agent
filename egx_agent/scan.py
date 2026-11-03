@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import breadth, corporate, db, holidays, levels, portfolio, predict, risk, strategy
+from . import breadth, corporate, db, holidays, layers, levels, portfolio, predict, risk, strategy
 from .data import dividends, flows, macro, news, ownership, prices, shariah, universe
 from .indicators import add_indicators
 
@@ -314,6 +314,12 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
     for r in buys + watches:
         r.update(shares=0, amount=0.0, risk_egp=0.0, size_note="")   # sized for each person when they look
     db.save_scan(conn, scan_date, buys + watches)
+    try:        # the day's stocks at 6/7 layers or more, for their live record (Picks → 7 Layers)
+        floor = cfg["min_avg_value_egp"]
+        layers.save_day(conn, scan_date, [(s, int(layers.frame(f)["score"].iloc[-1]), float(f["close"].iloc[-1]))
+                                          for s, f in ind.items() if s in rows and len(f) >= 120 and f["value_avg20"].iloc[-1] >= floor])
+    except Exception as exc:
+        warnings.append(f"7 layers not saved ({type(exc).__name__})")
 
     say(0.96, "Updating paper trading…")
     n_accounts = 0

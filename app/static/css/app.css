@@ -1583,3 +1583,7 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .layer.ok > svg { color: var(--up); } .layer.no > svg { color: var(--down); } .layer.no { opacity: .78; }
 .layer.l1 { --lc: var(--up); } .layer.l2 { --lc: var(--info); } .layer.l3 { --lc: var(--warn); } .layer.l4 { --lc: var(--violet); }
 .layer.l5 { --lc: #b08a12; } .layer.l6 { --lc: var(--down); } .layer.l7 { --lc: var(--accent); }
+.lay-tile { display: block; color: inherit; text-decoration: none; }
+.lay-tile.pass { border-color: var(--up); }
+.lay-score { margin-inline-start: auto; font-size: 24px; font-weight: 800; } .lay-score small { font-size: 13px; color: var(--text-3); }
+.lay-miss { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 8px; }

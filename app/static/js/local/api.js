@@ -1140,6 +1140,7 @@ async function route(path, { method = 'GET', body } = {}) {
       case 'news': return newsView(c);
       case 'watchlist': return { symbols: c.book.watchlist || [] };
       case 'market': return load('market');
+      case 'layers': return load('layers');
       case 'egx30': return load('egx30');
       case 'predict': return predictView(c);
       case 'quotes': return quotes(c, path);

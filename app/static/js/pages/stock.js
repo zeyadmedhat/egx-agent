@@ -10,6 +10,7 @@ import { PriceChart } from '../charts.js';
 import { AiForecast } from './ai.js';
 import { PriceRange, ReachLine } from './range.js';
 import { RightsPage } from './rights.js';
+import { LAYER_NAMES } from './layers.js';
 
 const RANGES = [
   { value: 60, label: '3M' }, { value: 120, label: '6M' }, { value: 250, label: '1Y' }, { value: 500, label: '2Y' },
@@ -285,8 +286,6 @@ function Checklist({ list }) {
 
 // The 7 layers (egx_agent/layers.py): GrowthX's "Market mirror" checklist, built from standard formulas, at the last
 // close, 7 on top like the video's building, with what 10 years of EGX said about the score. Checks, not advice.
-const LAYER_NAMES = { trend: 'Trend', momentum: 'Momentum', volume: 'Volume', volatility: 'Volatility', squeeze: 'Squeeze',
-  timeframes: 'Week & month', smart_money: 'Smart money' };
 
 function layerLine(x, brk) {
   const pct = v => fmt.pct(v, 1, false);
@@ -331,7 +330,7 @@ function LayersCard({ l }) {
         <li>${t('Taking only the BUYs at 6/7 or more would have made {a} a year instead of {b} (winners {c} instead of {d}). So the BUY rules don’t use it.', {
           a: fmt.pct(s.strict.cagr, 0, false), b: fmt.pct(s.rules.cagr, 0, false), c: fmt.pct(s.strict.wins, 0, false), d: fmt.pct(s.rules.wins, 0, false) })}</li>
       </ul>`}
-    <${More} label="What the 7 layers are"><p>${t('A checklist from GrowthX’s “Market mirror” video, built here from standard formulas on daily prices: 1 trend (50-day average), 2 momentum (RSI and MACD), 3 volume (up days against down days), 4 volatility (the daily swing, ATR), 5 squeeze (Bollinger bands inside the Keltner channel), 6 the week and the month (each above its own average), 7 smart money (the last break of a swing high or low, and money flow). The video trades only at 6/7 or more. Tested on EGX since {date}. The past, not a promise.', { date: s ? fmt.date(s.from, false) : '2016' })}</p><//>
+    <${More} label="What the 7 layers are"><p>${t('A checklist from GrowthX’s “Market mirror” video, built here from standard formulas on daily prices: 1 trend (50-day average), 2 momentum (RSI and MACD), 3 volume (up days against down days), 4 volatility (the daily swing, ATR), 5 squeeze (Bollinger bands inside the Keltner channel), 6 the week and the month (each above its own average), 7 smart money (the last break of a swing high or low, and money flow). The video trades only at 6/7 or more. Tested on EGX since {year}. The past, not a promise.', { year: s ? s.from.slice(0, 4) : '2016' })}</p><//>
   <//>`;
 }
 

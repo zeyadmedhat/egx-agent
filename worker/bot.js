@@ -5,8 +5,8 @@
 // and, for on-time scans, GH_TOKEN (a GitHub key that can only start this repository's runs).
 // Keep the replies in step with app/alerts.py.
 
-const WATCH_RE = /^\/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?|levels))?\s*$/i
-const UNWATCH_RE = /^\/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+(buy|levels))?\s*$/i   // a kind: only that alert
+const WATCH_RE = /^\/watch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+([0-9]+(?:[.,][0-9]+)?|levels|layers))?\s*$/i
+const UNWATCH_RE = /^\/unwatch(?:@\w+)?\s+([A-Za-z0-9]{2,12})(?:\s+(buy|levels|layers))?\s*$/i   // a kind: only that alert
 const LIST_RE = /^\/(?:list|alerts)(?:@\w+)?\s*$/i
 const WEEKLY_RE = /^\/weekly(?:@\w+)?\s+(on|off)\s*$/i
 const QUIET_RE = /^\/quiet(?:@\w+)?(?:\s+(on|off))?\s*$/i
@@ -57,6 +57,7 @@ const EN = {
     "/watch COMI · when it gets a BUY signal\n" +
     "/watch COMI 45 · when it closes above 45 (or below, if 45 is under its price)\n" +
     "/watch COMI levels · near a strong support or at resistance\n" +
+    "/watch COMI layers · when it reaches 6 of the 7 layers\n" +
     "/unwatch COMI · stop its alerts (/unwatch all: every alert)\n" +
     "/list · your alerts\n\n" +
     "💼 <b>Your portfolio</b> (from the website)\n" +
@@ -128,6 +129,7 @@ const EN = {
   buysFoot: "<i>Your share counts are on the website.</i>",
   alertBuy: s => `${s}: a BUY signal`,
   alertLevels: s => `${s}: near support or resistance`,
+  alertLayers: s => `${s}: reaches 6 of the 7 layers`,
   alertPrice: (s, k, p) => `${s}: a close ${k} ${p}`,
   noAlerts: "You have no alerts yet.\n\n",
   yourAlerts: "🔔 <b>Your alerts</b>",
@@ -137,6 +139,7 @@ const EN = {
   okBuy: s => `OK: I'll tell you when ${s} gets a BUY signal, after any close.`,
   okLevels: s => `OK: I'll tell you when ${s} closes near a strong support or reaches resistance ` +
     "(the levels on its page on the website).",
+  okLayers: s => `OK: I'll tell you when ${s} reaches 6 of the 7 layers at a close (a checklist, not a BUY signal).`,
   noPrices: s => `There are no prices for ${s} yet, so I can't watch its price.`,
   okPrice: (s, k, p, last) => `OK: I'll tell you when ${s} closes ${k} ${p} (last close ${last}).`,
   bBellOn: "🔔 BUY alert: on (tap to stop)", bBellOff: "🔕 Tell me when it's a BUY",
@@ -225,6 +228,7 @@ const AR = {
     "/watch COMI · عندما يحصل على إشارة شراء\n" +
     "/watch COMI 45 · عندما يغلق فوق 45 (أو تحته إذا كان 45 أقل من سعره)\n" +
     "/watch COMI levels · قرب دعم قوي أو عند مقاومة\n" +
+    "/watch COMI layers · عندما يصل إلى 6 من الطبقات السبع\n" +
     "/unwatch COMI · إيقاف تنبيهاته (/unwatch all: كل التنبيهات)\n" +
     "/list · تنبيهاتك\n\n" +
     "💼 <b>محفظتك</b> (من الموقع)\n" +
@@ -295,6 +299,7 @@ const AR = {
   buysFoot: "<i>عدد الأسهم لكل صفقة على الموقع.</i>",
   alertBuy: s => `${s}: إشارة شراء`,
   alertLevels: s => `${s}: قرب الدعم أو المقاومة`,
+  alertLayers: s => `${s}: يصل إلى 6 من الطبقات السبع`,
   alertPrice: (s, k, p) => `${s}: إغلاق ${k === "above" ? "فوق" : "تحت"} ${p}`,
   noAlerts: "ليس لديك تنبيهات بعد.\n\n",
   yourAlerts: "🔔 <b>تنبيهاتك</b>",
@@ -303,6 +308,7 @@ const AR = {
   tooMany: m => `لديك ${m} تنبيهًا بالفعل. احذف بعضها بـ /unwatch أولًا.`,
   okBuy: s => `تم: سأخبرك عندما يحصل ${s} على إشارة شراء بعد أي إغلاق.`,
   okLevels: s => `تم: سأخبرك عندما يغلق ${s} قرب دعم قوي أو يصل إلى مقاومة (المستويات في صفحته على الموقع).`,
+  okLayers: s => `تم: سأخبرك عندما يصل ${s} إلى 6 من الطبقات السبع عند الإغلاق (قائمة فحص، وليست إشارة شراء).`,
   noPrices: s => `لا توجد أسعار لـ ${s} بعد، فلا يمكنني متابعة سعره.`,
   okPrice: (s, k, p, last) => `تم: سأخبرك عندما يغلق ${s} ${k === "above" ? "فوق" : "تحت"} ${p} (آخر إغلاق ${last}).`,
   bBellOn: "🔔 تنبيه الشراء: مفعّل (اضغط للإيقاف)", bBellOff: "🔕 نبّهني عند إشارة الشراء",
@@ -621,6 +627,7 @@ function alertText(a, lang) {
   const T = L(lang)
   if (a.kind === "buy") return T.alertBuy(a.symbol)
   if (a.kind === "levels") return T.alertLevels(a.symbol)
+  if (a.kind === "layers") return T.alertLayers(a.symbol)
   return T.alertPrice(a.symbol, a.kind, px(a.price))
 }
 
@@ -652,6 +659,9 @@ function watch(state, cid, text, lang) {
   } else if (m[2].toLowerCase() === "levels") {
     kind = "levels"
     out = T.okLevels(sym)
+  } else if (m[2].toLowerCase() === "layers") {
+    kind = "layers"
+    out = T.okLayers(sym)
   } else {
     price = parseFloat(m[2].replace(",", "."))
     if (last == null) return reply(T.noPrices(esc(sym)))

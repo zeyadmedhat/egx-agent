@@ -702,6 +702,31 @@ def layers_study(d: Data) -> dict | None:
     return d.cache.get(d.version, ("layers_study",), lambda: (record.stored_odds(d.conn) or {}).get("layers"))
 
 
+def layers_view(d: Data) -> dict:
+    """Picks → 7 Layers: the actively traded stocks at 5/7 layers or more today, each with the layers it misses and
+    its BUY status; the live record of each day's 6/7+ list against EGX30 (layers.live_record); and the 10-year test."""
+    def build():
+        _, df = current_scan(d.conn)
+        action = {r["symbol"]: r["action"] for r in records(df)}
+        rows = []
+        for sym in d.table.index:
+            ind = d.indicators(sym)
+            if len(ind) < 120 or not ind["value_avg20"].iloc[-1] >= d.cfg["min_avg_value_egp"]:
+                continue
+            row = layers.frame(ind).iloc[-1]
+            if row["score"] >= layers.PASS - 1:
+                c = ind["close"]
+                rows.append({"symbol": sym, "score": int(row["score"]), "close": float(c.iloc[-1]),
+                             "chg1": float(c.iloc[-1] / c.iloc[-2] - 1), "date": str(ind.index[-1].date()),
+                             "misses": [k for k in layers.LAYERS if not row[k]], "action": action.get(sym)})
+        rows.sort(key=lambda r: (-r["score"], r["symbol"]))
+        idx = d.indicators(prices.INDEX_SYMBOL)
+        rec = layers.live_record(d.conn, lambda s: d.indicators(s)["close"] if len(d.indicators(s)) else None,
+                                 idx["close"]) if len(idx) else None
+        return clean({"pass_at": layers.PASS, "rows": rows, "record": rec, "study": layers_study(d)})
+    return d.cache.get(d.version, ("layers_view",), build)
+
+
 def rule_checks(ind: pd.DataFrame, cfg: dict, sf: pd.Series | None = None) -> dict:
     """The breakout rule's checks at the last close, passed or not, with the numbers behind them: the stock page's
     checklist and the bot's /why."""

@@ -18,6 +18,8 @@ frame() works on every row from the bars up to it (no look-ahead), so the 10-yea
 """
 from __future__ import annotations
 
+import sqlite3
+
 import numpy as np
 import pandas as pd
 
@@ -173,3 +175,40 @@ def study(prep, cfg: dict, start, res: dict, run) -> dict:
     return {"from": str(start.date()), "horizon": HORIZON, "pass_at": PASS, "n": int(len(days)), "by_score": by_score,
             "periods": periods,
             "all": stat(days), "rules": replay(res), "strict": replay(strict), "buys_split": split}
+
+
+# ------------------------------------------------------------------ the live record (Picks → 7 Layers)
+
+def save_day(conn: sqlite3.Connection, day: str, picks: list[tuple[str, int, float]]) -> int:
+    """Keep the day's stocks at PASS/7 or more: (symbol, score, close). Saving the same day again replaces it."""
+    conn.execute("DELETE FROM layer_picks WHERE date=?", (day,))
+    conn.executemany("INSERT INTO layer_picks(date, symbol, score, close) VALUES (?,?,?,?)",
+                     [(day, s, int(sc), float(c)) for s, sc, c in picks if sc >= PASS])
+    conn.commit()
+    return sum(1 for _, sc, _ in picks if sc >= PASS)
+
+
+def live_record(conn: sqlite3.Connection, close_of, index_close: pd.Series) -> dict:
+    """How the kept picks did from their day's close: to the last close, and over HORIZON sessions once that has
+    passed, each against EGX30 over the same days. close_of(symbol) → its closes (a Series by date)."""
+    picks = [dict(r) for r in conn.execute("SELECT date, symbol, score, close FROM layer_picks ORDER BY date, symbol")]
+    out = []
+    for p in picks:
+        c = close_of(p["symbol"])
+        day = pd.Timestamp(p["date"])
+        if c is None or not len(c) or day not in index_close.index:
+            continue
+        after, idx_after = c[c.index > day], index_close[index_close.index > day]
+        i0 = float(index_close.loc[day])
+        row = {**p, "now": float(c.iloc[-1]) / p["close"] - 1, "egx30_now": float(index_close.iloc[-1]) / i0 - 1,
+               "sessions": int(len(after))}
+        if len(after) >= HORIZON and len(idx_after) >= HORIZON:
+            row["ret"] = float(after.iloc[HORIZON - 1]) / p["close"] - 1
+            row["egx30"] = float(idx_after.iloc[HORIZON - 1]) / i0 - 1
+        out.append(row)
+    done = [r for r in out if "ret" in r]
+    summary = lambda rs, a, b: {"n": len(rs), "beat": sum(r[a] > r[b] for r in rs) / len(rs),  # noqa: E731
+                                "avg": sum(r[a] - r[b] for r in rs) / len(rs)} if rs else None
+    return {"since": out[0]["date"] if out else None, "days": len({r["date"] for r in out}),
+            "so_far": summary([r for r in out if r["sessions"]], "now", "egx30_now"), "month": summary(done, "ret", "egx30"),
+            "recent": out[-40:][::-1]}

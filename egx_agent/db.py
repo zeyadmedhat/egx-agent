@@ -23,6 +23,13 @@ CREATE TABLE IF NOT EXISTS prices (
     open REAL, high REAL, low REAL, close REAL, volume REAL,
     PRIMARY KEY (symbol, date)
 );
+CREATE TABLE IF NOT EXISTS layer_picks (      -- each day's stocks at 6/7 layers or more (layers.py), kept to see
+    date   TEXT NOT NULL,                      -- how they do from then on (Picks → 7 Layers)
+    symbol TEXT NOT NULL,
+    score  INTEGER NOT NULL,
+    close  REAL NOT NULL,
+    PRIMARY KEY (date, symbol)
+);
 CREATE TABLE IF NOT EXISTS rights_prices (    -- a rights issue's rights while they trade (KORA_r1: TradingView's
     symbol TEXT NOT NULL,                      -- KORAR1), kept: TradingView drops them once the issue is over
     date   TEXT NOT NULL,
