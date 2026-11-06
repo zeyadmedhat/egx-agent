@@ -27,7 +27,7 @@ export function TodayPage() {
   if (page) return page;
   const m = data.market;
   return html`
-    <${PageHead} title="Today" sub=${t('From the {date} close', { date: fmt.date(m.date) })}>
+    <${PageHead} title="Today" sub=${t('From {date}', { date: fmt.date(m.date) })}>
       <${SessionBadge} dataDate=${m.date} /><//>
     <${Brief} data=${data} blocked=${blocked} alerts=${alerts} />
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
@@ -179,7 +179,7 @@ function OrdersCard({ o }) {
     <div class="orders-head">
       <div><h2>${t('Orders for {when}', { when: sessionName(o.session) })}</h2>
         <div class="sub">${n ? t('Most urgent first. Tick each one off as you place it at your broker.')
-          : t('From the {date} close.', { date: fmt.date(o.scan_date) })}</div></div>
+          : t('From {date}.', { date: fmt.date(o.scan_date) })}</div></div>
       <div class="right">
         ${n > 0 && html`<span class="orders-progress">${t('{k} of {n} done', { k, n })}<span class=${cls('bar', k === n && 'up')}>
           <span style=${`width:${(k / n) * 100}%`}></span></span></span>`}

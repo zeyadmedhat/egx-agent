@@ -22,7 +22,7 @@ export function PicksPage() {
   const model = pred && pred.model ? pred : null;
   const week = Object.fromEntries(((model && model.rows) || []).map(r => [r.symbol, r]));
   return html`
-    <${PageHead} title="Picks" sub=${t('For the next session, from the {date} close', { date: fmt.date(m.date) })}>
+    <${PageHead} title="Picks" sub=${t('For the next session, from {date}', { date: fmt.date(m.date) })}>
       <${SessionBadge} dataDate=${m.date} /><//>
     <${Light} m=${m} b=${data.breadth} blocked=${blocked} />
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">

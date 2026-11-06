@@ -27,6 +27,7 @@ export function tp(en, vars) {
 // know stays as written. The exit-rule notes are the same as the Telegram bot's (worker/bot.js).
 const STRENGTH = { strong: 'قوي', moderate: 'متوسط', weak: 'ضعيف' };
 const NOTES = [
+  [/^Some news sources didn't answer \(the others were read\): (.+)$/, 'بعض مصادر الأخبار لم ترد (وقُرئت البقية): $1'],
   [/^Closed at ([\d.]+), above its 20-day high of ([\d.]+), on ([\d.]+)× normal volume$/, 'أغلق عند $1، فوق أعلى سعر في 20 يومًا ($2)، بحجم تداول $3× المعتاد'],
   [/^Dipped to its 20-day average \(([\d.]+)\) and bounced; RSI turning up at (\d+)$/, 'هبط إلى متوسط 20 يومًا ($1) وارتد؛ مؤشر RSI يتجه للصعود عند $2'],
   [/^Uptrend: price above its 20- and 50-day averages; ADX (\d+) \((strong|moderate|weak) trend\)$/,

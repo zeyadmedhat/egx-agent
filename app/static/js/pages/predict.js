@@ -51,7 +51,7 @@ export function PredictPage() {
 
     <section class="section">
       <${SectionHead} title="Today's ranking" count=${data.rows.length}
-        hint=${t('From the {date} close, best first. A chance shows only for its top {n}.', { date: fmt.date(data.date), n: fmt.int(data.top_n) })}>
+        hint=${t('From {date}, best first. A chance shows only for its top {n}.', { date: fmt.date(data.date), n: fmt.int(data.top_n) })}>
         ${showSeg}<//>
       <div class="card flush"><${ChanceTable} rows=${rows} base=${data.base || {}} /></div>
     </section>
@@ -81,7 +81,7 @@ function Week({ data, rows, filters }) {
 
     <section class="section">
       <${SectionHead} title="Next week's ranking" count=${data.rows.length}
-        hint=${t('From the {date} close, highest chance first. Chance: it rises to the target before it falls to the stop, within 5 sessions.', { date: fmt.date(data.date) })}>
+        hint=${t('From {date}, highest chance first. Chance: it rises to the target before it falls to the stop, within 5 sessions.', { date: fmt.date(data.date) })}>
         ${filters}<//>
       <div class="card flush"><${WeekTable} rows=${rows} base=${a.hit} top=${data.top_n} /></div>
     </section>

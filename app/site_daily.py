@@ -338,7 +338,8 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             report["telegram"] = "not set up"
         if subs is not None and all(worker):      # after the alerts that fired: the Worker's copy of who's watching what
             key = static_site.derive_key(password, static_site.salt_for(site_id))
-            extra = {"site": site_url, "mine": {cid: {"date": data_date, "positions": [
+            extra = {"site": site_url, "owner": owner_chat(conn, token, owner) if token and owner else None,
+                     "mine": {cid: {"date": data_date, "positions": [
                         {k: p.get(k) for k in ("symbol", "last", "stop", "target", "status", "reason")} for p in ps]}
                         for cid, ps in mine.items()},
                      # the Worker sends each of these at 9:30 Cairo before that session (/morning off stops it)

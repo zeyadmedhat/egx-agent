@@ -394,6 +394,8 @@ def status(d: Data) -> dict:
         "alerts": sum(1 for p in positions if p["status"] in ACTION_STATUSES),
         "positions": len(positions),
         "holidays": {h["date"]: h["title"] for h in holidays.upcoming()},
+        "final": scan.scan_is_final(d.conn),
+        "behind": 0,                    # only the published site can fall behind (engine.js sessionsBehind)
     }
 
 

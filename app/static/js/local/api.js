@@ -173,6 +173,8 @@ function status(c, positions) {
     job: null,
     scan_url: c.core.scan_url || null,
     holidays: Object.fromEntries(Object.entries(c.core.holidays || {}).filter(([d]) => d >= localToday())),
+    final: c.core.final !== false,
+    behind: m ? E.sessionsBehind(m.date) : 0,
   };
 }
 

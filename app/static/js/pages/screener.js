@@ -93,7 +93,7 @@ export function ScreenerPage() {
   const MORE = ['rating', 'layers', 'trend', 'rsi', 'volume', 'high', 'model', 'yield', 'exdiv', 'pe'];
   const more = MORE.filter(k => f[k] !== 'any').length + (f.liquid ? 0 : 1);
   return html`<${PageHead} title="Screener"
-      sub=${t("Every stock's numbers from the {date} close. Filter, sort, and tap a stock for its chart.", { date: fmt.date(data.date) })} />
+      sub=${t("Every stock's numbers from {date}. Filter, sort, and tap a stock for its chart.", { date: fmt.date(data.date) })} />
     <div class="row preset-row" style="margin-bottom:12px">
       ${PRESETS.map(([label, p]) => html`<button class=${cls('btn sm', isOn(p) && 'on')} aria-pressed=${isOn(p)}
         onClick=${() => save({ ...DEFAULTS, ...p })}>${t(label)}</button>`)}

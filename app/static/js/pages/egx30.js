@@ -29,7 +29,7 @@ export function Egx30Page() {
   const vs = v => d.close / v - 1;
   const avg = { v: fmt.int(d.ema50) };
   return html`
-    <${PageHead} title="EGX30" sub=${t("Egypt's 30 biggest and most traded companies, from the {date} close.", { date: fmt.date(d.date) })}>
+    <${PageHead} title="EGX30" sub=${t("Egypt's 30 biggest and most traded companies, from {date}.", { date: fmt.date(d.date) })}>
       <div class="egx30-price"><b class="num">${fmt.int(d.close)}</b> <${Change} value=${d.change} pill /></div><//>
     ${d.risk_off != null && html`<${Callout} tone=${d.risk_off ? 'warn' : 'ok'}>${d.risk_off
       ? html`<b>${t('Under its 50-day average ({v}).', avg)}</b> ${t('The agent gives no new BUYs until EGX30 closes back above it.')}`

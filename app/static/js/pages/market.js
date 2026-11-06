@@ -44,7 +44,7 @@ export function MarketPage() {
       ${r.leaders.map(l => html`<a href=${stockHref(l.symbol)} title=${`${fmt.pct(l.r21, 1)} in a month`}>${l.symbol}</a>`)}</div>` },
   ];
   return html`
-    <${PageHead} title="Market" sub=${t('How many stocks rise with the index, from the {date} close.', { date: fmt.date(b.date) })}>
+    <${PageHead} title="Market" sub=${t('How many stocks rise with the index, from {date}.', { date: fmt.date(b.date) })}>
       <${SessionBadge} dataDate=${b.date} /><//>
     ${data.mood && html`<${Mood} m=${data.mood} />`}
     ${data.investors && data.investors.length > 0 && html`<${Investors} days=${data.investors} />`}

@@ -384,14 +384,18 @@ export function sessionState(now = new Date()) {
 export function SessionBadge({ dataDate }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(id); }, []);
-  const s = sessionState(now);
+  const s = sessionState(now), st = store.status || {};
   const date = fmt.date(dataDate);
   const [tn, label, sub, text] = s.state === 'open'
     ? ['warn', 'Session open', 'Prices not final',
       "EGX is trading now (10:00–14:30 Cairo). The live boxes are about 15 minutes late; the agent's numbers use the {date} close."]
+    : st.behind > 0
+      ? ['warn', 'Old prices', '', 'The latest prices are from {date}: the site has missed its scans since then.']
     : s.state === 'after' && dataDate < s.day
       ? ['info', "Today's close not in yet", '',
         'The session ended. The agent scans after the close; until then its numbers use the {date} close.']
+    : st.final === false
+      ? ['warn', 'Final close not in yet', 'Session prices', 'Prices from during the {date} session, not its final close.']
       : s.state === 'weekend'
         ? ['ok', 'Market closed', 'Closing prices', 'Final closing prices of {date}. EGX trades Sunday to Thursday.']
         : s.state === 'holiday'
@@ -400,6 +404,14 @@ export function SessionBadge({ dataDate }) {
           'Final closing prices of {date}. The next session opens at 10:00 Cairo time.'];
   return html`<div class=${cls('session', tn)} title=${t(text, { date })}>
     <span class="dot"></span><b>${t(label)}</b>${sub && html`<span>· ${t(sub)}</span>`}</div>`;
+}
+
+// The published site runs by itself: when its scans stop, say so at the top of every page.
+export function BehindBanner() {
+  const s = useStore(x => x.status);
+  if (!s || !s.behind || !s.market) return null;
+  return html`<div style="margin-bottom:12px"><${Callout} tone="warn">${t('This site is behind. Latest prices: {date}. Sessions missing: {n}.',
+    { date: fmt.date(s.market.date), n: s.behind })}<//></div>`;
 }
 
 // A section that stays closed until you open it: the title and a short hint show, the rest is one tap away. What's
@@ -820,8 +832,9 @@ export function JobControl() {
       <span class="pbar"><span style=${`width:${pct}%`}></span></span><b>${pct}%</b></div>`;
   }
   if (store.me && !store.me.user.is_admin) {
+    const status = store.status || {};
     const pill = market && html`<span class="data-pill" title=${t('The site scans by itself after every close')}>
-      <${Icon} name="check" size=${14} /><span class="hide-mobile">${t('Data:')}${' '}</span>${t('{date} close', { date: fmt.date(market.date, false) })}</span>`;
+      <${Icon} name=${status.behind ? 'alert' : 'check'} size=${14} /><span class="hide-mobile">${t('Data:')}${' '}</span>${t(status.final === false ? '{date} session' : '{date} close', { date: fmt.date(market.date, false) })}</span>`;
     // The GitHub Pages site: the owner's button opens the scan on GitHub (Settings → Run a scan now).
     const url = STATIC && owner && scanUrl;
     return url ? html`${pill}<a class="btn primary" href=${url} target="_blank" rel="noopener noreferrer"

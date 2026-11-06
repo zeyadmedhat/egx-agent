@@ -1148,3 +1148,15 @@ def test_the_orders_list_is_the_same_on_the_site_as_on_the_mac_and_in_telegram(t
     strip = lambda o: {**o, "items": [{k: v for k, v in it.items() if k != "info"} for it in o["items"]]}  # noqa: E731
     assert len(py["items"]) == 7 and py["session"] == session and py["blocked"]
     assert strip(js) == strip(py)
+
+
+def test_the_site_counts_the_sessions_it_missed():
+    """The stale banner (engine.js sessionsBehind): 3 Nov 2026 was a Tuesday, Friday and Saturday have no session."""
+    (js,) = run_js({"op": "behind", "args": {"cases": [
+        ["2026-11-03", "2026-11-03T20:00:00Z"],     # the same evening: up to date
+        ["2026-11-03", "2026-11-04T13:00:00Z"],     # 15:00 Cairo on the 4th: its scan may still come
+        ["2026-11-03", "2026-11-04T17:00:00Z"],     # 19:00: one missing
+        ["2026-11-03", "2026-11-06T19:00:00Z"],     # Friday: the 4th and 5th
+        ["2026-11-05", "2026-11-07T10:00:00Z"],     # a normal weekend
+    ]}})
+    assert js == [0, 0, 1, 2, 0]

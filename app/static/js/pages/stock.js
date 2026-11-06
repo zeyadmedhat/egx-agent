@@ -1,5 +1,5 @@
 // Stock: TradingView-style chart with your levels, why it does or doesn't qualify, your position, Shariah details.
-import { html, useApi, useState, useEffect, useStore, fmt, tone, cls, remember, todayISO, api, toast, refreshAll, stockHref, STATIC } from '../lib.js';
+import { html, useApi, useState, useEffect, useStore, store, fmt, tone, cls, remember, todayISO, api, toast, refreshAll, stockHref, STATIC } from '../lib.js';
 import {
   Icon, Badges, IndexPills, StatusChip, Kpi, Callout, PageLoading, Seg, DayBar, WatchStar,
   Cautions, NewsList, Why, LiveChart, LIVE_NOTE, Term, More, Change, StockAvatar, Fold, Rating, Reason, useQuotes, livePosition, PositionCard, sessionState,
@@ -72,7 +72,7 @@ function StockMain({ route }) {
       </div>
       ${st && html`<div class="price"><div class="big">${fmt.price(st.close)}</div>
         <div class="chg"><${Change} value=${st.change} pill /> <span class="faint" style="font-weight:500">${t('on the day')}</span></div>
-        <div class="faint" style="font-size:12px">${t('Close of {date}', { date: fmt.date(st.last_bar) })}</div>
+        <div class="faint" style="font-size:12px">${t(store.status && store.status.final === false && st.last_bar === (store.status.market || {}).date ? 'Session price of {date}' : 'Close of {date}', { date: fmt.date(st.last_bar) })}</div>
         ${quote && Math.abs(quote.price - st.close) > 1e-9 && (sessionState().state === 'open'
           ? html`<div class="live-now"><span class="live-dot"></span>
               ${t('Live')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /> <span class="faint">${t('~15 min late')}</span></div>`

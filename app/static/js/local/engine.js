@@ -71,6 +71,15 @@ export function expectedSessionDate(now = new Date()) {
   return d;
 }
 
+// EGX sessions finished since `day` that the site doesn't have: each counts from 18:00 Cairo, as the scan after a close
+// can run late. 0 when the site is up to date.
+export function sessionsBehind(day, now = new Date()) {
+  const { day: today, minutes } = cairo(now);
+  let n = 0;
+  for (let d = sessionsAfter(day, 1); d < today || (d === today && minutes >= 18 * 60); d = sessionsAfter(d, 1)) n += 1;
+  return n;
+}
+
 // The first session a stop you set now counts in: today's if it hasn't opened yet (10:00 Cairo), else the next one,
 // so a price earlier today, from before you set it, can't sell you.
 export function stopFrom(now = new Date()) {

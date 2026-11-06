@@ -193,6 +193,18 @@ console.log("buttons and languages ok")
 
 // On-time scans: when the bot asks GitHub to scan
 const at = (day, hm, weekday = "Wed") => ({ day, minute: +hm.slice(0, 2) * 60 + +hm.slice(3), weekday })
+{ // GitHub refuses the bot's run: the owner hears once a day, in their language
+  const sent = [], data = new Map([["state", { owner: "7", subs: { 7: { lang: "ar" } }, info: { scan: "2026-09-29" } }]])
+  const bot = new Bot({ storage: { get: async k => data.get(k), put: async (k, v) => data.set(k, v) } }, { GH_TOKEN: "x", GITHUB_REPO: "a/b" })
+  bot.send = async (cid, out) => sent.push([cid, out.text])
+  const real = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 401 })
+  await bot.tick(new Date("2026-09-30T08:00:00Z"))      // 11:00 Cairo
+  await bot.tick(new Date("2026-09-30T08:31:00Z"))      // the next half hour: refused again
+  globalThis.fetch = real
+  assert.equal(sent.length, 1)
+  assert.ok(sent[0][0] === "7" && sent[0][1].includes("EGX on-time scans") && sent[0][1].includes("401") && sent[0][1].includes("الموقع"))
+}
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:30")).key, undefined)          // GitHub's own run
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:55")).key, undefined)
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "16:00")).key, "2026-09-30 c960")  // it didn't come

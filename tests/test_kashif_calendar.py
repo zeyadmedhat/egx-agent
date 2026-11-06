@@ -64,3 +64,36 @@ def test_a_scan_every_half_hour_during_the_session(tmp_path):
     assert session_scan_due(conn, at(4, 11, 20))                     # 30 minutes ago
     assert not session_scan_due(conn, at(4, 9, 50)) and not session_scan_due(conn, at(4, 15, 30))   # closed
     assert not session_scan_due(conn, at(9, 11, 20))                 # Friday
+
+
+def test_a_late_github_run_goes_on_if_the_site_has_nothing_since_the_last_run_time(tmp_path):
+    """GitHub's timer ran 7–8 hours late in Nov 2026: a run counts however late it starts, unless the site already has it."""
+    import os
+    import re
+    import subprocess
+
+    import yaml
+    root = Path(__file__).parent.parent
+    step = yaml.safe_load((root / ".github/workflows/site.yml").read_text(encoding="utf-8"))["jobs"]["when"]["steps"][0]["run"]
+    script = re.sub(r"\$\{\{ github\.event_name \}\}", "schedule", step)
+    script = re.sub(r"\$\{\{[^}]*\}\}", "x", script)
+    (tmp_path / "date").write_text('#!/bin/sh\ncase "$1" in +%H%M) echo "$NOW";; *) echo 2026-11-04;; esac\n')
+    (tmp_path / "curl").write_text('#!/bin/sh\n[ -n "$BUILT" ] || exit 22\necho "{\\"built\\": \\"$BUILT\\"}"\n')
+    for f in ("date", "curl"):
+        (tmp_path / f).chmod(0o755)
+
+    def goes(now, built):
+        out = tmp_path / "out"
+        out.write_text("")
+        subprocess.run(["bash", "-e", "-c", script], check=True, capture_output=True, env={
+            **os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "GITHUB_OUTPUT": str(out), "NOW": now, "BUILT": built})
+        return "go=true" in out.read_text()
+
+    assert goes("1630", "2026-11-03T13:03:32")          # 12 seconds past the old window: the close still comes in
+    assert goes("2211", "2026-11-04T14:05:00")          # very late, only a session scan so far
+    assert not goes("1650", "2026-11-04T15:40:00")      # the close is already on the site
+    assert goes("0935", "2026-11-03T15:40:00")          # the morning run
+    assert not goes("1100", "2026-11-04T09:40:00")      # the morning run is in; the bot does the session
+    assert goes("1100", "2026-11-03T15:40:00")          # it isn't: go on
+    assert not goes("0830", "2026-11-03T15:40:00")      # the winter time of the 9:30 timer
+    assert goes("1700", "")                             # the site didn't answer

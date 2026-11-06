@@ -205,11 +205,15 @@ const EN = {
   shotFoot: missing => "<i>" + (missing ? "To add them: the website → My Portfolio → From a screenshot. " : "") +
     "To fix one: the website → My Portfolio → Sell or edit. What you paid is the market value − the profit/loss, so " +
     "the price moving since doesn't count.</i>",
+  ghRefused: s => `⚠️ <b>The website can't update.</b> GitHub refused the bot's run (status ${s}).` +
+    (s === 401 || s === 403 ? ' The GitHub key has probably expired: renew "EGX on-time scans" on GitHub, then set it again with wrangler.' : ""),
 }
 
 const days = n => (n <= 10 ? `${n} أيام` : `${n} يومًا`)     // Arabic: 3–10 take the plural, 11+ the singular
 
 const AR = {
+  ghRefused: s => `⚠️ <b>الموقع لا يتحدّث.</b> رفض GitHub طلب البوت (الحالة ${s}).` +
+    (s === 401 || s === 403 ? ' غالبًا انتهى مفتاح GitHub: جدّد "EGX on-time scans" من GitHub، ثم ضعه من جديد عبر wrangler.' : ""),
   day: d => d ? `${+d.slice(8, 10)} ${MONTHS_AR[+d.slice(5, 7) - 1]}` : "–",
   welcome: "✅ <b>تم الاتصال.</b> بعد كل إغلاق للبورصة المصرية ستصلك إشارات اليوم هنا. عدد الأسهم لكل صفقة على الموقع.\n" +
     "أرسل /help لتعرف ما يمكنني فعله، أو /stop للإيقاف.",
@@ -876,7 +880,8 @@ export function parseHoldings(text) {
 // egx_agent/holidays.py): GitHub's own timer starts one at 9:30 before the open and one at 15:30 after the close
 // (.github/workflows/site.yml), and the bot asks for one every half hour of the session, 10:30–14:00, for the live
 // prices. GitHub's timer runs late or not at all when it's busy, so the bot backs it up at the same two times: at
-// 10:05 if no run has reported since 9:30, and at 16:00 if that close's final scan hasn't arrived.
+// 10:05 if no run has reported since 9:30, and at 16:00 if that close's final scan hasn't arrived. If GitHub refuses
+// the bot's run (its key expired on 3 Nov 2026, and nobody knew), the owner hears about it once a day (tick).
 const MORNING = [570, 600]                            // the reminder before the open: 9:30–10:00 Cairo
 const SESSION_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu"]
 const SESSION = [630, 869]                            // 10:30–14:00: the live prices every half hour (scan.session_scan_due)
@@ -1382,6 +1387,10 @@ export class Bot {
       headers: { Authorization: `Bearer ${env.GH_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "egx-bot",
                  "X-GitHub-Api-Version": "2022-11-28", "content-type": "application/json" } })
     await store.put("dispatch", { key: due.key, at: now.toISOString(), status: r.status })
+    if (r.status !== 204 && state && state.owner && (await store.get("refused")) !== c.day) {   // once a day
+      await store.put("refused", c.day)
+      await this.send(state.owner, reply(L((state.subs[state.owner] || {}).lang).ghRefused(r.status)))
+    }
     return json({ ok: r.status === 204, status: r.status })
   }
 }

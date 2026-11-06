@@ -92,7 +92,7 @@ export function HeatmapPage() {
   const pick = (setter, key) => v => { setter(v); remember(key, v); };
   return html`
     <${PageHead} title="Heatmap"
-      sub=${t('Every stock that traded at the {date} close, by sector. Bigger tiles are bigger companies; green rose, red fell.', { date: fmt.date(data.breadth && data.breadth.date) })}>
+      sub=${t('Every stock that traded on {date}, by sector. Bigger tiles are bigger companies; green rose, red fell.', { date: fmt.date(data.breadth && data.breadth.date) })}>
       ${data.breadth && html`<${SessionBadge} dataDate=${data.breadth.date} />`}<//>
     <div class="row heat-controls">
       <${Seg} options=${PERIODS} value=${period} onChange=${pick(setPeriod, 'heat-period')} />

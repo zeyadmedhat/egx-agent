@@ -5,7 +5,7 @@ import {
   loadMe, api, toast, setStore, setLang, refreshAll, STATIC, store,
 } from './lib.js';
 import { t, loadArabic } from './i18n.js';
-import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm, Change, Disclaimer } from './ui.js';
+import { Icon, Toasts, JobControl, StockPicker, Field, Callout, Confirm, Change, Disclaimer, BehindBanner } from './ui.js';
 import { AuthScreen } from './pages/login.js';
 import { UnlockScreen } from './pages/unlock.js';
 
@@ -110,7 +110,7 @@ function TopBar({ page, onMenu, menuOpen }) {
 function IndexChip() {
   const m = useStore(s => s.status && s.status.market);
   if (!m || m.egx30_close == null) return null;
-  return html`<a class="index-chip" href="#/egx30" title=${t('Data: {date} close', { date: fmt.date(m.date) })}>
+  return html`<a class="index-chip" href="#/egx30" title=${t('Data: {date}', { date: fmt.date(m.date) })}>
     <span class=${cls('dot', m.risk_off ? 'warn' : 'up')} title=${t(m.risk_off ? 'Weak market' : 'Market OK')}></span>
     <span class="faint">EGX30</span><b class="num">${fmt.int(m.egx30_close)}</b><${Change} value=${m.egx30_change} /></a>`;
 }
@@ -248,7 +248,7 @@ function App() {
           in this browser.</div>`
       : html`<div class="offline"><b>Can't reach the agent.</b> It may have been stopped. Double-click
           “Start Trading Agent.command” in the project folder, then reload this page.</div>`)}
-    <main class="content"><${SubNav} page=${page} /><${Page} route=${route} key=${page + lang} /><${Disclaimer} /></main>
+    <main class="content"><${SubNav} page=${page} /><${BehindBanner} /><${Page} route=${route} key=${page + lang} /><${Disclaimer} /></main>
     <${BottomBar} page=${page} onMenu=${flip} menuOpen=${menu} />
     ${menu && html`<${Menu} onClose=${() => setMenu(false)} />`}
     <${Toasts} />
