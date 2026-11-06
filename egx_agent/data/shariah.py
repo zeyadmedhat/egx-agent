@@ -28,6 +28,7 @@ STATUS_FILTERS = {
 INDEX_FILTERS = {3: "egx30", 4: "egx70", 5: "egx33"}
 REFRESH_DAYS = 7
 MAX_PAGES = 40
+RETRY_WAITS = (5, 20)       # seconds before the 2nd and 3rd try at a page
 
 
 def stock_url(symbol: str) -> str:
@@ -82,10 +83,23 @@ def parse_rows(html: str) -> list[dict]:
     return rows
 
 
+def _get(session: requests.Session, params: dict) -> requests.Response:
+    """One page. A dropped connection or a server error gets two more tries; a refusal (4xx) is left alone."""
+    for wait in RETRY_WAITS:
+        try:
+            r = session.get(BASE, params=params, headers=HEADERS, timeout=30)
+            if r.status_code < 500:
+                return r
+        except (requests.ConnectionError, requests.Timeout):
+            pass
+        time.sleep(wait)
+    return session.get(BASE, params=params, headers=HEADERS, timeout=30)
+
+
 def _fetch_all_pages(session: requests.Session, params: dict, delay: float) -> list[dict]:
     out, seen = [], set()
     for page in range(1, MAX_PAGES + 1):
-        r = session.get(BASE, params={**params, "page": page}, headers=HEADERS, timeout=30)
+        r = _get(session, {**params, "page": page})
         r.raise_for_status()
         rows = parse_rows(r.text)
         new = [row for row in rows if row["symbol"] not in seen]

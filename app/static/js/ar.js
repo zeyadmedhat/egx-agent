@@ -646,6 +646,7 @@ export const AR = {
   "With price history": "لها تاريخ أسعار",
   "Latest price bar": "آخر شمعة سعرية",
   "Kashif checked": "آخر فحص لكاشف",
+  "Kashif couldn't be read, so the site is using its last saved Shariah list.": "تعذّرت قراءة كاشف، لذلك يستخدم الموقع آخر قائمة شرعية محفوظة.",
   "Restore this backup?": "استعادة هذه النسخة الاحتياطية؟",
   "Restore": "استعادة",
   "Only message me on days with something to do": "راسلني فقط في الأيام التي بها شيء مطلوب",

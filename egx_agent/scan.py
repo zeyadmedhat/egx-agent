@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import date, datetime, time, timedelta
 from typing import Callable, Iterable
@@ -143,7 +144,8 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         try:
             shariah.refresh_kashif(conn)
         except Exception as exc:
-            warnings.append(f"Kashif refresh failed, using cached Shariah data ({exc})")
+            logging.getLogger(__name__).warning("Kashif refresh failed: %s", exc)     # the why: the run's log
+            warnings.append("Kashif couldn't be read, so the site is using its last saved Shariah list.")
             failed.append(checked[-1])
     universe.ensure_seeded(conn)
 

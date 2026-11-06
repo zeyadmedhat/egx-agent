@@ -32,6 +32,34 @@ def test_parse_kashif_cards():
     assert rows[1]["purification_pct"] is None
 
 
+def test_kashif_gets_two_more_tries(monkeypatch):
+    """A dropped connection or a 5xx is tried again after a wait; a refusal isn't, and a third failure still raises."""
+    import requests
+
+    class Site:
+        def __init__(self, *answers):
+            self.answers, self.calls = list(answers), 0
+
+        def get(self, *a, **k):
+            self.calls += 1
+            x = self.answers.pop(0)
+            if isinstance(x, Exception):
+                raise x
+            r = requests.Response()
+            r.status_code = x
+            return r
+
+    waits = []
+    monkeypatch.setattr(shariah.time, "sleep", waits.append)
+    drop = requests.ConnectionError("reset")
+    site = Site(drop, 503, 200)
+    assert shariah._get(site, {}).status_code == 200 and site.calls == 3 and waits == list(shariah.RETRY_WAITS)
+    site = Site(403)
+    assert shariah._get(site, {}).status_code == 403 and site.calls == 1
+    with pytest.raises(requests.ConnectionError):
+        shariah._get(Site(drop, drop, drop), {})
+
+
 def test_clean_symbol_strips_rtl_marks():
     assert shariah.clean_symbol("‎RAKT‎") == "RAKT"
     assert shariah.clean_symbol(" comi ") == "COMI"
