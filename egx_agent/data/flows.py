@@ -172,6 +172,7 @@ SPLIT = {(g, k): f"{SERIES[g]}_{k[:3] if k == 'individuals' else k[:4]}" for g i
 SPLIT_TRIES = 3              # new sessions: at most this many back (the day's roundup can come late)
 SPLIT_BACK_PER_RUN = 20      # older sessions filled in each run, newest first, until BACKFILL_DAYS are there
 READY = "15:30"              # Cairo: the day's roundup isn't out before this
+SPLIT_VERSION = "2"          # a newer reader: the last month's days with a group left out are read again, once
 _WHO = re.compile(r"(?<!\w)[وبل]?(?:ال)?(افراد|مؤسسات|مصري\w*|محلي\w*|عرب\w*|اجانب|اجنبي\w*)(?!\w)")
 
 
@@ -185,6 +186,7 @@ def parse_split(text: str) -> dict[str, dict[str, float]] | None:
     """{group: {individuals, institutions}}: net million EGP, or None unless at least four of the six are named and
     they add up to about zero (one left out was about even)."""
     out: dict[tuple, float] = {}
+    twice: list[tuple] = []         # a group named again with the other side: Youm7's slip for the one it left out
     for clause in _CLAUSE.split(_normal(text)):
         sell, buy = "للبيع" in clause, "للشراء" in clause
         head, _, tail = clause.partition("بقيمة")
@@ -204,7 +206,13 @@ def parse_split(text: str) -> dict[str, dict[str, float]] | None:
         if not cells or len(nums) < len(cells):
             continue
         for cell, v in zip(cells, nums):
+            if cell in out and (out[cell] < 0) != sell and (cell, -v if sell else v) not in twice:   # a repeat isn't one
+                twice.append((cell, -v if sell else v))
             out.setdefault(cell, -v if sell else v)
+    left = [(g, k) for g in SERIES for k in KINDS if (g, k) not in out]
+    # 5 Nov 2026: "الأفراد المصريين" bought 2.7M, but Egyptian individuals had sold; the foreign ones were left out
+    if len(twice) == 1 and len(left) == 1 and left[0][1] == twice[0][0][1]:
+        out[left[0]] = twice[0][1]
     if len(out) < 4:
         return None
     if not _even(out):      # one amount in thousands instead of millions (or the like): the one fix that evens it
@@ -249,10 +257,14 @@ def update_split(conn: sqlite3.Connection, session: requests.Session | None = No
     new = [d for d in new if d < today or now.strftime("%H:%M") >= READY]
     back = db.get_meta(conn, "flows_split_back") or (new[0] if new else newest or today)   # the oldest one tried
     older = [d for d in sessions if d < back][::-1][:SPLIT_BACK_PER_RUN]
+    again = []
+    if db.get_meta(conn, "flows_split_v") != SPLIT_VERSION:   # the days the card shows that have a group at exactly 0
+        again = [r["date"] for r in recent_split(conn) if any(v == 0.0 for g in SERIES for v in r[g].values())]
+        again = [d for d in again if d not in new]
     s = session or requests.Session()
     s.headers.update({"User-Agent": UA})
     saved = 0
-    for i, day in enumerate(new + older):
+    for i, day in enumerate(new + again + older):
         if i:
             time.sleep(delay)
         got = fetch_split(date.fromisoformat(day), s)
@@ -264,6 +276,8 @@ def update_split(conn: sqlite3.Connection, session: requests.Session | None = No
         if day in older:
             db.set_meta(conn, "flows_split_back", day)
         conn.commit()
+    db.set_meta(conn, "flows_split_v", SPLIT_VERSION)
+    conn.commit()
     return saved
 
 

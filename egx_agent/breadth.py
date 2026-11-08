@@ -30,7 +30,9 @@ SWITCH_HALF_BELOW = 0.50
 
 def load_closes(conn: sqlite3.Connection, sessions: int = SESSIONS) -> tuple[pd.DataFrame, pd.Series]:
     """Closes as a table (EGX sessions × stocks) and the EGX30 close, for the last `sessions` sessions."""
-    since = (date.today() - timedelta(days=int(sessions * 7 / 5) + 40)).isoformat()
+    last = conn.execute("SELECT MAX(date) FROM prices").fetchone()[0]     # from the data, not today's clock
+    end = date.fromisoformat(last[:10]) if last else date.today()
+    since = (end - timedelta(days=int(sessions * 7 / 5) + 40)).isoformat()
     rows = pd.read_sql_query("SELECT symbol, date, close FROM prices WHERE date >= ?", conn, params=(since,))
     if rows.empty:
         return pd.DataFrame(), pd.Series(dtype=float)

@@ -279,6 +279,14 @@ def test_each_groups_individuals_and_institutions_are_read():
         "تعاملات الافراد المصريين والعرب والاجانب والمؤسسات المصرية للشراء بقيمة 120.8 مليون جنيه، 33.1 مليون جنيه، 1.9 مليون "
         "جنيه، 138.3 مليون جنيه، على الترتيب")
     assert got["foreigners"]["institutions"] == -254.5
+    # 5 Nov 2026: Youm7 wrote "Egyptian individuals" among the buyers too; the 2.7M is the foreign individuals'
+    got = flows.parse_split((
+        "ومالت صافي تعاملات الأفراد والمؤسسات المصرية والعربية للبيع بقيمة 107.8 مليون جنيه، 11.8 مليون جنيه، 85.6 مليون "
+        "جنيه، 17.3 مليون جنيه، على الترتيب فيما مالت تعاملات الأفراد المصريين والمؤسسات الأجنبية للشراء بقيمة 2.7 مليون "
+        "جنيه، 219.9 مليون جنيه، على الترتيب.") * 2)          # the page has the sentence twice
+    assert got == {"egyptians": {"individuals": -107.8, "institutions": -85.6},
+                   "arabs": {"individuals": -11.8, "institutions": -17.3},
+                   "foreigners": {"individuals": 2.7, "institutions": 219.9}}
     assert flows.parse_split("ومالت صافي تعاملات الافراد المصريين والعرب والمؤسسات المصرية والعربية للشراء بقيمة 10 مليون جنيه، "
                              "20 مليون جنيه، 30 مليون جنيه، 40 مليون جنيه") is None
 
@@ -315,6 +323,16 @@ def test_the_split_fills_new_sessions_then_two_years_back_a_little_each_run(tmp_
     assert rows[-1]["foreigners"] == {"individuals": 0.0, "institutions": -100.0}
     assert flows.load(conn).iloc[-1].to_dict() == {"egyptians": 70.0, "arabs": 30.0, "foreigners": -100.0}   # replaces 999
     assert not any("/other/" in u for u in asked)
+    # a newer reader: the days the card shows with a group at exactly 0 are read again, once
+    db.set_meta(conn, "flows_split_v", "1")
+    asked.clear()
+    flows.SPLIT_BACK_PER_RUN, back = 0, flows.SPLIT_BACK_PER_RUN
+    try:
+        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 13
+        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 0       # once
+    finally:
+        flows.SPLIT_BACK_PER_RUN = back
+    assert db.get_meta(conn, "flows_split_v") == flows.SPLIT_VERSION
 
 
 def test_past_rights_issues_are_measured_from_the_close_before_the_ex_date(tmp_path):

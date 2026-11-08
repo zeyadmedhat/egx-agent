@@ -60,6 +60,9 @@ def test_the_live_record_and_the_alert(tmp_path):
     rec = layers.live_record(conn, lambda s: stock if s == "AAA" else None, index)
     assert rec["since"] == str(days[0].date()) and rec["so_far"]["n"] == 1 and rec["so_far"]["beat"] == 1.0
     assert rec["month"]["n"] == 1 and rec["recent"][0]["ret"] > rec["recent"][0]["egx30"]
+    layers.save_day(conn, str(days[-1].date()), [("AAA", 7, 12.0)])   # a pick on the last close: no session yet
+    rec = layers.live_record(conn, lambda s: stock if s == "AAA" else None, index)
+    assert rec["days"] == 1 and rec["so_far"]["n"] == 1 and rec["recent"][0]["sessions"] == 0
     conn.execute("INSERT INTO stocks(symbol, name_ar, sector_ar) VALUES ('AAA', 'أ', 'بنوك')")
     assert "6 of the 7 layers" in alerts.watch_command(conn, "1", "/watch AAA layers")
     assert conn.execute("SELECT kind FROM watch_alerts WHERE chat_id='1'").fetchone()[0] == "layers"

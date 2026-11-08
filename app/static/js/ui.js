@@ -496,16 +496,17 @@ export function WatchStar({ symbol, label }) {
 // shares or a rights issue coming, bad news this week. compact: one chip each.
 const CAUTION_SHORT = { ex_dividend: 'Ex-dividend', bonus: 'Bonus shares', split: 'Split', rights: 'Rights issue',
   bad_news: 'Bad news?', results: 'Results' };
+const cautionText = c => tn(String(c.text).replace(/\b\d{4}-\d{2}-\d{2}\b/g, d => fmt.date(d)));
 export function Cautions({ items, compact }) {
   if (!items || !items.length) return null;
   if (compact) {
-    return html`<span class="cautions">${items.map(c => html`<span class=${cls('caution-chip', c.level)} title=${c.text}>
+    return html`<span class="cautions">${items.map(c => html`<span class=${cls('caution-chip', c.level)} title=${cautionText(c)}>
       <${Icon} name=${c.level === 'warn' ? 'alert' : 'info'} size=${12} />${t(CAUTION_SHORT[c.kind] || c.kind)}${
         c.kind !== 'bad_news' ? ` ${fmt.date(c.date)}` : ''}</span>`)}</span>`;
   }
   return html`<ul class="caution-list">${items.map(c => html`<li class=${c.level}>
     <${Icon} name=${c.level === 'warn' ? 'alert' : 'info'} size=${14} />
-    <span dir="auto">${c.url ? html`<a href=${c.url} target="_blank" rel="noopener noreferrer">${c.text}</a>` : c.text}</span></li>`)}</ul>`;
+    <span dir="auto">${c.url ? html`<a href=${c.url} target="_blank" rel="noopener noreferrer">${cautionText(c)}</a>` : cautionText(c)}</span></li>`)}</ul>`;
 }
 
 // Headlines (data/news.py): date, source, a good/bad dot from keyword rules, the title linking to the article.

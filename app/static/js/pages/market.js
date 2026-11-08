@@ -47,7 +47,7 @@ export function MarketPage() {
     <${PageHead} title="Market" sub=${t('How many stocks rise with the index, from {date}.', { date: fmt.date(b.date) })}>
       <${SessionBadge} dataDate=${b.date} /><//>
     ${data.mood && html`<${Mood} m=${data.mood} />`}
-    ${data.investors && data.investors.length > 0 && html`<${Investors} days=${data.investors} />`}
+    ${data.investors && data.investors.length > 0 && html`<${Investors} days=${data.investors} latest=${b.date} />`}
     <${Callout} tone=${TONE[v.tone]}><b>${t(v.text)}</b>${change != null
       ? ' ' + t(change >= 0 ? '{pct} of {n} stocks are above their 50-day average, up {pts} points in a week.'
         : '{pct} of {n} stocks are above their 50-day average, down {pts} points in a week.',
@@ -209,7 +209,7 @@ const money = v => {
   return `${v > 0.05 ? '+' : v < -0.05 ? '−' : ''}${a >= 1000 ? `${fmt.num(a / 1000, 1)}B` : `${fmt.num(a, a >= 100 ? 0 : 1)}M`}`;
 };
 
-function Investors({ days }) {
+function Investors({ days, latest }) {
   const [n, setN] = useState(1);
   const use = days.slice(-n);
   const sum = (g, k) => use.reduce((a, d) => a + ((d[g] || {})[k] || 0), 0);
@@ -221,9 +221,11 @@ function Investors({ days }) {
   const who = c => t(`${ADJ[c.g]} ${c.k}`);
   const span = use.length === 1 ? fmt.date(use[0].date)
     : t('{from} – {to} · {n} sessions', { from: fmt.date(use[0].date, false), to: fmt.date(use[use.length - 1].date, false), n: use.length });
+  const last = days[days.length - 1].date;
   return html`<section class="card inv">
     <div class="inv-top"><div class="card-title" style="margin:0">${t('Who bought and who sold')}</div>
       <${Seg} options=${SPANS} value=${n} onChange=${setN} /></div>
+    ${latest > last && html`<p class="faint s" style="margin:6px 0 0">${t("{date}'s split isn't out yet; these are the numbers up to {last}.", { date: fmt.date(latest, false), last: fmt.date(last, false) })}</p>`}
     <p class="inv-say">${top.v > 0 && html`<b class="up">${who(top)}</b> ${t('bought the most ({v})', { v: money(top.v) })}`}${top.v > 0 && low.v < 0 ? '; ' : ''}${low.v < 0 && html`<b class="down">${who(low)}</b> ${t('sold the most ({v})', { v: money(low.v) })}`}.</p>
     <div class="inv-axis"><span></span><div><span>${t('Sold')}</span><span>${t('Bought')}</span></div><span></span></div>
     ${rows.map(r => html`<div class="inv-group">

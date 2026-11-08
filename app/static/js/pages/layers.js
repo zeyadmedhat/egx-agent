@@ -32,8 +32,9 @@ export function LayersPage() {
   const columns = [
     { key: 'date', label: 'Day', render: r => fmt.date(r.date, false) },
     { key: 'symbol', label: 'Stock', render: r => html`<a href=${stockHref(r.symbol)}><b>${r.symbol}</b></a> <span class="faint">${r.score}/7</span>` },
-    { key: 'now', label: 'Since then', align: 'r', render: r => html`<span class=${r.now >= 0 ? 'up' : 'down'}>${fmt.pct(r.now, 1)}</span>` },
-    { key: 'egx30_now', label: 'EGX30', align: 'r', render: r => html`<span class="faint">${fmt.pct(r.egx30_now, 1)}</span>` },
+    { key: 'now', label: 'Since then', align: 'r', render: r => r.sessions
+      ? html`<span class=${r.now >= 0 ? 'up' : 'down'}>${fmt.pct(r.now, 1)}</span>` : html`<span class="faint">${t('Today')}</span>` },
+    { key: 'egx30_now', label: 'EGX30', align: 'r', render: r => r.sessions ? html`<span class="faint">${fmt.pct(r.egx30_now, 1)}</span>` : '' },
   ];
   return html`
     <${PageHead} title="7 Layers" sub=${t('Stocks passing 6 or more of the 7 layers today, then the close ones at 5')} />
