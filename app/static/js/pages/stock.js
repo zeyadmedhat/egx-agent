@@ -24,7 +24,8 @@ const INTRADAY_RANGES = {
 const FRAMES = [{ value: '1d', label: '1D' }, { value: '4h', label: '4H' }, { value: '1h', label: '1H' }];
 const VIEWS = [{ value: 'agent', label: 'Agent chart' }, { value: 'live', label: 'Live (TradingView)' }];
 const PANES = [['zones', 'Support & resistance'], ['fib', 'Fibonacci'], ['ema', 'Averages'], ['volume', 'Volume'],
-  ['rsi', 'RSI'], ['macd', 'MACD']];
+  ['rsi', 'RSI'], ['macd', 'MACD'],
+  ['waves', 'Elliott waves'], ['gann', 'Gann'], ['harmonic', 'Harmonic']];
 const PANES_ON = { zones: true, fib: false, ema: true, volume: true, rsi: true, macd: true };
 
 // A rights issue's rights (KORA_r1) open their own view (rights.js); every other symbol the stock's page.

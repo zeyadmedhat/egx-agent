@@ -1,6 +1,6 @@
 // Home → Summary: the day in a few sentences, the orders for the next session and your positions. The market has its
 // own tabs (Market, EGX30) and the BUY signals are on Picks (pages/picks.js), which reads the same /today.
-import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, todayISO, copyText, STATIC } from '../lib.js';
+import { html, useApi, useState, useEffect, api, toast, fmt, tone, stockHref, cls, todayISO, copyText, STATIC, store } from '../lib.js';
 import {
   Icon, Badges, Empty, Callout, PageHead, SectionHead, PageLoading, JobControl, SessionBadge, useQuotes, quoteSymbols, livePosition,
   PositionCard, RightsCard, ownerText,
@@ -94,6 +94,8 @@ function Brief({ data, blocked, alerts }) {
   lines.push(!pos.length ? t('You have no open positions.')
     : alerts ? t('Your positions: {n} need action. See the orders below.', { n: alerts })
       : pos.length === 1 ? t('Your position: nothing to do, it stays on hold.') : t('Your {n} positions: nothing to do, all on hold.', { n: pos.length }));
+  const brk = data.orders && !data.orders.stale && breakAfter(data.orders.session);
+  if (brk) lines.push(t(brk === 'holiday' ? BEFORE_HOLIDAY : BEFORE_WEEKEND, { day: dayLabel(data.orders.session) }));
   for (const p of pos) {
     for (const c of p.cautions || []) {
       if (c.kind === 'results') lines.push(t('{sym}: results expected around {date}.', { sym: p.symbol, date: fmt.date(c.date, false) }));
@@ -125,11 +127,30 @@ ${' '}· ${t('Total')} <b class=${tone(total)}>${fmt.signed(total)} ${t('EGP')}<
 // ------------------------------------------------------------------ orders for the next session
 const KIND = { adjust: 'UPDATE', sell: 'SELL', stop: 'STOP', review: 'REVIEW', buy: 'BUY' };
 
+// The last session before a break: a Thursday (the weekend follows) or the day before a public holiday. Tested on
+// EGX30 since 2016 (10 Nov 2026): these days rose more often than others, by about what a buy and a sell cost in fees.
+const BEFORE_HOLIDAY = '{day} is the last session before a holiday. Since 2016 EGX30 rose on 63% of these days (53% of other days), +0.4% on average: about what a buy and a sell cost in fees. A fact about timing, not a trade.';
+const BEFORE_WEEKEND = '{day} is the last session before the weekend. Since 2016 EGX30 rose on 60% of Thursdays (52% of other days), +0.2% on average: less than a buy and a sell cost in fees. A fact about timing, not a trade.';
+
+export function breakAfter(day, holidays = (store.status && store.status.holidays) || {}) {
+  const d = new Date(day + 'T12:00:00Z');
+  for (let k = 1; k < 20; k++) {
+    const x = new Date(d.getTime() + k * 864e5);
+    if (x.getUTCDay() === 5 || x.getUTCDay() === 6) continue;
+    if (holidays[x.toISOString().slice(0, 10)]) return 'holiday';
+    return d.getUTCDay() === 4 ? 'weekend' : null;
+  }
+  return null;
+}
+
+const dayLabel = day => new Date(day + 'T00:00:00').toLocaleDateString(isAr() ? 'ar-EG-u-nu-latn' : 'en-GB',
+  { weekday: 'long', day: 'numeric', month: 'short' });
+
 function sessionName(day) {
   const d = new Date(day + 'T00:00:00');
   const tomorrow = new Date(todayISO() + 'T00:00:00');
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const label = d.toLocaleDateString(isAr() ? 'ar-EG-u-nu-latn' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+  const label = dayLabel(day);
   if (day === todayISO()) return t('today, {day}', { day: label });
   if (d.getTime() === tomorrow.getTime()) return t('tomorrow, {day}', { day: label });
   return label;

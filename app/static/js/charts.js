@@ -1,6 +1,7 @@
 // Charts drawn with TradingView's Lightweight Charts (vendored in /static/vendor).
-import { html, useEffect, useRef, useStore, cssVar, fmt } from './lib.js';
+import { html, useEffect, useMemo, useRef, useStore, cssVar, fmt } from './lib.js';
 import { t as tr } from './i18n.js';
+import { drawings } from './drawings.js';
 
 const LWC = window.LightweightCharts;
 
@@ -70,6 +71,50 @@ class Bands {
   }
 }
 
+// Lines, shaded triangles and labels placed by bar number and price, over the candles: Elliott waves, the Gann fan,
+// harmonic patterns (drawings.js). Lines may run past the last bar (the Gann fan goes on into the future).
+class Overlay {
+  constructor(d, t) { this.d = d; this.t = t; this.chart = null; this.series = null; }
+  attached({ chart, series }) { this.chart = chart; this.series = series; }
+  detached() { this.chart = this.series = null; }
+  updateAllViews() {}
+  paneViews() {
+    const self = this;
+    const draw = target => target.useMediaCoordinateSpace(({ context: ctx }) => {
+      if (!self.series) return;
+      const ts = self.chart.timeScale();
+      const xy = ([i, p]) => [ts.logicalToCoordinate(i), self.series.priceToCoordinate(p)];
+      const ok = ([x, y]) => x != null && y != null;
+      const col = c => self.t[c] || c;
+      for (const s of self.d.shapes) {
+        const pts = s.pts.map(xy);
+        if (!pts.every(ok)) continue;
+        ctx.beginPath(); pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath();
+        ctx.fillStyle = alpha(col(s.color), 0.12); ctx.fill();
+      }
+      ctx.font = `600 11px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (const l of self.d.lines) {
+        const a = xy(l.a), b = xy(l.b);
+        if (!ok(a) || !ok(b)) continue;
+        ctx.strokeStyle = col(l.color); ctx.lineWidth = 1.4; ctx.setLineDash(l.dash ? [5, 4] : []);
+        ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+        const lp = l.label && xy(l.labelAt || l.b);
+        if (lp && ok(lp)) { ctx.fillStyle = col(l.color); ctx.textAlign = 'right'; ctx.fillText(l.label, lp[0] - 4, lp[1] - 8); ctx.textAlign = 'center'; }
+      }
+      ctx.setLineDash([]);
+      for (const l of self.d.labels) {
+        const [x, y] = xy(l.at);
+        if (x == null || y == null) continue;
+        const cy = y + (l.up ? -14 : 14);
+        ctx.fillStyle = col(l.color); ctx.beginPath(); ctx.arc(x, cy, 9, 0, 2 * Math.PI); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillText(l.text, x, cy + 0.5);
+      }
+    });
+    return [{ zOrder: () => 'top', renderer: () => ({ draw }) }];
+  }
+}
+
 // A bar's time for the legend: a date for daily bars, a date and the hour for the 1-hour and 4-hour charts (their
 // times are Cairo's clock written as UTC seconds).
 function barTime(time) {
@@ -86,6 +131,8 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show, 
   const legend = useRef();
   const chartRef = useRef();
   const theme = useStore(s => s.theme);
+  const lang = useStore(s => s.lang);
+  const draw = useMemo(() => drawings(series, show, { t: tr, day: i => barTime(series.time[i]), price: fmt.price, pct: x => fmt.pct(x, 1) }), [series, show.waves, show.gann, show.harmonic, lang]);
 
   useEffect(() => {
     const t = palette();
@@ -133,6 +180,7 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show, 
         axisLabelVisible: true, title: `Fib ${(f.r * 100).toFixed(1)}%`,
       });
     }
+    if (draw.lines.length || draw.labels.length) candles.attachPrimitive(new Overlay(draw, t));
     if (fills.length && !intraday) {
       LWC.createSeriesMarkers(candles, [...fills].sort((a, b) => (a.date < b.date ? -1 : 1)).map(f => ({
         time: f.date, position: f.side === 'buy' ? 'belowBar' : 'aboveBar', color: f.side === 'buy' ? t.up : t.down,
@@ -192,12 +240,43 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show, 
     chart.subscribeCrosshairMove(p => writeLegend(p.logical == null ? n - 1 : Math.round(p.logical)));
     showRange(chart, n, bars);
     return () => { chart.remove(); chartRef.current = null; };
-  }, [series, levels, fills, plan, show.ema, show.volume, show.rsi, show.macd, show.zones, show.fib, theme]);
+  }, [series, levels, fills, plan, show.ema, show.volume, show.rsi, show.macd, show.zones, show.fib, draw, theme]);
 
   useEffect(() => { if (chartRef.current) showRange(chartRef.current, series.time.length, bars); }, [bars]);
 
   return html`<div class="chart-box"><div class="chart-legend" ref=${legend}></div>
-    <div ref=${box} style="position:absolute;inset:0"></div></div>`;
+    <div ref=${box} style="position:absolute;inset:0"></div></div>
+    ${draw.notes.length > 0 && html`<details class="chart-note"><summary style="cursor:pointer">${tr('What these drawings say (a drawing, not a signal)')}</summary>
+      ${draw.notes.map(x => html`<p style="margin:8px 0 0">${x}</p>`)}
+      <p class="faint" style="margin:8px 0 0">${tr('Drawn by the computer from this chart. Tested on 10 years of EGX: none of these beat chance. A drawing, not a signal.')}</p>
+      <${HowToRead} show=${show} /></details>`}`;
+}
+
+// "How to read these": a small picture and two sentences for each drawing that's on.
+const PICS = {
+  waves: ['Elliott waves', 'M4 52 L22 34 L30 42 L52 14 L62 26 L80 6 L92 22 L100 14 L116 34',
+    [[22, 34, '1'], [30, 42, '2'], [52, 14, '3'], [62, 26, '4'], [80, 6, '5'], [92, 22, 'A'], [100, 14, 'B'], [116, 34, 'C']],
+    'The theory: a price moves in 5 steps (1, 3 and 5 go with the move, 2 and 4 are small pullbacks), then pulls back in 3 (A, B, C).',
+    'The numbers on the chart mark these steps. People often count the same chart differently.'],
+  gann: ['Gann', 'M6 54 L40 4 M6 54 L76 4 M6 54 L116 18 M6 54 L116 36 M6 54 L116 46',
+    [[110, 14, '1×1']],
+    'Lines fan out from a big low (or high) at set slopes. The solid one, 1×1, is the main line.',
+    'Price above the 1×1 line: the rise is on pace. Below it: the rise has slowed.'],
+  harmonic: ['Harmonic', 'M6 50 L34 10 L54 34 L74 18 L108 52',
+    [[6, 50, 'X'], [34, 10, 'A'], [54, 34, 'B'], [74, 18, 'C'], [108, 52, 'D']],
+    'Five turning points, X, A, B, C, D, whose sizes match set ratios (named Gartley, Bat, Butterfly, Crab).',
+    'Green: the theory expects a rise from D. Red: a fall from D. The note says what really happened.'],
+};
+function HowToRead({ show }) {
+  const keys = Object.keys(PICS).filter(k => show[k]);
+  return html`<details style="margin-top:8px"><summary style="cursor:pointer">${tr('How to read these')}</summary>
+    ${keys.map(k => { const [title, d, marks, a, b] = PICS[k]; return html`<div style="display:flex;gap:12px;align-items:center;margin-top:10px">
+      <svg viewBox="0 0 122 60" width="122" height="60" style="flex:none;color:var(${k === 'gann' ? '--warn' : k === 'waves' ? '--violet' : '--up'})" aria-hidden="true">
+        <path d=${d} fill="none" stroke="currentColor" stroke-width="2" />
+        ${marks.map(([x, y, s]) => html`<text x=${x} y=${y < 30 ? y + 12 : y - 4} font-size="9" font-weight="700" fill="currentColor" text-anchor="middle">${s}</text>`)}
+      </svg>
+      <div><b>${tr(title)}</b><br />${tr(a)} ${tr(b)}</div></div>`; })}
+  </details>`;
 }
 
 // ------------------------------------------------------------------ line comparison (equity vs EGX30, drawdown)

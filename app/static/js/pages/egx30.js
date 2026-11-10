@@ -10,7 +10,8 @@ const RANGES = [
   { value: 1250, label: '5Y' }, { value: 100000, label: 'All' },
 ];
 const VIEWS = [{ value: 'agent', label: 'Agent chart' }, { value: 'live', label: 'Live (TradingView)' }];
-const PANES = [['zones', 'Support & resistance'], ['fib', 'Fibonacci'], ['ema', 'Averages'], ['volume', 'Volume'], ['rsi', 'RSI'], ['macd', 'MACD']];
+const PANES = [['zones', 'Support & resistance'], ['fib', 'Fibonacci'], ['ema', 'Averages'], ['volume', 'Volume'], ['rsi', 'RSI'], ['macd', 'MACD'],
+  ['waves', 'Elliott waves'], ['gann', 'Gann'], ['harmonic', 'Harmonic']];
 const PERIOD = { '1W': '1 week', '1M': '1 month', '3M': '3 months', '6M': '6 months', YTD: 'This year', '1Y': '1 year',
   '3Y': '3 years', '5Y': '5 years' };
 const pct = v => (v == null ? html`<span class="faint">–</span>` : html`<b class=${tone(v)}>${fmt.pct(v, 1)}</b>`);
