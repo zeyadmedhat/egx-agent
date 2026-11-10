@@ -143,7 +143,12 @@ export function drawings(series, show, f = {}) {
   }
 
   if (show.harmonic) {
-    const h = harmonic(piv);
+    // Harmonic patterns are rare at the chart's swing size (5% of stocks had one in the past year), so smaller swings
+    // count too: the latest pattern at a third, half or the full size.
+    const base = swingSize(high, low, close);
+    const h = [base / 3, base / 2, base].map(p => harmonic(p === base ? piv : zigzag(high, low, Math.max(0.03, p))))
+      .filter(Boolean).sort((a, b) => b.points[4].i - a.points[4].i)[0];
+    out.harmonic = h ? { from: h.points[0].i, to: h.points[4].i, date: day(h.points[0].i) } : null;
     if (h) {
       const [X, A, B, C, D] = h.points;
       const color = h.bullish ? 'up' : 'down';

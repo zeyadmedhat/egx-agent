@@ -228,3 +228,14 @@ def test_the_macs_orders_come_from_the_portfolio_kept_on_the_site(tmp_path, monk
     assert alerts.bot_positions(d, cfg) is None
     text, _ = alerts.build_message(d, [])        # sold everything on the site: no orders for old positions
     assert "Sell all" not in text
+
+
+def test_break_line_on_the_last_session_before_a_break(monkeypatch):
+    from egx_agent import holidays
+    monkeypatch.setattr(holidays, "HOLIDAYS", {"2026-11-12": "test"})
+    holidays._offset.cache_clear()
+    assert "before the weekend" in alerts.break_line("2026-11-05")       # a Thursday
+    assert "before a holiday" in alerts.break_line("2026-11-11")         # Wednesday, Thursday off
+    assert "عطلة رسمية" in alerts.break_line("2026-11-11", "ar")
+    assert alerts.break_line("2026-11-10") is None                       # an ordinary Tuesday
+    holidays._offset.cache_clear()

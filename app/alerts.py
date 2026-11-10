@@ -514,16 +514,36 @@ def personal_part(d: views.Data, positions: list[dict], lang: str = "en") -> tup
     return lines, bool(items)
 
 
+def break_line(day: str, lang: str = "en") -> str | None:
+    """On the last session before a break (a Thursday, or the day before a holiday), the same fact as Home's line
+    (pages/today.js): tested on EGX30 since 2016 (10 Nov 2026), these days rose more often, by about a round trip's fees."""
+    d = date.fromisoformat(day)
+    gap = (date.fromisoformat(holidays.sessions_after(day, 1)) - d).days
+    if gap > (3 if d.weekday() == 3 else 1):
+        return ("📅 اليوم آخر جلسة قبل عطلة رسمية. منذ 2016 ارتفع EGX30 في 63% من هذه الأيام (53% في الأيام الأخرى)، "
+                "بمتوسط +0.4%: تقريبًا ما تكلّفه عمولات شراء وبيع. معلومة عن التوقيت، وليست صفقة." if lang == "ar" else
+                "📅 Today is the last session before a holiday. Since 2016 EGX30 rose on 63% of these days (53% of other "
+                "days), +0.4% on average: about what a buy and a sell cost in fees. A fact about timing, not a trade.")
+    if d.weekday() == 3:
+        return ("📅 اليوم آخر جلسة قبل عطلة نهاية الأسبوع. منذ 2016 ارتفع EGX30 في 60% من أيام الخميس (52% في الأيام "
+                "الأخرى)، بمتوسط +0.2%: أقل مما تكلّفه عمولات شراء وبيع. معلومة عن التوقيت، وليست صفقة." if lang == "ar" else
+                "📅 Today is the last session before the weekend. Since 2016 EGX30 rose on 60% of Thursdays (52% of other "
+                "days), +0.2% on average: less than a buy and a sell cost in fees. A fact about timing, not a trade.")
+    return None
+
+
 def morning_message(d: views.Data, positions: list[dict], lang: str = "en") -> str | None:
-    """The reminder the Worker sends at 9:30 Cairo, before the session the last close's orders are for: only what
-    to do at the open (a linked friend's own orders, then the BUY signals), or None when there's nothing to do."""
+    """The reminder the Worker sends at 9:30 Cairo, before the session the last close's orders are for: what to do at
+    the open (a linked friend's own orders, then the BUY signals) and, before a break, break_line; None when there's
+    nothing of either."""
     scan_date, df = views.current_scan(d.conn)
     if not scan_date:
         return None
     o = views.orders(d, positions) if positions else None
     items = _order_items(o, positions, lang) if o else []
     buys = sorted((r for r in views.records(df) if r["action"] == "BUY"), key=views.signal_order)
-    if not items and not buys:
+    brk = break_line(views.sessions_after(scan_date, 1), lang)
+    if not items and not buys and not brk:
         return None
     ar = lang == "ar"
     lines = [f"☀️ <b>{'قبل الافتتاح' if ar else 'Before the open'}</b> · "
@@ -533,6 +553,8 @@ def morning_message(d: views.Data, positions: list[dict], lang: str = "en") -> s
         lines += [""] + [f"{ICON[kind]} {title}" for kind, title, _ in items]
     for r in buys:
         lines += ["", _buy_line(r, lang)]
+    if brk:
+        lines += ["", brk]
     foot = ("عدد الأسهم لكل صفقة على الموقع. " if ar else "Your share counts are on the site. ") if buys else ""
     lines += ["", f"<i>{foot}{'/morning off يوقف هذا التذكير.' if ar else '/morning off stops this reminder.'}</i>"]
     text = "\n".join(lines)

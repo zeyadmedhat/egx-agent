@@ -243,9 +243,14 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show, 
   }, [series, levels, fills, plan, show.ema, show.volume, show.rsi, show.macd, show.zones, show.fib, draw, theme]);
 
   useEffect(() => { if (chartRef.current) showRange(chartRef.current, series.time.length, bars); }, [bars]);
+  // The harmonic pattern can be older than the view: a button moves the chart to it.
+  const hp = show.harmonic && draw.harmonic, hidden = hp && hp.from < series.time.length - bars;
+  const toPattern = () => chartRef.current && chartRef.current.timeScale().setVisibleLogicalRange({ from: hp.from - 20, to: hp.to + 40 });
 
   return html`<div class="chart-box"><div class="chart-legend" ref=${legend}></div>
-    <div ref=${box} style="position:absolute;inset:0"></div></div>
+    <div ref=${box} style="position:absolute;inset:0"></div>
+    ${show.harmonic && (hidden ? html`<button class="btn sm chart-flag" onClick=${toPattern}>${tr('Harmonic pattern from {date}: show it', { date: hp.date })}</button>`
+      : !hp && html`<span class="chart-flag faint">${tr('No harmonic pattern on this chart.')}</span>`)}</div>
     ${draw.notes.length > 0 && html`<details class="chart-note"><summary style="cursor:pointer">${tr('What these drawings say (a drawing, not a signal)')}</summary>
       ${draw.notes.map(x => html`<p style="margin:8px 0 0">${x}</p>`)}
       <p class="faint" style="margin:8px 0 0">${tr('Drawn by the computer from this chart. Tested on 10 years of EGX: none of these beat chance. A drawing, not a signal.')}</p>

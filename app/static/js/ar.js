@@ -2189,4 +2189,6 @@ export const AR = {
   "Five turning points, X, A, B, C, D, whose sizes match set ratios (named Gartley, Bat, Butterfly, Crab).": "خمس نقاط تحوّل، X وA وB وC وD، تطابق أحجامها نسبًا محددة (بأسماء جارتلي والخفاش والفراشة والسلطعون).",
   "Green: the theory expects a rise from D. Red: a fall from D. The note says what really happened.": "الأخضر: تتوقع النظرية صعودًا من D. الأحمر: هبوطًا من D. والملاحظة تقول ما حدث فعلًا.",
   "What these drawings say (a drawing, not a signal)": "ماذا تقول هذه الرسوم (رسم، وليس إشارة)",
+  "Harmonic pattern from {date}: show it": "نمط توافقي من {date}: اعرضه",
+  "No harmonic pattern on this chart.": "لا يوجد نمط توافقي على هذا الرسم.",
 };
