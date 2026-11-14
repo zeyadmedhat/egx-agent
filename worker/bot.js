@@ -1055,7 +1055,7 @@ const COMMANDS = {
        ["weekly", "ملخص الخميس تشغيل أو إيقاف"], ["lang", "English / العربية"], ["link", "اربط محفظتك على الموقع"],
        ["unlink", "فك الربط"], ["help", "ما يمكنني فعله"], ["stop", "أوقف كل الرسائل"]],
 }
-const COMMANDS_VERSION = "2026-10-04"
+const COMMANDS_VERSION = "2026-11-14"
 
 // One Durable Object holds the data, so messages are handled one at a time, in order.
 // The website's bells (Picks): /watch SYMBOL or /unwatch SYMBOL buy from a linked browser, kept in order here until
