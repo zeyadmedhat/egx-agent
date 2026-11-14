@@ -53,7 +53,7 @@ function Market({ s }) {
       : '{b} left falling stocks. Only {a} went into rising ones.', {
       a: html`<b class="up">${egp(s.in)}</b>`, b: html`<b class="down">${egp(s.out)}</b>` })}</p>
     <div class="flow-split"><span class="up" style=${`width:${(s.in / total) * 100}%`}></span><span class="down" style=${`width:${(s.out / total) * 100}%`}></span></div>
-    <div class="flow-split-l"><span>${t('In')} ${fmt.pct(s.in / total, 0, false)}</span><span>${t('Out')} ${fmt.pct(s.out / total, 0, false)}</span></div>
+    <div class="flow-split-l"><span>${t('Money in')} ${fmt.pct(s.in / total, 0, false)}</span><span>${t('Money out')} ${fmt.pct(s.out / total, 0, false)}</span></div>
     <div class="flow-kpis">
       <div><span class="faint">${t('Traded')}</span><b>${egp(s.value)}</b><span class=${s.vs >= 1.25 ? 'up' : s.vs <= 0.8 ? 'down' : 'faint'}>${times(s.vs)}</span></div>
       <div><span class="faint">${t('Net')}</span><b class=${tone(s.net)}>${signed(s.net)}</b><span class="faint">${t('in minus out')}</span></div>
@@ -227,7 +227,7 @@ function Live({ sectors, usual }) {
       a: html`<b class="up">${egp(s.in)}</b>`, b: html`<b class="down">${egp(s.out)}</b>` })}${usual ? html`. ${tp(open ? 'So far {p} of a usual day\'s money' : '{p} of a usual day\'s money', {
       p: html`<b>${fmt.pct(s.value / usual, 0, false)}</b>` })}` : ''}.</p>
     <div class="flow-split"><span class="up" style=${`width:${(s.in / total) * 100}%`}></span><span class="down" style=${`width:${(s.out / total) * 100}%`}></span></div>
-    <div class="flow-split-l"><span>${t('In')} ${fmt.pct(s.in / total, 0, false)}</span><span>${t('Out')} ${fmt.pct(s.out / total, 0, false)}</span></div>
+    <div class="flow-split-l"><span>${t('Money in')} ${fmt.pct(s.in / total, 0, false)}</span><span>${t('Money out')} ${fmt.pct(s.out / total, 0, false)}</span></div>
     <${Sectors} rows=${secs} title="By sector" bare />
     <div class="flow-lists">
       <${LiveTop} title="Most money in" rows=${ins} />
