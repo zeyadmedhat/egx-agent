@@ -961,6 +961,24 @@ export async function quotes(url, get = fetch, feed = tvFeed) {
   return json(out)
 }
 
+// GET /flow: every EGX stock's session so far, for the Money flow page's live part: {at, rows: [[symbol, price,
+// change, traded EGP, volume against its 10-day average]]}. One screener call for the whole market, kept a minute.
+let FLOW = null
+export async function flow(get = fetch) {
+  if (FLOW && Date.now() - FLOW.at < 60000) return json(FLOW)
+  const back = Object.fromEntries(Object.entries(TV_ALIASES).map(([k, v]) => [v, k]))
+  const r = await get("https://scanner.tradingview.com/egypt/scan", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ columns: ["name", "close", "change", "Value.Traded", "relative_volume_10d_calc"], range: [0, 400] }) }).catch(() => null)
+  if (!r || !r.ok) return json({}, 502)
+  const rows = []
+  for (const row of ((await r.json().catch(() => ({}))).data || [])) {
+    const [name, price, change, value, rel] = row.d || []
+    if (name && price > 0) rows.push([back[name] || name, price, change == null ? null : change / 100, value || 0, rel ?? null])
+  }
+  FLOW = { at: Date.now(), rows }
+  return json(FLOW)
+}
+
 // Prices from TradingView's own data feed (its charts' websocket, the same ~15 minutes late), for what its screener
 // leaves out: rights (EGX:KORAR1, type "right"). {SYM: {price, change}}; whatever came within 4 seconds.
 async function tvFeed(syms) {
@@ -1399,6 +1417,7 @@ export default {
   fetch(req, env) {
     const url = new URL(req.url)
     if (url.pathname === "/quotes" && req.method === "GET") return quotes(url)
+    if (url.pathname === "/flow" && req.method === "GET") return flow()
     return env.BOT.get(env.BOT.idFromName("bot")).fetch(req)
   },
   // Every 10 minutes (wrangler.toml): only the morning (the reminder at 9:30 Cairo, UTC+2 or +3), the session (a scan

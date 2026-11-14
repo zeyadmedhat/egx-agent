@@ -74,7 +74,7 @@ export function PaperPage() {
 
   return html`
     <${PageHead} title="Practice account"
-      sub=${`A virtual ${fmt.egp(data.paper_capital)} account. After every scan the agent buys each BUY signal at the next open (skipping gaps above Buy up to) and sells by the same exit rules you get.`} />
+      sub=${`A virtual ${fmt.egp(data.paper_capital)} account. After every scan, it buys each BUY signal at the next open. It skips gaps above Buy up to. It sells by the same exit rules you get.`} />
     ${!data.auto_paper && html`<div style="margin-bottom:14px"><${Callout} tone="warn">Automatic paper trading is off.
       <a href="#/settings">Turn it on in Settings.</a><//></div>`}
     <div class="kpis">

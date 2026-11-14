@@ -29,7 +29,7 @@ export function MarketPage() {
   const b = data.breadth;
   if (!b) {
     return html`<${PageHead} title="Market" /><div class="card"><${Empty} icon="bars" title="No price data yet"
-      text="Run a scan first. The breadth numbers are calculated from every stock's price history." /></div>`;
+      text="Run a scan first. These numbers come from every stock's prices." /></div>`;
   }
   const v = data.verdict;
   const change = v.change_week;
@@ -49,8 +49,8 @@ export function MarketPage() {
     ${data.mood && html`<${Mood} m=${data.mood} />`}
     ${data.investors && data.investors.length > 0 && html`<${Investors} days=${data.investors} latest=${b.date} />`}
     <${Callout} tone=${TONE[v.tone]}><b>${t(v.text)}</b>${change != null
-      ? ' ' + t(change >= 0 ? '{pct} of {n} stocks are above their 50-day average, up {pts} points in a week.'
-        : '{pct} of {n} stocks are above their 50-day average, down {pts} points in a week.',
+      ? ' ' + t(change >= 0 ? '{pct} of {n} stocks are above their 50-day average. Up {pts} points in a week.'
+        : '{pct} of {n} stocks are above their 50-day average. Down {pts} points in a week.',
       { pct: fmt.pct(b.above50, 0, false), n: b.stocks, pts: fmt.int(Math.abs(change * 100)) })
       : ''}<//>
     ${v.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${v.switch} compact /></div>`}
@@ -68,7 +68,7 @@ export function MarketPage() {
 
     <section class="section">
       <${SectionHead} title="Sectors" count=${b.sectors.length}
-        hint="Median return of the sector's stocks. Sectors with one or two stocks move with those names alone." />
+        hint="The middle return of the sector's stocks. A sector of one or two stocks moves with those names." />
       <${SectorBars} rows=${b.sectors} />
       ${data.sector_money && data.sector_money.length > 0 && html`<${SectorMoney} rows=${data.sector_money} />`}
       <${Fold} title="Every sector in a table" hint="How many of its stocks are above their 50-day average, and its strongest names." flush>
@@ -120,7 +120,7 @@ function SectorMoney({ rows }) {
   return html`<div class="card inv sec sec-money">
     <div class="card-title" style="margin:0">${t('Where the money went')}</div>
     <p class="inv-say">${tp('Most money went to {a} ({x} of the day)', { a: sector(rows[0]), x: fmt.pct(rows[0].share, 0, false) })}${
-      jump && VS_USUAL(jump) === 'up' ? html`; ${tp('{a} got far more than usual ({x}, against {y})', {
+      jump && VS_USUAL(jump) === 'up' ? html`. ${tp('{a} got far more than usual ({x}, against {y})', {
         a: sector(jump), x: fmt.pct(jump.share, 0, false), y: fmt.pct(jump.usual, 0, false) })}` : ''}.</p>
     ${(all ? rows : rows.slice(0, SECTORS_SHOWN)).map(r => html`<div class="inv-row"><span title=${tn(r.sector)}>${tn(r.sector)}</span>
       <div class="inv-track"><span class="inv-bar info" style=${`inset-inline-start:0;width:${(r.share / max) * 100}%`}></span>
@@ -128,7 +128,7 @@ function SectorMoney({ rows }) {
       <b class=${`inv-v ${VS_USUAL(r)}`}>${fmt.pct(r.share, 0, false)}${VS_USUAL(r) ? (VS_USUAL(r) === 'up' ? ' ▲' : ' ▼') : ''}</b></div>`)}
     ${rows.length > SECTORS_SHOWN && html`<button class="btn sm ghost" style="margin-top:8px" onClick=${() => setAll(x => !x)}>
       ${all ? t('Show fewer') : t('Show all {n}', { n: rows.length })}</button>`}
-    <p class="faint inv-note">${t("Bar: the sector's share of the money traded at the last close. Line: its usual share, over the 20 sessions before. ▲ well above usual, ▼ well below. A single big deal counts too.")}</p>
+    <p class="faint inv-note">${t("Bar: the sector's share of the last session's money. Line: its usual share (20 sessions before). ▲ far above usual. ▼ far below. One big deal can move it.")}</p>
   </div>`;
 }
 
@@ -148,7 +148,7 @@ function Movers({ data }) {
   return html`
     <section class="section">
       <${SectionHead} title="Biggest movers"
-        hint="Among actively traded stocks (enough daily trading for the BUY rules). A stock that jumped more than 30% in one day is left out: that's a split or bonus shares the prices don't reflect yet.">
+        hint="Only actively traded stocks. A jump over 30% in one day is left out. That's a split or bonus shares, not a real move.">
         <${Seg} options=${PERIODS} value=${period} onChange=${setPeriod} /><//>
       <div class="grid grid-2">
         <div class="card"><div class="card-title up">${t('Rose most')}</div>${list(m.up)}</div>
@@ -190,8 +190,8 @@ function Mood({ m }) {
       ${p.score == null ? html`<span class="faint">–</span>` : html`<div class="gauge"><b class="gauge-v">${Math.round(p.score)}</b>
         <div class=${`bar ${MOOD_TONE(p.score)}`}><span style=${`width:${p.score}%`}></span></div></div>`}</div>`)}</div>
     <${More} label="How it's made, and what it told in the past">
-      <p>${t("Built like CNN's Fear & Greed Index. Each measure scores 0–100 by where today's value sits among the last two years', and the mood is their average. CNN's options and junk-bond measures don't exist on EGX; small companies against EGX30 stand in for the appetite for risk. The seventh, foreign and Arab investors' net buying, is EGX's own.")}</p>
-      <p>${t("Tested since {date}: it didn't tell where EGX30 went next. The differences below are small and changed from one period to another, so use it to know the mood, not to time a buy or a sale.", { date: fmt.date(m.since) })}</p>
+      <p>${t("Built like CNN's Fear & Greed Index. Each measure gets a score from 0 to 100. The score compares today with the last two years. The mood is the average. EGX has no options or junk bonds. So small companies against EGX30 show the appetite for risk. The seventh measure is EGX's own: foreign and Arab net buying.")}</p>
+      <p>${t("Tested since {date}. It didn't predict where EGX30 went next. The differences below are small and not steady. Use it to read the mood, not to time a trade.", { date: fmt.date(m.since) })}</p>
       <${DataTable} columns=${past} rows=${m.past} rowKey=${r => r.label} /><//>
   </div>`;
 }
@@ -209,7 +209,7 @@ const money = v => {
   return `${v > 0.05 ? '+' : v < -0.05 ? '−' : ''}${a >= 1000 ? `${fmt.num(a / 1000, 1)}B` : `${fmt.num(a, a >= 100 ? 0 : 1)}M`}`;
 };
 
-function Investors({ days, latest }) {
+export function Investors({ days, latest }) {
   const [n, setN] = useState(1);
   const use = days.slice(-n);
   const sum = (g, k) => use.reduce((a, d) => a + ((d[g] || {})[k] || 0), 0);
@@ -225,7 +225,7 @@ function Investors({ days, latest }) {
   return html`<section class="card inv">
     <div class="inv-top"><div class="card-title" style="margin:0">${t('Who bought and who sold')}</div>
       <${Seg} options=${SPANS} value=${n} onChange=${setN} /></div>
-    ${latest > last && html`<p class="faint s" style="margin:6px 0 0">${t("{date}'s split isn't out yet; these are the numbers up to {last}.", { date: fmt.date(latest, false), last: fmt.date(last, false) })}</p>`}
+    ${latest > last && html`<p class="faint s" style="margin:6px 0 0">${t("{date}'s numbers aren't out yet. These go up to {last}.", { date: fmt.date(latest, false), last: fmt.date(last, false) })}</p>`}
     <p class="inv-say">${top.v > 0 && html`<b class="up">${who(top)}</b> ${t('bought the most ({v})', { v: money(top.v) })}`}${top.v > 0 && low.v < 0 ? '; ' : ''}${low.v < 0 && html`<b class="down">${who(low)}</b> ${t('sold the most ({v})', { v: money(low.v) })}`}.</p>
     <div class="inv-axis"><span></span><div><span>${t('Sold')}</span><span>${t('Bought')}</span></div><span></span></div>
     ${rows.map(r => html`<div class="inv-group">
@@ -234,7 +234,7 @@ function Investors({ days, latest }) {
         <div class="inv-track"><span class=${`inv-bar ${c.v >= 0 ? 'up' : 'down'}`}
           style=${`${c.v >= 0 ? 'inset-inline-start' : 'inset-inline-end'}:50%;width:${(Math.abs(c.v) / max) * 50}%`}></span></div>
         <b class="inv-v">${money(c.v)}</b></div>`)}</div>`)}
-    <p class="faint inv-note">${span}. ${t("Net buying (+) or selling (−) in pounds. From the exchange's daily statement, as Youm7 reports it.")}
+    <p class="faint inv-note">${span}. ${t("Net buying (+) or selling (−), in pounds. From the exchange's daily report, via Youm7.")}
       ${use.length < n ? ' ' + t('Only {k} sessions have these numbers so far.', { k: use.length }) : ''}</p>
   </section>`;
 }

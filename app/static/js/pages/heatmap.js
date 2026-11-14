@@ -92,7 +92,7 @@ export function HeatmapPage() {
   const pick = (setter, key) => v => { setter(v); remember(key, v); };
   return html`
     <${PageHead} title="Heatmap"
-      sub=${t('Every stock that traded on {date}, by sector. Bigger tiles are bigger companies; green rose, red fell.', { date: fmt.date(data.breadth && data.breadth.date) })}>
+      sub=${t('Every stock that traded on {date}, by sector. Bigger tile, bigger company. Green rose, red fell.', { date: fmt.date(data.breadth && data.breadth.date) })}>
       ${data.breadth && html`<${SessionBadge} dataDate=${data.breadth.date} />`}<//>
     <div class="row heat-controls">
       <${Seg} options=${PERIODS} value=${period} onChange=${pick(setPeriod, 'heat-period')} />
@@ -124,7 +124,7 @@ export function HeatmapPage() {
       <span>${fmt.pct(full, 0)}</span>
     </div>
     <p class="faint" style="font-size:12px;margin-top:8px">${size === 'cap'
-      ? t("Size: the company's market value from TradingView. {n} stocks without one are left out: switch to Money traded to see them.", { n: left })
-      : t('Size: the average money traded in it a day over the last 20 sessions.')}
-      ${' '}${t('A move over 30% in one day (a split or bonus shares not in the prices yet) shows as –.')}</p>`;
+      ? t("Size: the company's market value (TradingView). {n} stocks have none and are left out. Switch to Money traded to see them.", { n: left })
+      : t('Size: average money traded a day (last 20 sessions).')}
+      ${' '}${t('A move over 30% in one day shows as –. It\'s a split or bonus shares.')}</p>`;
 }

@@ -8,7 +8,6 @@ import {
 import { t, tn } from '../i18n.js';
 import { PriceChart } from '../charts.js';
 import { AiForecast } from './ai.js';
-import { PriceRange, ReachLine } from './range.js';
 import { RightsPage } from './rights.js';
 import { LAYER_NAMES } from './layers.js';
 
@@ -114,24 +113,21 @@ function StockMain({ route }) {
             : html`<${LiveChart} symbol=${data.symbol} />
               <p class="faint chart-note">${t(LIVE_NOTE)} ${t('Your buy, stop and target lines are on the Agent chart.')}</p>`}
         </div>
-        ${data.range && html`<${Fold} flush title=${t('How far {sym} could move', { sym: data.symbol })} hint=${rangeHint(data.range)}>
-          <${PriceRange} r=${data.range} sym=${data.symbol} series=${data.series} plan=${rangePlan(data)} ai=${data.ai}
-            results=${data.corporate && data.corporate.results && data.corporate.results.next} cautions=${data.cautions} /><//>`}
         ${data.ai && html`<${Fold} flush title=${t('What the AI models forecast for {sym}', { sym: data.symbol })} hint=${t('Beta · not advice')}>
           <${AiForecast} ai=${data.ai} sym=${data.symbol} rg=${data.range} pred=${data.prediction} /><//>`}
         ${data.news && html`<div class="card stock-news"><div class="card-title"><${Icon} name="news" size=${15} />${t('News')}
             <span class="right faint">Mubasher, Reuters, Zawya</span></div>
           <${NewsList} items=${data.news} sources=${SOURCES} limit=${5}
-            empty="No headlines for this stock yet. The agent reads a few stocks' news pages each run, so it can take a couple of days to reach every stock." />
+            empty="No headlines for this stock yet. The agent reads a few stocks' news each run. It can take a couple of days to reach every stock." />
           <${More} label="About these headlines"><p>${t('Headlines link to the publisher. The green/red dot is a rough guess from keywords, not a reading of the article.')}</p><//></div>`}
         </div>
         <aside class="stack">
           ${data.cautions && data.cautions.length > 0 && html`<div class="card"><div class="card-title">
             <${Icon} name="alert" size=${15} />${t('Good to know now')}</div><${Cautions} items=${data.cautions} /></div>`}
-          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes} rg=${data.range} />`}
+          ${data.position && html`<${PositionPanel} p=${data.position} hold=${data.hold} c=${data.chart} atr=${st.atr_pct * st.close} quotes=${quotes} />`}
           ${data.signal && html`<${SignalPanel} data=${data} />`}
           <${EntryCard} data=${data} />
-          ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} rg=${data.range} />`}
+          ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} />`}
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
           ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
           ${data.layers && html`<${LayersCard} l=${data.layers} />`}
@@ -145,21 +141,6 @@ function StockMain({ route }) {
       </div>`}`;
 }
 
-// The stop and target drawn on "How far it could move": your position's (unless it waits for a re-base), else the BUY
-// signal's, else the chart's plan from support and resistance.
-// The closed fold's one line: next week's range, the price ended inside it 8 times in 10.
-function rangeHint(r) {
-  const w = r.steps['5'];
-  return w && !w.reset ? t('1 week: {lo} – {hi}', { lo: fmt.price(w.lo), hi: fmt.price(w.hi) }) : '';
-}
-
-function rangePlan(data) {
-  const p = data.position, s = data.signal, c = data.chart;
-  if (p && p.status !== 'ADJUST') return { stop: p.stop, target: p.target, mine: true };
-  if (s && s.action === 'BUY') return { stop: s.stop, target: s.target };
-  return c ? { stop: c.stop, target: c.target } : null;
-}
-
 // The page in one line: Buy / Hold / Sell / Wait / Avoid, from the signal, the checklist, your position, the model
 // and the chart levels. A summary of the cards below, not a new rule.
 export function verdictFor(data) {
@@ -171,7 +152,7 @@ export function verdictFor(data) {
     // half or less of its 3-month high: after crashes like that its top ratings did worse than the rest (2026-10)
     const closes = ((data.series && data.series.close) || []).slice(-60).filter(v => v != null);
     const crashed = closes.length > 0 && close <= Math.max(...closes) * 0.5;
-    if (pr.top10 && crashed) notes.push(t("The model ranks it in its top 10% (#{rank} of {n}), but it is at half its 3-month high or less: after crashes like that, its top-rated stocks usually kept falling in the tests.", { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
+    if (pr.top10 && crashed) notes.push(t("The model ranks it in its top 10% (#{rank} of {n}). But it is at half its 3-month high or less. After crashes like that, its top-rated stocks usually kept falling in the tests.", { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
     else if (pr.top10) notes.push(t('The model ranks it in its top 10% (#{rank} of {n}).', { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
     else if (pr.rank10 && pr.count && pr.rank10 > pr.count / 2) notes.push(t('The model ranks it in its bottom half (#{rank} of {n}).', { rank: fmt.int(pr.rank10), n: fmt.int(pr.count) }));
   };
@@ -227,7 +208,7 @@ function Verdict({ data }) {
     <div class="verdict-rating">
       <${Rating} v=${p ? p.rating : null} />
       ${p && p.rating != null
-        ? html`<div><b>${t('Rating {v}/100', { v: p.rating })}</b>${b && b.hit != null ? html`<span class="faint"> · ${t('within 2 weeks, with its stop and target, stocks rated like it reached the target first {hit} of the time (the average stock {base})', {
+        ? html`<div><b>${t('Rating {v}/100', { v: p.rating })}</b>${b && b.hit != null ? html`<span class="faint"> · ${t('within 2 weeks, stocks rated like it reached the target before the stop {hit} of the time (average stock: {base})', {
             hit: fmt.pct(b.hit, 0, false), base: fmt.pct(p.base && p.base[10], 0, false) })}</span>` : ''}
             ${p.why10 && p.why10.length > 0 && html`<div style="margin-top:4px"><${Reason} items=${p.why10} /></div>`}</div>`
         : html`<span class="muted">${t('No rating: the model rates only stocks with enough daily trading.')}</span>`}
@@ -264,7 +245,7 @@ function EntryCard({ data }) {
   const how = { now: 'now', dip: 'on a dip', breakout: 'on a breakout' }[best && best.kind];
   return html`<${Fold} title="Where to buy it"
     hint=${best ? t('Best: {how} at {price}, {rr}× reward for the risk', { how: t(how), price: fmt.price(best.price), rr: fmt.num(best.rr, 1) }) : ''}>
-    ${!uptrend && html`<p class="entry-note">${t("Not in an uptrend now, and the rules buy only in one (price above its 20- and 50-day averages). Until then these are prices to watch, not buys.")}</p>`}
+    ${!uptrend && html`<p class="entry-note">${t("Not in an uptrend now. The rules buy only in one: price above its 20- and 50-day averages. Until then, these are prices to watch, not buys.")}</p>`}
     ${rows.map(r => html`<div class=${cls('entry-row', r === best && 'best', r.kind === 'today' && 'ref')}>
       <span class="entry-name">${t(ENTRY[r.kind][0])}${r === best && html`<span class="best-chip">${t('Best')}</span>`}</span>
       <span class="entry-price">${fmt.price(r.price)}</span>
@@ -313,25 +294,11 @@ function layerLine(x, brk) {
 function LayersCard({ l }) {
   const s = l.study, pass = l.score >= l.pass_at;
   const rows = l.items.map((x, i) => ({ x, i })).reverse();
-  const hi = s && s.periods && s.periods.since_2022, lo = s && s.periods && s.periods.before_2022;
-  const all = s && s.by_score.filter(r => r.n >= 500);
-  return html`<${Fold} open title=${html`<span>${t('7 layers')} · <b class=${pass ? 'up' : ''}>${l.score}/7</b></span>`}
-      hint=${t(pass ? 'At the video’s 6/7' : 'Under the video’s 6/7')}>
+  return html`<${Fold} open title=${html`<span>${t('7 layers')} · <b class=${pass ? 'up' : ''}>${l.score}/7</b></span>`}>
     <div class="layers">${rows.map(({ x, i }) => html`<div class=${cls('layer', `l${i + 1}`, x.ok ? 'ok' : 'no')}>
       <span class="n">${i + 1}</span><div class="lw"><b>${t(LAYER_NAMES[x.key])}</b><span>${layerLine(x, l.last_break)}</span></div>
       <${Icon} name=${x.ok ? 'checkCircle' : 'xCircle'} size=${17} /></div>`)}</div>
-    ${s && html`<div class="card-sub" style="margin:14px 0 6px;font-weight:650;font-size:13px">${t('Did it work on EGX? Beat EGX30 over the next month, by score')}</div>
-      <div class="rt-bars">${all.map(r => html`<div class="rt-hist">
-        <div class="rt-hist-l"><b>${r.score}/7</b> <span class="faint">(${t('{n} days', { n: fmt.short(r.n) })})</span></div>
-        <div class="rt-bar half"><span class=${cls('seg', r.score >= s.pass_at ? 'share' : 'low')} style=${`width:${r.beat * 100}%`}></span></div>
-        <span class="rt-bar-v">${fmt.pct(r.beat, 0, false)}</span></div>`)}</div>
-      <ul class="reasons" style="margin-top:10px">
-        <li>${t('Since 2022, 6/7 or more did a little better than lower scores ({a} against {b}). Before 2022 it did worse ({c} against {d}).', {
-          a: fmt.pct(hi.pass.beat, 0, false), b: fmt.pct(hi.rest.beat, 0, false), c: fmt.pct(lo.pass.beat, 0, false), d: fmt.pct(lo.rest.beat, 0, false) })}</li>
-        <li>${t('Taking only the BUYs at 6/7 or more would have made {a} a year instead of {b} (winners {c} instead of {d}). So the BUY rules don’t use it.', {
-          a: fmt.pct(s.strict.cagr, 0, false), b: fmt.pct(s.rules.cagr, 0, false), c: fmt.pct(s.strict.wins, 0, false), d: fmt.pct(s.rules.wins, 0, false) })}</li>
-      </ul>`}
-    <${More} label="What the 7 layers are"><p>${t('A checklist from GrowthX’s “Market mirror” video, built here from standard formulas on daily prices: 1 trend (50-day average), 2 momentum (RSI and MACD), 3 volume (up days against down days), 4 volatility (the daily swing, ATR), 5 squeeze (Bollinger bands inside the Keltner channel), 6 the week and the month (each above its own average), 7 smart money (the last break of a swing high or low, and money flow). The video trades only at 6/7 or more. Tested on EGX since {year}. The past, not a promise.', { year: s ? s.from.slice(0, 4) : '2016' })}</p><//>
+    <${More} label="What the 7 layers are"><p>${t('A checklist from GrowthX’s “Market mirror” video. It\'s built from standard formulas on daily prices. 1 trend (50-day average). 2 momentum (RSI and MACD). 3 volume (up days against down days). 4 volatility (the daily swing, ATR). 5 squeeze (Bollinger bands inside the Keltner channel). 6 the week and the month (each above its own average). 7 smart money (the last swing break, and money flow). The video trades only at 6/7 or more. Tested on EGX since {year}. The past, not a promise.', { year: s ? s.from.slice(0, 4) : '2016' })}</p><//>
   <//>`;
 }
 
@@ -438,13 +405,13 @@ function ZoneList({ c, pos, atr }) {
       <div class="zone now"><span class="p">${fmt.price(c.close)}</span><span>${t('Last close')}</span></div>
       ${(c.supports || []).map(z => zone(z, true))}</div>
     <p class="faint" style="font-size:12px;margin-top:8px">${t((c.supports || []).concat(c.resistances || []).some(z => z.test)
-      ? 'Dots: the level’s 5 signs of strength. Touched 3+ times, busy trading at it, a weekly level too, touched in the last 3 months, held more often than it broke.'
+      ? 'Dots: the level’s 5 signs of strength. Touched 3+ times. Busy trading at it. A weekly level too. Touched in the last 3 months. Held more often than it broke.'
       : 'More dots: more tools agree on the level.')}</p>`;
 }
 
 // Stop-loss and target from the chart's support and resistance (egx_agent/levels.py), for every stock. When you hold
 // it, your position's stop and target are the only ones shown (Your position), and this card lists the levels.
-function LevelsPanel({ c, pos, atr, sym, tg, rg }) {
+function LevelsPanel({ c, pos, atr, sym, tg }) {
   const hint = tg && tg.bot && html`<p class="faint tg-hint"><${Icon} name="bell" size=${13} />${' '}
     ${t('A Telegram message when it nears support or reaches resistance: send {cmd} to @{bot}.', { cmd: `/watch ${sym} levels`, bot: tg.bot })}</p>`;
   if (pos) {
@@ -464,7 +431,6 @@ function LevelsPanel({ c, pos, atr, sym, tg, rg }) {
         <span class="v up">${fmt.price(c.target2)} <span class="faint" style="font-weight:500">${fmt.pct(c.target2 / c.close - 1, 1)}</span></span>`}
       <span class="k"><${Term} k="rr">${t('Reward / risk')}<//></span><span class="v">${fmt.num(c.rr, 1)}×</span>
     </div>
-    <${ReachLine} r=${rg} stop=${c.stop} target=${c.target} />
     <ul class="level-why">
       ${c.stop_why.length > 0 && html`<li><b class="down">${t('Stop')}</b> ${t('just under support:')} ${sources(c.stop_why)}</li>`}
       ${c.method === 'atr' && html`<li><b class="down">${t('Stop')}</b> ${t('no support in range, so 2× the daily range')}</li>`}
@@ -478,12 +444,13 @@ function LevelsPanel({ c, pos, atr, sym, tg, rg }) {
   </div>`;
 }
 
-const LEVELS_HOW = 'The agent marks prices where buyers or sellers stepped in before: swing lows and highs of the last year, '
-  + 'Fibonacci retracements (23.6–78.6%) and extensions (127.2%, 161.8%) of the latest big rise, the 20- and 50-day '
-  + 'averages, monthly pivot points, the price where the most shares traded in 6 months, and the 1-year high. Levels '
-  + 'that sit together make one zone; the more tools agree, the stronger it is. The stop goes a little under the '
-  + 'nearest solid support (at least one normal daily move away, at most the widest stop in Settings); the target a '
-  + 'little under the first resistance that pays at least 1.5× the risk. It is a plan, not a promise.';
+const LEVELS_HOW = 'The agent marks prices where buyers or sellers stepped in before. Swing highs and lows of the last '
+  + 'year. Fibonacci retracements (23.6–78.6%) and extensions (127.2%, 161.8%) of the latest big rise. '
+  + 'The 20- and 50-day averages. Monthly pivots. The most-traded price (6 months). The 1-year high. '
+  + 'Levels close together make one zone. The more tools agree, the stronger it is. The stop goes a '
+  + 'little under the nearest solid support. It\'s at least one normal daily move away, and at most the '
+  + 'widest stop in Settings. The target goes a little under the first resistance that pays 1.5× the risk '
+  + 'or more. It is a plan, not a promise.';
 
 const SOURCES = { mubasher: 'Mubasher', reuters: 'Reuters', zawya: 'Zawya', 'dow-jones': 'Dow Jones', lse: 'LSE filings',
   alborsa: 'Al Borsa News', dne: 'Daily News Egypt' };
@@ -594,41 +561,21 @@ function BigDeals({ list }) {
     <${More} label="About these"><p>${t(DEALS_HOW)}</p><//><//>`;
 }
 
-const DEALS_HOW = 'A big deal is a large block of the stock\'s shares traded in one go, picked out of the stock\'s own '
-  + 'headlines (Mubasher, Reuters, Zawya). Funds, companies, big owners and the company\'s own officials make these, '
-  + 'rarely small investors, so they show when a big player bought or sold. A headline usually names one side only: '
-  + '"Changed hands" means it didn\'t say who bought. Only deals in the news are here, so some are missing, and the '
-  + 'agent reads each stock\'s news only every few days. The agent\'s signals don\'t use these.';
+const DEALS_HOW = 'A big deal is a large block of shares traded in one go. It\'s taken from the stock\'s own headlines (Mubasher, Reuters, Zawya). Funds, companies, big owners and the company\'s officials make these, rarely small investors. So they show when a big player bought or sold. A headline usually names one side only. "Changed hands" means it didn\'t say who bought. Only deals in the news are here, so some are missing. The agent reads each stock\'s news every few days. Its signals don\'t use these.';
 
-const OWNERS_HOW = 'Each company\'s list of big owners (Arab Finance\'s, from the latest disclosure, or Mubasher\'s) is read '
-  + 'again about once a month and compared with the last one. A stake that moved half a point or more, a new owner and '
-  + 'one that left the list are shown on the day the new list was read, which can be weeks after the trade. An owner '
-  + 'that left usually fell under 5% or sold out. The agent\'s signals don\'t use these.';
+const OWNERS_HOW = 'Each company\'s list of big owners is read again about once a month (Arab Finance\'s latest disclosure, or Mubasher\'s). It\'s compared with the last one. A stake that moved half a point or more shows here. So does a new owner, or one that left the list. They show on the day the new list was read, which can be weeks after the trade. An owner that left usually fell under 5% or sold out. The agent\'s signals don\'t use these.';
 
-const ANALYST_HOW = 'Where brokers\' analysts think the price will be in about 12 months, and whether they say buy, hold or '
-  + 'sell. TradingView doesn\'t say when each target was set, so one can be months old, and a target far below today\'s '
-  + 'price usually is. Studies find analysts\' targets run too high on average and miss by a lot, so read them as one '
-  + 'opinion. Most EGX companies have one to four analysts, many have none. The agent\'s signals don\'t use them.';
+const ANALYST_HOW = 'Where brokers\' analysts think the price will be in about 12 months. And whether they say buy, hold or sell. TradingView doesn\'t say when each target was set. So one can be months old, especially a target far below today\'s price. Studies find analysts\' targets run too high and miss by a lot. Read them as one opinion. Most EGX companies have one to four analysts. Many have none. The agent\'s signals don\'t use them.';
 
-const COMPANY_HOW = 'P/E: the price divided by a year of profit per share; lower is cheaper, but a growing company usually '
-  + 'costs more. Price / book: the price against what the company owns minus what it owes. Growth: the last 12 months '
-  + 'against the 12 before (in EGP, so inflation lifts it too). Net margin: profit from each pound of sales. Return on '
-  + 'equity: yearly profit on the owners\' money. Debt / equity: borrowing against the owners\' money; over 1 is a lot for '
-  + 'most companies except banks. Free float: the share of the company anyone can trade, not held by owners of 5% or more, '
-  + 'from the owners lists of Arab Finance (the latest disclosure) and Mubasher: 100% minus the big holders, the lower '
-  + 'of the two, since a list that misses an owner makes the float look bigger (TradingView\'s when neither has a list). '
-  + 'Family members or related companies that each hold under 5% still count as free, and the exchange also counts '
-  + 'shares held as GDRs as not free, so its own figure can be lower. A small float moves more on less money. '
-  + 'The agent\'s signals don\'t use these: they are here to know the company.';
+const COMPANY_HOW = 'P/E: the price divided by a year\'s profit per share. Lower is cheaper, but growing companies usually cost more. Price / book: the price against what the company owns minus what it owes. Growth: the last 12 months against the 12 before. It\'s in EGP, so inflation lifts it too. Net margin: profit from each pound of sales. Return on equity: yearly profit on the owners\' money. Debt / equity: borrowing against the owners\' money. Over 1 is a lot, except for banks. Free float: the share of the company anyone can trade. It leaves out owners of 5% or more. It comes from the owners lists of Arab Finance and Mubasher, the lower of the two. A list that misses an owner makes the float look bigger. When neither has a list, it\'s TradingView\'s. Family members or related companies under 5% each still count as free. The exchange also counts GDR shares as not free, so its figure can be lower. A small float moves more on less money. The agent\'s signals don\'t use these. They help you know the company.';
 
 // Your position: the same card as Today and My Portfolio (live price, P&L, stop to target), and where the stop and
 // target come from. The stop rises to each new support under the price (egx_agent/engine.py); the target stays.
-function PositionPanel({ p, hold, c, atr, quotes, rg }) {
+function PositionPanel({ p, hold, c, atr, quotes }) {
   const next = p.stop != null && c ? nextTarget(p, c, atr) : null;
   const sw = p.stop != null ? stopWhy(p, c, atr) : '';
   const tw = targetWhy(p, c, atr);
   return html`<${PositionCard} p=${livePosition(p, quotes)} hold=${hold}>
-    ${p.status !== 'ADJUST' && html`<${ReachLine} r=${rg} stop=${p.stop} target=${p.target} />`}
     ${(sw || tw || next) && html`<${More} label="Where the stop and target come from"><ul class="level-why">
       ${sw && html`<li><b class="down">${t('Stop')}</b> ${sw}</li>`}
       ${tw && html`<li><b class="up">${t('Target')}</b> ${tw}</li>`}

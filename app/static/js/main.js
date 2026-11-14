@@ -52,7 +52,7 @@ function lazy(file, name) {
 }
 
 const PAGES = Object.fromEntries(Object.entries({
-  today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), layers: lazy('layers', 'LayersPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
+  today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), layers: lazy('layers', 'LayersPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), flow: lazy('flow', 'FlowPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
   stock: lazy('stock', 'StockPage'), rights: lazy('rights', 'RightsListPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
   calc: lazy('calc', 'CalcPage'), backtest: lazy('backtest', 'BacktestPage'), settings: lazy('settings', 'SettingsPage'), admin: lazy('admin', 'AdminPage'),
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
@@ -61,15 +61,21 @@ const PAGES = Object.fromEntries(Object.entries({
 // bookmarks still work (#/signals is Picks, #/predict its Rankings). Settings and Admin sit in the ⚙ menu.
 const SECTIONS = [
   { id: 'home', label: 'Home', icon: 'home',
-    tabs: [['today', 'Summary'], ['market', 'Market'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['dividends', 'Dividends & results'], ['news', 'News']] },
+    tabs: [['today', 'Summary'], ['market', 'Market', [['market', 'Overview'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap']]],
+      ['flow', 'Money flow'], ['news', 'News & dates', [['news', 'News'], ['dividends', 'Dividends & results']]]] },
   { id: 'picks', label: 'Picks', icon: 'target', tabs: [['signals', 'Picks'], ['predict', 'Rankings'], ['layers', '7 Layers'], ['record', 'Track record']] },
   { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist'], ['rights', 'Rights issues']] },
   { id: 'portfolio', label: 'Portfolio', icon: 'briefcase',
     tabs: [['portfolio', 'My portfolio'], ['paper', 'Practice'], ['calc', 'Calculator'], ['backtest', 'Rules test']] },
 ].map(s => ({ ...s, tabs: s.tabs.filter(([id]) => id in PAGES) }));
-const sectionOf = page => SECTIONS.find(s => s.tabs.some(([id]) => id === page));
+// A tab can hold a few pages (Market: overview, EGX30, heatmap), picked with a switch under the tabs.
+const inTab = ([id, , group], page) => id === page || (group || []).some(([g]) => g === page);
+const sectionOf = page => SECTIONS.find(s => s.tabs.some(tab => inTab(tab, page)));
 const pageTitle = page => {
-  for (const s of SECTIONS) for (const [id, label] of s.tabs) if (id === page) return label;
+  for (const s of SECTIONS) for (const [id, label, group] of s.tabs) {
+    if (id === page) return label;
+    for (const [g, gl] of group || []) if (g === page) return gl;
+  }
   return { settings: 'Settings', admin: 'Admin' }[page] || 'Summary';
 };
 
@@ -120,9 +126,13 @@ function SubNav({ page }) {
   const counts = useCounts();
   const sec = sectionOf(page);
   if (!sec || sec.tabs.length < 2) return null;
-  return html`<nav class="subnav" aria-label=${t(sec.label)}>${sec.tabs.map(([id, label]) => html`<a href=${`#/${id}`}
-    class=${cls(id === page && 'on')} aria-current=${id === page ? 'page' : undefined}>${t(label)}
-    ${id === 'signals' && html`<${Count} id="signals" counts=${counts} />`}</a>`)}</nav>`;
+  const tab = sec.tabs.find(x => inTab(x, page));
+  const group = tab && tab[2] && tab[2].filter(([g]) => g in PAGES);
+  return html`<nav class="subnav" aria-label=${t(sec.label)}>${sec.tabs.map(x => html`<a href=${`#/${x[0]}`}
+    class=${cls(x === tab && 'on')} aria-current=${x === tab ? 'page' : undefined}>${t(x[1])}
+    ${x[0] === 'signals' && html`<${Count} id="signals" counts=${counts} />`}</a>`)}</nav>
+    ${group && group.length > 1 && html`<nav class="subswitch seg" aria-label=${t(tab[1])}>${group.map(([g, gl]) => html`<a href=${`#/${g}`}
+      class=${cls('seg-btn', g === page && 'on')} aria-current=${g === page ? 'page' : undefined}>${t(gl)}</a>`)}</nav>`}`;
 }
 
 // On a phone the sections move to a bar at the bottom of the screen, within reach of your thumb.

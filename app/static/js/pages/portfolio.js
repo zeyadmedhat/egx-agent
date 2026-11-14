@@ -65,7 +65,7 @@ export function PortfolioPage({ route }) {
       <button class="btn primary" onClick=${() => startAdd('type')}><${Icon} name="plus" />${t('Log a buy')}</button>
       ${STATIC && html`<button class="btn" onClick=${() => startAdd('shot')}><${Icon} name="camera" />${t('From a screenshot')}</button>`}<//>
     ${data.nothing_saved && html`<div style="margin-bottom:14px"><${Callout} tone="warn"><b>${t('Nothing is saved in this browser yet.')}</b>${' '}
-      ${tp('Your portfolio is kept only in the browser where you entered it, and links opened from Telegram or another app can open a different browser. Open the site there, or bring your portfolio here with {link}.',
+      ${tp('Your portfolio is kept only in the browser where you entered it. Links from Telegram or another app may open a different browser. Open the site there, or bring your portfolio here with {link}.',
         { link: html`<a href="#/settings">${t('Settings → Restore from a backup')}</a>` })}<//></div>`}
     ${add && html`<section class="section" id="buy-form" style="margin-top:0;margin-bottom:24px;scroll-margin-top:80px">
       <${SectionHead} title="Log a buy" hint=${add === 'shot'
@@ -230,7 +230,7 @@ function WalletForm({ kind, w, thndr, onClose }) {
         ${spec.notes.map(n => html`<option value=${n}>${t(n)}</option>`)}</select><//>`}
       ${kind !== 'fix' && html`<${Field} label="Date"><${DateInput} weekends value=${form.date} onInput=${set('date')} /><//>`}
     </div>
-    ${kind === 'refund' && w.plan && html`<p class="faint" style="font-size:12.5px;margin:0">${t("Your Thndr Trader commission kickbacks are added for you, the day of each of the month's first 50 orders. Add money back here only if it's something else.")}</p>`}
+    ${kind === 'refund' && w.plan && html`<p class="faint" style="font-size:12.5px;margin:0">${t("Thndr Trader kickbacks are added for you. Each comes on the day of one of the month's first 50 orders. Add money back here only for something else.")}</p>`}
     <div class="row">
       <span style="flex:1">${total != null && amount > 0 ? t(kind === 'withdraw' ? 'Total out of your wallet: {v}' : 'Reaches your wallet: {v}', { v: fmt.egp(total, 2) })
         : kind === 'settle' && amount > 0 ? t('You can withdraw {v} more at once; the fee comes out of your wallet.', { v: fmt.egp(amount, 2) }) : ''}</span>
@@ -314,7 +314,7 @@ function PlanForm({ w, onClose }) {
   };
   return html`<form class="preview-box" style="margin-top:14px;gap:10px" onSubmit=${submit}>
     <b>${t('Thndr Trader plan')}</b>
-    <p class="faint" style="font-size:12.5px;margin:0">${t("Copy it from the plan's page in Thndr's app (Account → Subscriptions). Thndr takes its commission on every order and gives it back to your wallet the same day on the first 50 buys and sales of each plan month, which starts on the day of the month you subscribed. The app counts the ones you log here, and the plan's price comes out of this wallet on each renewal from now on.")}</p>
+    <p class="faint" style="font-size:12.5px;margin:0">${t("Copy it from the plan's page in Thndr's app (Account → Subscriptions). Thndr takes its commission on every order. It gives it back to your wallet the same day for the first 50 buys and sales of each plan month. The plan month starts on the day you subscribed. The app counts the orders you log here. The plan's price comes out of this wallet at each renewal.")}</p>
     <div class="form-grid">
       <${Field} label="Member since"><${DateInput} weekends value=${form.since} onInput=${set('since')} /><//>
       <${Field} label="Plan"><select class="input" value=${form.kind} onChange=${set('kind')}>
@@ -331,7 +331,7 @@ function PlanForm({ w, onClose }) {
       <button class="btn primary sm" type="submit" disabled=${busy || !form.since}><${Icon} name="check" />${t('Save')}</button>
     </div>
     ${gone && html`<${Confirm} title="Remove your Thndr Trader plan?"
-      text="Your orders from now on count Thndr's commission, and nothing more comes out of your wallet for the plan. What's in your wallet already stays."
+      text="Your orders now count Thndr's commission. Nothing more comes out of your wallet for the plan. What's in your wallet stays."
       confirmLabel="Remove" danger onConfirm=${() => send('DELETE')} onClose=${() => setGone(false)} />`}
   </form>`;
 }
@@ -342,7 +342,7 @@ const togetherWords = r => (r >= 0.7 ? 'move closely together' : r >= 0.4 ? 'oft
 
 const UNITS = [{ value: 'egp', label: 'In pounds' }, { value: 'usd', label: 'In dollars' }, { value: 'gold', label: 'In gold' }];
 const UNIT_HINT = {
-  egp: 'Its value after every session since your first buy (cash plus your shares at each close), next to EGX30 and a bank deposit as if you had put the same money in them.',
+  egp: 'Its value after every session since your first buy (cash plus shares). Next to EGX30 and a bank deposit, as if you had put the same money in them.',
   usd: "The same, in dollars at each day's rate: a rise in pounds can be a fall in dollars when the pound weakens.",
   gold: "The same, in grams of 24-carat gold at each day's price: how many grams your account would buy.",
 };
@@ -540,7 +540,7 @@ function BigLossPlan({ p, data }) {
       <span>${earns
         ? t('{sym} earns a buy on its own today ({why}), so buying more is an option: size it as a new trade with its own stop.', {
           sym: p.symbol, why: t(p.buy_signal ? 'a BUY signal' : "the model's top 10%") })
-        : crash ? t("Not now: {sym} is at half its 3-month high or less. After crashes like that, even the model's top-rated stocks usually kept falling in the tests (typical next 6 months −14%).", { sym: p.symbol })
+        : crash ? t("Not now: {sym} is at half its 3-month high or less. After crashes like that, even the model's top stocks usually kept falling in the tests. Typical next 6 months: −14%.", { sym: p.symbol })
           : t("Not now: {sym} has no BUY signal and isn't in the model's top 10%. Buying more only lowers the average; it doesn't make the stock a better buy.", { sym: p.symbol })}</span>
       <div class="form-grid" style="margin-top:8px">
         <${Field} label="Buy more: shares"><input class="input" type="number" min="1" step="1" value=${add.shares}
@@ -677,9 +677,9 @@ function StopForm({ p }) {
       <button class="btn" type="submit" disabled=${!(n > 0) || busy}><${Icon} name="shield" size=${14} />${t('Set stop')}</button>
       ${p.my_stop && html`<button type="button" class="linkish" disabled=${busy} onClick=${() => save(null)}>${t('Back to the automatic stop')}</button>`}
     </div>
-    <p class="faint">${p.stops_mine ? t('From the next session (today\'s if it hasn\'t opened yet), and it stays there until you change it again.')
-      : t('From the next session (today\'s if it hasn\'t opened yet), and it can still rise to a newer support.')}
-      ${p.my_stop ? t('To lower it, type a lower price, as low as the automatic stop.') : ''} ${t("The automatic stop sits a little under a support so a dip that only touches it doesn't sell you; a stop right on the support sells on a touch.")}</p>
+    <p class="faint">${p.stops_mine ? t('From the next session (today\'s if it hasn\'t opened yet). It stays there until you change it.')
+      : t('From the next session (today\'s if it hasn\'t opened yet). It can still rise to a newer support.')}
+      ${p.my_stop ? t('To lower it, type a lower price, as low as the automatic stop.') : ''} ${t("The automatic stop sits a little under a support. So a dip that only touches it doesn't sell you. A stop right on the support sells on a touch.")}</p>
   </form>`;
 }
 
@@ -852,7 +852,7 @@ function ClosedDetail({ r, data, onClose }) {
       <button class="btn sm" type="button" onClick=${onClose}><${Icon} name="x" size=${14} />${t('Close')}</button>
     </div>
     ${confirm && html`<${Confirm} title=${t('Delete the {sym} trade?', { sym: r.symbol })} danger confirmLabel="Delete trade"
-      text="This removes the trade and all its transactions from your history and your profit/loss, as if you never logged it."
+      text="This removes the trade and all its transactions from your history and profit/loss. As if you never logged it."
       onConfirm=${remove} onClose=${() => setConfirm(false)} />`}
   </div>`;
 }
@@ -1058,7 +1058,7 @@ function BuyForm({ data, query, onDone }) {
     ${far && html`<div style="margin-top:12px"><${Callout} tone="warn">${t('{sym} closed at {close} on {date}, so {price} is far from what it traded at then. If you bought earlier, set the real buy date: the stop, the day count and the exit rules start from it.', {
       sym: form.symbol, close: fmt.price(st.close), date: fmt.date(lastDate), price: fmt.price(price) })}<//></div>`}
     <div class="form-foot">
-      <div style="flex:1;min-width:260px">${preview || html`<span class="faint" style="font-size:12.5px">${t("⭐ = today's BUY signals. Buying more of a stock you already hold adds the shares to that position at the average price, and the 1-month limit keeps counting from your first buy.")}</span>`}</div>
+      <div style="flex:1;min-width:260px">${preview || html`<span class="faint" style="font-size:12.5px">${t("⭐ = today's BUY signals. Buying more of a stock you hold adds to that position at the average price. The 1-month limit keeps counting from your first buy.")}</span>`}</div>
       <button class="btn primary" type="submit" disabled=${!valid || busy}><${Icon} name="plus" />${t('Save buy')}</button>
     </div>
   </form>`;
@@ -1180,7 +1180,7 @@ function ImportPanel({ data }) {
     if (done) { toast(t('Added {n} to My Portfolio.', { n: done })); refreshAll(); }
   };
   return html`<div class="import-panel">
-    <p class="muted" style="font-size:13px">${t('Take a screenshot of your holdings in your broker\'s app (Thndr\'s home screen with all your stocks works) and pick it here. The bot reads every stock on it with Cloudflare\'s free AI (about 15 seconds): each one\'s market value and profit/loss give what you paid, fees in. The picture isn\'t kept. Check every number before adding: the reader can misread.')}</p>
+    <p class="muted" style="font-size:13px">${t('Take a screenshot of your holdings in your broker\'s app (Thndr\'s home screen works). Pick it here. The bot reads every stock on it with Cloudflare\'s free AI (about 15 seconds). Each stock\'s value and profit/loss give what you paid, fees in. The picture isn\'t kept. Check every number before adding. The reader can make mistakes.')}</p>
     <label class=${cls('btn', busy && 'disabled')} style="margin-top:10px"><${Icon} name="plus" />
       ${busy && !rows ? t('Reading the picture…') : t('Pick a screenshot')}
       <input type="file" accept="image/*" hidden disabled=${busy} onChange=${pickFile} /></label>

@@ -69,7 +69,7 @@ export function NewsPage() {
           <${NewsList} items=${items} sources=${data.sources} showSymbol limit=${60}
             empty="No headline matches these filters." />
         </div>
-        <${More} label="About these headlines"><p>${t("Only headlines are kept here: each links to the publisher's article. The topics and the green/red dot come from keyword rules in Arabic and English. They're a quick guide, not a reading of the article. The agent reads each stock's Mubasher page every few days, and Reuters and Zawya every run.")}</p><//>
+        <${More} label="About these headlines"><p>${t("Only headlines are kept. Each links to the full article. Topics and the green/red dot come from keywords. They're a quick guide, not a reading of the article. Stock pages on Mubasher are read every few days. Reuters and Zawya every run.")}</p><//>
       </div>
       <aside class="stack">
         <div class="card"><div class="card-title"><${Icon} name="info" size=${15} />${t('Announced this month')}</div>

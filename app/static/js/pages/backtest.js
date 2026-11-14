@@ -38,8 +38,8 @@ export function BacktestPage() {
       <button class="btn primary" onClick=${run} disabled=${running} style="margin-inline-start:auto">
         <${Icon} name="play" />${mine ? 'Running…' : 'Run backtest'}</button>
     </div>
-    <p class="faint" style="font-size:12.5px;margin-top:12px">Uses your current Settings: signals at each close, buys at the
-      next open, the same position sizing, fees, stops, targets and 1-month limit. The first run takes about 20–40 seconds.</p>
+    <p class="faint" style="font-size:12.5px;margin-top:12px">Uses your current Settings. Signals at each close, buys at the next open.
+      Same position sizing, fees, stops, targets and 1-month limit. The first run takes about 20–40 seconds.</p>
   </div>`;
 
   if (loading && !res) return html`<${PageHead} title="Rules test" />${controls}<div style="margin-top:14px"><${PageLoading} error=${error} /></div>`;

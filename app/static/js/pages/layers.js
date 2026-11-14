@@ -38,7 +38,7 @@ export function LayersPage() {
   ];
   return html`
     <${PageHead} title="7 Layers" sub=${t('Stocks passing 6 or more of the 7 layers today, then the close ones at 5')} />
-    <${Callout} tone="warn">${t('A checklist, not BUY signals.')} ${s && hi && hi.pass != null && t('On EGX since {year}, 6/7 or more beat EGX30 over the next month {a} of the time (lower scores {b}), and as BUYs it did worse than the rules ({c} a year against {d}).', {
+    <${Callout} tone="warn">${t('A checklist, not BUY signals.')} ${s && hi && hi.pass != null && t('On EGX since {year}, 6/7 or more beat EGX30 over the next month {a} of the time. Lower scores: {b}. As BUYs it did worse than the rules: {c} a year against {d}.', {
       year: s.from.slice(0, 4), a: fmt.pct(hi.pass, 0, false), b: fmt.pct(hi.rest, 0, false),
       c: fmt.pct(s.strict.cagr, 0, false), d: fmt.pct(s.rules.cagr, 0, false) })}<//>
 

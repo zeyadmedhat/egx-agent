@@ -41,14 +41,13 @@ export function WatchlistPage() {
     ${rows.length ? html`<div class="card flush"><${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol}
         onRowClick=${r => go(stockHref(r.symbol))} /></div>`
       : html`<div class="card"><${Empty} icon="eye" title="No stocks yet"
-        text="Add one with the search box above, or press the star (☆) next to a stock on its page or in the Screener." /></div>`}
+        text="Add one with the search box above. Or press the star (☆) next to a stock on its page or in the Screener." /></div>`}
     <p class="faint" style="font-size:12px;margin-top:8px">${t(STATIC
       ? 'Kept in this browser with your portfolio, and in your backups (Settings → Download a backup).'
       : 'Kept with your portfolio on this Mac.')}</p>
     <${Fold} title="Alerts in Telegram" hint="Get a message when a stock gets a BUY signal or closes past a price.">
-      <p class="muted" style="font-size:13px;margin-bottom:10px">The website's Telegram bot can tell you after a close
-        when a stock gets a BUY signal or closes past a price. Connect it on the website (Settings → Connect Telegram),
-        then send it:</p>
+      <p class="muted" style="font-size:13px;margin-bottom:10px">After a close, the Telegram bot can tell you when a stock gets a BUY
+        signal or closes past a price. Connect it on the website (Settings → Connect Telegram). Then send it:</p>
       <div class="stat-list">
         <span class="k"><code>/watch COMI</code></span><span class="v" style="font-weight:500">when COMI gets a BUY signal</span>
         <span class="k"><code>/watch COMI 45</code></span><span class="v" style="font-weight:500">when COMI closes above 45 (or below, if 45 is under its price)</span>

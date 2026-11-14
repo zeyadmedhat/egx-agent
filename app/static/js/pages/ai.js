@@ -61,7 +61,7 @@ export function AiForecast({ ai, sym, rg, pred }) {
         <div class="row ai-before">
           <button class=${cls('btn sm', before && 'primary')} aria-pressed=${before} onClick=${() => setBefore(b => !b)}>${t('What it forecast before')}</button>
           <span class="faint">${s.past.length === 0 ? t('No earlier forecasts for this share yet: they build up one a day.')
-            : t('The middle of the models: {n} earlier forecasts at this window have finished, {a} ended above the price and {b} below it, {e} off in the middle. {u} more have not finished yet.', {
+            : t('The middle of the models: {n} earlier forecasts at this window have finished. {a} ended above the price and {b} below it. Middle miss: {e}. {u} more have not finished yet.', {
               n: done.length, a: done.filter(p => p.value > p.actual).length, b: done.filter(p => p.value < p.actual).length,
               e: done.length ? fmt.pct(median(done.map(p => Math.abs(p.value / p.actual - 1))), 1, false) : '–', u: open })}</span>
         </div>
@@ -90,9 +90,9 @@ function Record({ s, n, ai }) {
   const span = { n: test.dates, from: fmt.date(test.from), to: fmt.date(test.to) };
   return html`<div class="ai-conf ai-record">
     <h4 style="margin-top:0">${t('Have these models been right before?')}</h4>
-    <p>${t('Tested on {n} past closes from {from} to {to}, on every stock: the middle got the direction right {d} of the time and was closer than "no change" {c} of the time.',
+    <p>${t('Tested on {n} past closes from {from} to {to}, on every stock. The middle got the direction right {d} of the time. It was closer than "no change" {c} of the time.',
       { ...span, d: fmt.pct(ta.direction, 0, false), c: fmt.pct(ta.closer, 0, false) })}</p>
-    <p>${enough(mine) ? t('For this share, {n} have finished: the middle was closer to the close than "no change" {p} of the time and got the direction right {d} of the time.',
+    <p>${enough(mine) ? t('For this share, {n} have finished. The middle was closer to the close than "no change" {p} of the time. It got the direction right {d} of the time.',
         { n: mine.n, p: fmt.pct(mine.closer, 0, false), d: fmt.pct(mine.direction, 0, false) })
       : t('Not known yet for this share: {n} of its forecasts at this window have finished, too few to tell.', { n: mine ? mine.n : 0 })}</p>
     <p>${enough(every) ? t('In its own record, on every stock, {n} have finished: closer than "no change" {p} of the time, direction right {d}.',
@@ -125,7 +125,7 @@ function Confidence({ s, n, ai, change, pred }) {
         : "The middle forecast, {v}, is smaller than most of this share's {k}-session moves in the past year. A usual move is about {u}, up or down.",
         { v: fmt.pct(change, 2), k: n, u: fmt.pct(s.typical, 1, false) })}</p>
     <${Agent} p=${pred} />
-    <${More} label="How the score is worked out"><p>${t('Agreement: all the models pointing the same way counts fully, an even split not at all. Size: the middle move against this share\'s usual move over the same number of sessions, full at a usual move or more. The score is the two multiplied, out of 100.')}</p><//>
+    <${More} label="How the score is worked out"><p>${t('Agreement: all models pointing the same way counts fully. An even split counts nothing. Size: the middle move against this share\'s usual move over the same sessions. A usual move or more counts fully. The score is the two multiplied, out of 100.')}</p><//>
   </div>`;
 }
 
@@ -135,9 +135,9 @@ function Agent({ p }) {
   if (!p || p.rating == null) return null;
   const b = (p.bands || []).find(x => p.rating >= x.from && p.rating <= x.to);
   return html`<div class="ai-agent"><h4>${t("Compare: the agent's own model")}</h4>
-    <p>${t('Rating {v}/100.', { v: p.rating })} ${b && b.hit != null ? t('Stocks rated like it reached their target before their stop {hit} of the time in its test (the average stock {base}).', {
+    <p>${t('Rating {v}/100.', { v: p.rating })} ${b && b.hit != null ? t('Stocks rated like it reached their target before their stop {hit} of the time in its test. Average stock: {base}.', {
       hit: fmt.pct(b.hit, 0, false), base: fmt.pct(p.base && p.base[10], 0, false) }) : ''}</p>
-    <p class="faint">${t("It learned from every liquid EGX stock's past and was tested on years it hadn't seen, so weigh it more than these lines.")} <a href="#/predict">${t('Rankings')}</a></p></div>`;
+    <p class="faint">${t("It learned from every liquid EGX stock's past. It was tested on years it hadn't seen. So weigh it more than these lines.")} <a href="#/predict">${t('Rankings')}</a></p></div>`;
 }
 
 // The drawing: past closes, then each model's path, their middle and spread; earlier forecasts on request.

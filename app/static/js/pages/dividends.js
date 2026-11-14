@@ -56,20 +56,20 @@ export function DividendsPage() {
   const open = r => go(stockHref(r.symbol));
 
   return html`<${PageHead} title="Dividends & results"
-      sub="Cash dividends of every EGX company, the highest yields, and bonus shares. Buy before the ex-date to get a dividend.">
+      sub="Cash dividends, top yields and bonus shares of every EGX company. Buy before the ex-date to get a dividend.">
       <${Seg} options=${SHOW} value=${show} onChange=${setShow} /><//>
     ${!data.dividends.length && html`<div style="margin-bottom:14px"><${Callout}><b>${t('No dividend data yet.')}</b> ${t('It downloads with the next scan after the close.')}<//></div>`}
     ${show === 'mine' && !held.size && html`<div style="margin-bottom:14px"><${Callout}>${t("You have no open positions, so there's nothing to show for your stocks.")}${' '}<a href="#/portfolio">${t('Log a buy in My Portfolio →')}</a><//></div>`}
     <section class="section">
       <${SectionHead} title="Coming up" count=${coming.length}
-        hint="Announced dividends. On the ex-date the price usually drops by about the dividend, so it isn't free money: it's part of the return." />
+        hint="Announced dividends. On the ex-date, the price usually drops by about the dividend. So it isn't free money. It's part of the return." />
       <div class="card flush"><${DataTable} columns=${cashCols} rows=${coming} rowKey=${r => r.symbol + r.ex_date}
         onRowClick=${open} empty="No dividend announced for the coming weeks yet." /></div>
     </section>
     ${market && market.results && html`<${Results} rows=${market.results.filter(mine)} />`}
     <section class="section">
       <${SectionHead} title="Also announced: bonus shares, rights issues and more" count=${actions.length}
-        hint="From Mubasher's list of the exchange's filings. Bonus shares and splits re-base the price (you get more shares); a rights issue usually adjusts it. Cash dividends here don't have an amount on TradingView yet." />
+        hint="From Mubasher's list of exchange filings. Bonus shares and splits lower the price, but you get more shares. A rights issue usually adjusts it too. These cash dividends have no amount on TradingView yet." />
       <div class="card flush"><${DataTable} columns=${actionCols} rows=${actions} rowKey=${r => r.symbol + r.type + r.effective}
         onRowClick=${open} empty="Nothing else announced for the coming weeks." /></div>
       ${data.rights_history && html`<${RightsPast} h=${data.rights_history} open=${actions.some(a => a.kind === 'rights')} />`}
@@ -77,7 +77,7 @@ export function DividendsPage() {
     <section class="section">
       <${SectionHead} title=${show === 'mine' ? 'Yields of your stocks' : 'Highest yields'}
         hint=${show === 'mine' ? "The last 12 months of cash dividends ÷ today's price."
-          : t("The last 12 months of cash dividends ÷ today's price, among stocks trading at least {v} EGP a day. A very high yield can mean the price fell, or a one-off payout.", { v: fmt.short(data.min_value) })} />
+          : t("Last 12 months of cash dividends ÷ today's price. Only stocks trading {v} EGP a day or more. A very high yield can mean the price fell. Or it was a one-off payout.", { v: fmt.short(data.min_value) })} />
       <div class="card flush"><${DataTable} columns=${yieldCols} rows=${yields} rowKey=${r => r.symbol}
         sort=${{ key: 'yield', dir: 'desc' }} onRowClick=${open} empty="None of these pays a cash dividend." /></div>
     </section>
@@ -87,9 +87,7 @@ export function DividendsPage() {
     <${Fold} title="Bonus shares and splits" hint=${t('{n} in the last year.', { n: bonus.length })} flush>
       <${DataTable} columns=${bonusCols} rows=${bonus} rowKey=${r => r.symbol + r.ex_date}
         onRowClick=${open} empty="None in the last year." /><//>
-    ${data.updated && html`<p class="faint" style="font-size:12px;margin-top:12px">From TradingView, last updated${' '}
-      ${fmt.datetime(data.updated)}. It gives each company's latest dividend and the next one once announced, so older
-      ones appear as the agent sees them.</p>`}`;
+    ${data.updated && html`<p class="faint" style="font-size:12px;margin-top:12px">${t('From TradingView, updated {date}. It shows each company\'s latest dividend and the next one. Older ones add up as the agent sees them.', { date: fmt.datetime(data.updated) })}</p>`}`;
 }
 
 // When companies are expected to publish results in the next few weeks (TradingView's estimates).
@@ -110,7 +108,7 @@ function Results({ rows }) {
     <div class="card flush"><${DataTable} columns=${columns} rows=${rows} rowKey=${r => r.symbol}
       sort=${{ key: 'date', dir: 'asc' }} empty="No results expected in the next 6 weeks." limit=${10} /></div>
     <${More} label="Where these dates come from">
-      <p>${t("TradingView estimates each company's next results date from when it reported before; EGX companies often publish a few days earlier or later. Only companies that reported on TradingView in the last 13 months are listed.")}</p><//>
+      <p>${t("TradingView guesses each next results date from past reports. EGX companies often publish a few days early or late. Only companies that reported in the last 13 months are listed.")}</p><//>
   </section>`;
 }
 
@@ -119,11 +117,11 @@ function RightsPast({ h, open }) {
   const p = v => fmt.pct(v, 0, false), r = v => fmt.pct(v, 1);
   return html`<${More} label=${t('What {n} past rights issues did (since {year})', { n: h.n, year: h.since })} open=${open}>
     <ul class="reasons">
-      <li>${t('Bought on the last day to get the rights: up the next day (split day) {up} of the time, usually {median}.', { up: p(h.ex_day.up), median: r(h.ex_day.median) })}</li>
-      <li>${t('A week later most of that gain was gone: up {up} of the time, usually {median}.', { up: p(h.week.up), median: r(h.week.median) })}</li>
-      <li>${t('After 3 months: up {up} of the time, usually {median}. Better than EGX30 {beat} of the time. 1 in 10 lost {p10} or more; 1 in 10 gained {p90} or more.', { up: p(h.quarter.up), median: r(h.quarter.median), beat: p(h.quarter.beat), p10: fmt.pct(-h.quarter.p10, 0, false), p90: fmt.pct(h.quarter.p90, 0, false) })}</li>
+      <li>${t('Bought on the last day for the rights: up the next day {up} of the time. Usually {median}.', { up: p(h.ex_day.up), median: r(h.ex_day.median) })}</li>
+      <li>${t('A week later, most of that gain was gone. Up {up} of the time, usually {median}.', { up: p(h.week.up), median: r(h.week.median) })}</li>
+      <li>${t('After 3 months: up {up} of the time, usually {median}. Beat EGX30 {beat} of the time. 1 in 10 lost {p10} or more. 1 in 10 gained {p90} or more.', { up: p(h.quarter.up), median: r(h.quarter.median), beat: p(h.quarter.beat), p10: fmt.pct(-h.quarter.p10, 0, false), p90: fmt.pct(h.quarter.p90, 0, false) })}</li>
       <li>${t('Bought on the news day instead: better than EGX30 only {beat} of the time.', { beat: p(h.announced.beat) })}</li>
-      <li>${t('Bought on the split day (no rights): down a week later {down} of the time, usually {median}.', { down: p(1 - h.after.up), median: r(h.after.median) })}</li>
+      <li>${t('Bought on the split day (no rights): down a week later {down} of the time. Usually {median}.', { down: p(1 - h.after.up), median: r(h.after.median) })}</li>
     </ul>
     <p class="faint">${t("This counts the rights at their value. You get it only if you pay to subscribe, or sell the rights (often for less). New shares can be sold only weeks later. This is the past, not a promise.")}</p><//>`;
 }

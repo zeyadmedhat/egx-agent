@@ -228,7 +228,7 @@ function DeviceCard({ telegram, scanUrl }) {
   };
   return html`<div class="card settings-section" id="sec-alerts">
     <div class="card-title" style="font-size:14px;color:var(--text)"><${Icon} name="shield" size=${16} />${t('Your data on this device')}</div>
-    <p class="muted" style="font-size:13px">${t("Your portfolio and settings are saved only in this browser. Nobody else can see them, not even the person who runs the site. They don't move to your other phone or computer by themselves: connect Telegram below (it keeps the newest copy for your other devices), or download a backup here and restore it there.")}</p>
+    <p class="muted" style="font-size:13px">${t("Your portfolio and settings are saved only in this browser. Nobody else can see them, not even the site's owner. They don't move to your other phone or computer by themselves. Connect Telegram below to keep the newest copy for your other devices. Or download a backup here and restore it there.")}</p>
     <div class="device-actions">
       <button class="btn primary" onClick=${download}><${Icon} name="download" />${t('Download a backup')}</button>
       <label class="btn"><${Icon} name="refresh" />${t('Restore from a backup')}
@@ -242,7 +242,7 @@ function DeviceCard({ telegram, scanUrl }) {
           <li><div>${tp('Press {connect} below, then {start} in Telegram.', { connect: html`<b>${t('Connect Telegram')}</b>`, start: html`<b>Start</b>` })}</div></li>
           <li><div>${t(telegram.worker ? 'The bot answers "Connected" right away. Then you get the latest signals, and new ones after each close.'
             : 'The bot answers "Connected" within about 3 hours: it checks for new people a few times a day. Then you get the latest signals, and new ones after each close.')}</div></li>
-          ${telegram.worker && html`<li><div>${t('It also links your portfolio on this device: after each close the bot tells you what to do with your own positions (sell, move a stop), and your portfolio comes with you to your other phone or computer.')}</div></li>`}
+          ${telegram.worker && html`<li><div>${t('It also links your portfolio on this device. After each close the bot tells you what to do with your positions (sell, move a stop). And your portfolio comes with you to your other phone or computer.')}</div></li>`}
         </ol>
         <div class="device-actions">
           <a class="btn primary" href=${connect ? connect.href : telegram.link} target="_blank" rel="noopener noreferrer"
@@ -313,9 +313,7 @@ function BotPortfolio({ bot }) {
     toast(t('Sent. Your other linked devices get this portfolio when they next open the site.'));
   });
   return html`<div class="sub-block"><h3>${t('Your portfolio in Telegram')}</h3>
-    <div class="muted" style="font-size:12.5px">${t('The bot keeps a copy of your portfolio for your Telegram chat only. '
-      + 'After each close it tells you what to do with your own positions, it answers /portfolio and /watchlist, and '
-      + 'your other phone or computer brings the newest copy when you link it too.')}</div>
+    <div class="muted" style="font-size:12.5px">${t('The bot keeps a copy of your portfolio, for your Telegram chat only. After each close it tells you what to do with your positions. It answers /portfolio and /watchlist. Your other phone or computer gets the newest copy when you link it too.')}</div>
     ${status === 'linked' ? html`
       <p style="font-size:13px;margin-top:10px">✅ ${t('Linked to @{bot} from this browser.', { bot })}</p>
       <div class="device-actions">
@@ -345,8 +343,8 @@ function BotPortfolio({ bot }) {
     ${sending && html`<${Confirm} title=${t(sending === 'previous' ? 'Put back the earlier portfolio?' : "Send this browser's portfolio?")}
       confirmLabel=${t(sending === 'previous' ? 'Put it back' : 'Send it')} danger
       text=${t(sending === 'previous'
-        ? "This browser's portfolio goes back to the earlier one, and it replaces the bot's copy and your other linked devices' copy too."
-        : "The bot's copy, and your other linked devices' copy when they next open the site, are replaced by this browser's portfolio. Use it on the device whose portfolio is right.")}
+        ? "This browser's portfolio goes back to the earlier one. It also replaces the bot's copy and your other linked devices' copy."
+        : "This browser's portfolio replaces the bot's copy. Your other linked devices get it when they next open the site. Use this on the device whose portfolio is right.")}
       onConfirm=${send} onClose=${() => setSending(null)} />`}
     ${asking && html`<${Confirm} title=${t('Bring your portfolio from Telegram?')} confirmLabel=${t('Bring it here')} danger
       text=${t("This browser's portfolio is replaced by the copy the bot has (the newest from any of your devices).")}
@@ -440,8 +438,8 @@ function AlertsCard() {
   }
   return html`<div class="card settings-section" id="sec-alerts">
     <div class="card-title" style="font-size:14px;color:var(--text)"><${Icon} name="bell" size=${16} />Alerts on your phone (Telegram)</div>
-    <p class="muted" style="font-size:13px;margin-bottom:16px">After each scan, your orders for the next session arrive in Telegram:
-      what to sell, which stops to move up and what to buy. Free, and set up once.</p>
+    <p class="muted" style="font-size:13px;margin-bottom:16px">After each scan, your orders for the next session arrive in Telegram.
+      What to sell, which stops to move up, and what to buy. Free, and set up once.</p>
     ${body}
     ${tg.error && html`<div style="margin-top:12px"><${Callout} tone="bad">The last message failed
       (${fmt.datetime(tg.error.at)}): ${tg.error.message}<//></div>`}

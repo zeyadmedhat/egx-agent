@@ -163,7 +163,7 @@ export function checkup({ positions, summary, limits, mix, corr }) {
   if (risk != null && risk * 100 > limits.max_open_risk_pct + 0.05) {
     out.push({ level: 'warn', title: ['Your stops put {pct} of your account at risk (your limit is {lim}%).', {
       pct: `${(risk * 100).toFixed(1)}%`, lim: limits.max_open_risk_pct }],
-    todo: ['The agent sizes new buys at 0 until this comes down, as a stop rises or a position is sold.', {}] });
+    todo: ['The agent sizes new buys at 0 until this comes down. That happens as a stop rises or a position is sold.', {}] });
   }
   if (corr && corr.average != null && corr.average >= 0.6 && positions.length >= 2) {
     out.push({ level: 'warn', title: ['Your stocks move closely together ({r}).', { r: corr.average.toFixed(2) }],

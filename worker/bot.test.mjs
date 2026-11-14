@@ -417,6 +417,10 @@ console.log("why, morning, screenshots ok")
   assert.deepEqual(fed, ["KORAR1"])
   assert.deepEqual(await r2.json(), { KORA: { price: 2.73, change: -0.0144 }, KORAR1: { price: 2.63, change: 0.1336 } })
   console.log("quotes ok")
+  const { flow } = await import("./bot.js")
+  const f = await (await flow(async () => ({ ok: true, json: async () => ({ data: [{ s: "EGX:AIH", d: ["AIH", 4.1, 2.5, 3e7, 1.8] },
+    { s: "EGX:X", d: ["X", 0, 1, 0, null] }] }) }))).json()
+  assert.deepEqual(f.rows, [["AIHC", 4.1, 0.025, 3e7, 1.8]])
 }
 
 { // next week (Predictions → Next week) and EGX30 (Market → EGX30)

@@ -62,7 +62,7 @@ export function PredictPage() {
       <${About} m=${m} data=${data} r=${r} onTrain=${train} running=${running} />
     <//>
     <${YearBars} years=${r.years} pick="top" label="Its top 10%" />
-    <p class="faint note" style="margin-top:14px">${t('Even its best picks reach the target first only about {pct} of the time, so always use the stop. A second opinion, not advice.', { pct: fmt.pct(r.top.hit, 0, false) })}</p>`}`;
+    <p class="faint note" style="margin-top:14px">${t('Even its best picks reach the target first only about {pct} of the time. Always use the stop. A second opinion, not advice.', { pct: fmt.pct(r.top.hit, 0, false) })}</p>`}`;
 }
 
 // Next week: each stock's honest chance (predict.week_chances) of rising 1.5× its daily range before falling as far
@@ -87,7 +87,7 @@ function Week({ data, rows, filters }) {
     </section>
     <${YearBars} years=${years} pick="strong" label="Strong picks" />
 
-    <p class="faint note" style="margin-top:14px">${t('Even its strong picks reach the target first only about {pct} of the time, so always use the stop. A second opinion, not advice.', { pct: fmt.pct(s.hit, 0, false) })}</p>`;
+    <p class="faint note" style="margin-top:14px">${t('Even its strong picks reach the target first only about {pct} of the time. Always use the stop. A second opinion, not advice.', { pct: fmt.pct(s.hit, 0, false) })}</p>`;
 }
 
 function WeekTable({ rows, base, top }) {
@@ -117,18 +117,18 @@ function Intro({ data, onTrain, running }) {
   return html`<div class="card predict-intro">
     <${JobProgress} kind="train" title="Training the prediction model…" />
     <h3>${t('What it predicts')}</h3>
-    <p>For every actively traded stock, after each close: if you bought at the next open with the agent's usual plan (${lv.levels_mode === 'chart'
+    <p>For every actively traded stock, after each close. Say you bought at the next open with the agent's usual plan (${lv.levels_mode === 'chart'
       ? `the stop just under the nearest solid support and the target just under resistance, kept ${lv.stop_min_pct}–${lv.stop_max_pct}% under the price`
-      : `stop ${lv.atr_stop_mult}× the average daily range below, kept ${lv.stop_min_pct}–${lv.stop_max_pct}% under the price; target ${lv.target_r}× the risk above`}),
-      what is the chance the <b>target is reached before the stop</b>, within 10 sessions (~2 weeks) and within
-      20 sessions (~1 month)?</p>
+      : `stop ${lv.atr_stop_mult}× the average daily range below, kept ${lv.stop_min_pct}–${lv.stop_max_pct}% under the price; target ${lv.target_r}× the risk above`}).
+      What is the chance the <b>target is reached before the stop</b>? Within 10 sessions (~2 weeks), and within
+      20 sessions (~1 month).</p>
     <h3>${t('How it learns')}</h3>
     <ul class="reasons">
       <li>${data.deep ? '' : `First a one-time download of ${data.deep_years} years of prices (about 4 minutes). `}It learns from
         about 10 years of every actively traded EGX stock: roughly 250,000 past examples.</li>
-      <li>It looks at ${data.features['10']} measures: trend, momentum, volume, volatility, how the stock compares with its sector, and how the
-        whole market is doing, Egypt-wide numbers (the dollar rate, interest rates and inflation), and each company's
-        dividends, bonus shares and rights issues: when the next ex-date is, and when the last one was announced.</li>
+      <li>It looks at ${data.features['10']} measures. Trend, momentum, volume and volatility. How the stock compares with its
+        sector, and how the whole market is doing. Egypt-wide numbers: the dollar, interest rates and inflation. And each
+        company's dividends, bonus shares and rights issues: the next ex-date, and when the last one was announced.</li>
       <li>It's tested honestly: each year is predicted by a version trained only on the years before it. Those are the results
         you'll see, and it tells you plainly if it has no edge.</li>
       <li>After that it updates every scan, and retrains itself once a month.</li>
@@ -175,7 +175,7 @@ function ChanceTable({ rows, base }) {
 export function Recent({ rec }) {
   if (!rec || !rec.n) return null;
   return html`<p class="recent-line"><${Icon} name="history" size=${14} />
-    ${t('Last {days} sessions: of its daily top {top}, {hits} reached the target first and {misses} did not, averaging {ret} a trade (all scored stocks {all}).', {
+    ${t('Last {days} sessions: of its daily top {top}, {hits} reached the target first and {misses} did not. Average: {ret} a trade (all scored stocks: {all}).', {
       days: fmt.int(rec.days), top: fmt.int(rec.top), hits: fmt.int(rec.hits), misses: fmt.int(rec.misses),
       ret: fmt.pct(rec.ret, 2), all: fmt.pct(rec.all_ret, 2) })}
     <span class="faint"> ${fmt.date(rec.from)} – ${fmt.date(rec.to)}</span></p>`;
@@ -225,7 +225,7 @@ function About({ m, data, r, onTrain, running }) {
       <span class="k">${t('Scored today')}</span><span class="v">${fmt.int(data.count)} actively traded stocks</span>
     </div>
     <div>
-      <p class="muted" style="font-size:13px">${t('It looks at {n} measures: the chart (trend, momentum, volume, support and resistance), the company\'s results as they were known each day (profit, sales, growth, debt, dividend), dividends and bonus shares coming, and Egypt-wide numbers (the dollar, interest rates, inflation). It rates stocks after every scan and retrains itself once a month.', { n: fmt.int(data.features[String(HZ)]) })}</p>
+      <p class="muted" style="font-size:13px">${t('It looks at {n} measures. The chart: trend, momentum, volume, support and resistance. The company\'s results as known each day: profit, sales, growth, debt, dividend. Coming dividends and bonus shares. And Egypt-wide numbers: the dollar, interest rates, inflation. It rates stocks after every scan and retrains once a month.', { n: fmt.int(data.features[String(HZ)]) })}</p>
       ${!STATIC && html`<button class="btn sm" style="margin-top:12px" onClick=${onTrain} disabled=${running}>
         <${Icon} name="refresh" />${t('Retrain now')}</button>`}
     </div>

@@ -109,7 +109,7 @@ function TradingChart({ is, day, live, share }) {
     ${any ? html`<${LineChart} lines=${lines} height=${280} format="price" key=${Object.keys(rights).length} />`
       : html`<div class="rt-days">${tr.days.map(d => html`<div><b>${+d.slice(8)}</b><span>${month(d)}</span></div>`)}</div>
         <p class="faint s" style="margin:8px 0 0">${t('Fills in day by day from {date}, when the rights start trading.', { date: fmt.date(tr.days[0], false) })}</p>`}
-    <p class="faint s" style="margin:8px 0 0">${t('When the blue line is under the dashed one, the rights sell for less than they are worth if you subscribe (the share price less {p}).', { p: fmt.price(is.price) })}</p>
+    <p class="faint s" style="margin:8px 0 0">${t('When the blue line is under the dashed one, the rights sell for less than their worth. Their worth if you subscribe: the share price less {p}.', { p: fmt.price(is.price) })}</p>
   </article>`;
 }
 
@@ -163,7 +163,7 @@ function Choices({ is, pos, price, at }) {
           : t('You get 1 new share.'), t('Thndr: until {date}', { date: fmt.date(at('Last day to subscribe on Thndr'), false) })])}
       ${card('xCircle', 'down', 'Do nothing', `−${money(n * price)}`, [t('The rights expire and that value is lost.')])}
     </div>
-    <p class="faint s" style="margin:10px 0 0">${t('You can mix: sell some rights and subscribe with the rest. Thndr charges 60 EGP to subscribe (free on Thndr Trader), and your national ID must stay valid until 45 days after the subscription ends.')}</p>
+    <p class="faint s" style="margin:10px 0 0">${t('You can mix: sell some rights and subscribe with the rest. Thndr charges 60 EGP to subscribe (free on Thndr Trader). Your national ID must stay valid until 45 days after the subscription ends.')}</p>
   </article>`;
 }
 
@@ -189,7 +189,7 @@ function Options({ is, pos, price, sharePrice, cfg, base }) {
       ${line('Break-even', fmt.price(r.break_even), t('needs {v}', { v: fmt.pct(r.break_even / sharePrice - 1, 0) }))}
       ${line('Profit / loss now', html`<span class=${r.pnl >= 0 ? 'up' : 'down'}>${fmt.signed(r.pnl)}</span>`)}
     </div>`)}</div>
-    <p class="faint s" style="margin:10px 0 0">${t('Break-even: the price at which selling all your shares, after the selling fee, gets back everything they really cost (the rights cash taken off). Profit / loss counts your shares at today’s price; cash left over isn’t counted. Subscribed shares can be sold only once they are listed.')}</p>
+    <p class="faint s" style="margin:10px 0 0">${t('Break-even: the price where selling all your shares gets back everything they cost. That\'s after the selling fee, with the rights cash taken off. Profit / loss counts your shares at today’s price. Cash left over isn’t counted. Subscribed shares can be sold only once they are listed.')}</p>
   </article>`;
 }
 

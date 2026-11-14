@@ -62,7 +62,7 @@ export function Egx30Page() {
     ${d.levels && html`<${Levels} z=${d.levels} />`}
 
     <section class="section">
-      <${SectionHead} title="Returns" hint="In dollars: what a dollar investor made, after the pound's moves. EGX70: smaller companies, all weighted the same." />
+      <${SectionHead} title="Returns" hint="In dollars: what a dollar investor made. EGX70: smaller companies, each with the same weight." />
       <div class="card flush"><${DataTable} rows=${d.periods} rowKey=${r => r.key} columns=${[
         { key: 'key', label: 'Period', sortable: false, render: r => html`<b>${t(PERIOD[r.key] || r.key)}</b>` },
         { key: 'egp', label: 'In pounds', align: 'r', sortable: false, render: r => pct(r.egp) },
@@ -110,8 +110,7 @@ function Levels({ z }) {
   </div>`;
 }
 
-const LEVELS_HOW = 'Prices where buyers or sellers stepped in before: the index\'s swing lows and highs of the last year, '
-  + 'Fibonacci retracements (23.6–78.6%) and extensions of its latest big rise, its 20- and 50-day averages, monthly '
-  + 'pivot points, the level where the most shares traded in 6 months and the 1-year high, the same tools as each '
-  + 'stock\'s levels. Levels that sit together make one zone; the more tools agree, the stronger it is. They show where '
-  + 'the index has turned before, not where it will turn.';
+const LEVELS_HOW = 'Prices where buyers or sellers stepped in before. Same tools as each stock\'s levels. Swing highs and '
+  + 'lows of the last year. Fibonacci levels. The 20- and 50-day averages. Monthly pivots. The '
+  + 'most-traded price (6 months). The 1-year high. Levels close together make one zone. The more tools '
+  + 'agree, the stronger it is. They show where the index turned before. Not where it will turn.';

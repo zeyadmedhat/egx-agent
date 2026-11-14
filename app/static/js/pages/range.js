@@ -65,7 +65,7 @@ export function PriceRange({ r, sym, series, plan, ai, results, cautions }) {
       ${due && html`<span class="rg-chip warn"><${Icon} name="alert" size=${13} />${t('Results expected around {date}: ranges with results inside held a little less often (77% vs 79%)', { date: fmt.date(results, false) })}</span>`}
       ${ex && html`<span class="rg-chip warn"><${Icon} name="alert" size=${13} />${t('Ex-dividend {date}: the price drops by the dividend that morning', { date: fmt.date(ex.date, false) })}</span>`}
     </div>
-    ${reset && html`<p class="warn-text ai-reset">${t("Ex-date of the {what}: {date}, inside this window. That day the price is reset for the new shares, so a range in today's prices would be wrong. It comes back once the price history is re-based for them.",
+    ${reset && html`<p class="warn-text ai-reset">${t("Ex-date of the {what}: {date}, inside this window. That day the price resets for the new shares. So a range in today's prices would be wrong. It comes back once the price history is re-based.",
       { what: t(RESET[reset.reset.kind]), date: fmt.date(reset.reset.date, false) })}</p>`}
     ${s && !s.reset && html`<div class="rg-touch">
       <div class="range-head"><h4>${t('Chance it touches a price on the way')}</h4><${Seg} options=${STEPS} value=${k} onChange=${setK} /></div>
@@ -205,13 +205,4 @@ function Cone({ r, series, plan, ai }) {
       ${mids.length > 0 && html`<span><i class="rg-ai-key"></i>${t("The AI models' middle guess (card below)")}</span>`}
     </div>
   </div>`;
-}
-
-// The stop-loss and target cards: the chance each trades by the end of the month's range (separate chances).
-export function ReachLine({ r, stop, target }) {
-  const s = r && r.steps['20'] && !r.steps['20'].reset ? r.steps['20'] : null;
-  const up = s && target > r.close ? chanceText(reachChance(s, r.close, target)) : null;
-  const down = s && stop > 0 && stop < r.close ? chanceText(reachChance(s, r.close, stop)) : null;
-  return (up || down) && html`<p class="reach-line"><span class="faint">${t('Chance it trades there by {date}', { date: fmt.date(s.target, false) })}</span>
-    ${up && html`<span><b class="up">${t('Target')}</b> ${up}</span>`}${down && html`<span><b class="down">${t('Stop')}</b> ${down}</span>`}</p>`;
 }

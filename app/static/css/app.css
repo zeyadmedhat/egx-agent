@@ -1423,8 +1423,6 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .range-check { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; }
 .range-check .input { max-width: 140px; }
 .range-answer { margin: 8px 0 0; font-weight: 600; }
-.reach-line { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 10px 0 0; font-size: 12.5px; }
-.reach-line .faint { flex-basis: 100%; }
 .rg-cone .ai-legend { margin-top: 2px; }
 .ai-draw .rg-fill { fill: var(--accent); opacity: .16; }
 .ai-draw .rg-week { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 2 3; opacity: .7; }
@@ -1588,3 +1586,57 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .lay-tile.pass { border-color: var(--up); }
 .lay-score { margin-inline-start: auto; font-size: 24px; font-weight: 800; } .lay-score small { font-size: 13px; color: var(--text-3); }
 .lay-miss { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 8px; }
+
+/* Money flow page (pages/flow.js) */
+.flow-span { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; font-size: 13px; }
+.flow-split { display: flex; height: 14px; border-radius: 7px; overflow: hidden; gap: 2px; }
+.flow-split .up { background: var(--up); }
+.flow-split .down { background: var(--down); }
+.flow-split-l { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-3); margin-top: 4px; }
+.flow-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.flow-kpis > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2, color-mix(in srgb, var(--text) 4%, transparent)); font-size: 12px; }
+.flow-kpis b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.flow-bub, .flow-tl { width: 100%; height: auto; display: block; }
+.flow-bub a, .flow-tl a { cursor: pointer; }
+.flow-q.up { fill: color-mix(in srgb, var(--up) 6%, transparent); }
+.flow-q.down { fill: color-mix(in srgb, var(--down) 6%, transparent); }
+.flow-ql { font-size: 12px; fill: var(--text-3); }
+.flow-grid { stroke: var(--border); stroke-width: 1; }
+.flow-axis { stroke: var(--text-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.flow-tick { font-size: 11px; fill: var(--text-3); font-variant-numeric: tabular-nums; }
+.flow-sym { font-size: 11px; font-weight: 650; fill: var(--text); pointer-events: none; }
+.flow-dot { stroke-width: 1.5; }
+.flow-dot.up { fill: color-mix(in srgb, var(--up) 35%, transparent); stroke: var(--up); }
+.flow-dot.down { fill: color-mix(in srgb, var(--down) 35%, transparent); stroke: var(--down); }
+.flow-dot.none { fill: color-mix(in srgb, var(--text-3) 30%, transparent); stroke: var(--text-3); }
+.flow-dot:hover { stroke-width: 3; }
+.flow-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+.flow-top { display: grid; grid-template-columns: 4.5em 1fr; gap: 0 8px; padding: 5px 0; border-top: 1px solid var(--border); color: inherit; text-decoration: none; font-size: 13px; }
+.flow-top .faint { grid-column: 2; font-size: 11.5px; }
+@media (max-width: 560px) { .flow-lists { grid-template-columns: 1fr; } .flow-sym, .flow-tick, .flow-ql { font-size: 12.5px; } }
+.flow-live { border-color: color-mix(in srgb, var(--info) 45%, var(--border)); }
+.flow-live .live-dot { margin-inline-end: 6px; }
+.flow-bare { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.flow-hot { display: flex; flex-wrap: wrap; gap: 8px; }
+.flow-chip { display: flex; gap: 6px; align-items: baseline; padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; color: inherit; text-decoration: none; }
+.flow-fg { display: flex; align-items: center; gap: 8px; font-weight: 650; margin: 14px 0 8px; }
+.flow-tag { width: 10px; height: 10px; border-radius: 3px; background: var(--text-3); }
+.flow-tag.up { background: var(--up); } .flow-tag.down { background: var(--down); }
+.flow-feet { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.flow-foot { display: block; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; color: inherit; text-decoration: none; font-size: 12.5px; line-height: 1.45; }
+.flow-foot:hover { border-color: var(--text-3); }
+.flow-foot p { margin: 6px 0 0; }
+.flow-foot-h { display: flex; align-items: center; gap: 8px; }
+.flow-foot-h b { font-size: 15px; }
+.flow-foot-h .faint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-spark { width: 90px; height: 30px; flex: none; }
+.flow-line { fill: none; stroke: var(--text-3); stroke-width: 1.6; }
+.flow-line.up { stroke: var(--up); } .flow-line.down { stroke: var(--down); }
+.flow-press { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin-top: 8px; font-size: 11px; }
+
+/* The switch inside a merged tab (main.js SubNav): Market → Overview / EGX30 / Heatmap */
+.subswitch { display: flex; width: max-content; margin: -8px 0 18px; }
+.subswitch a { display: inline-flex; align-items: center; white-space: nowrap; height: 30px; padding: 0 14px;
+  border-radius: var(--r-sm); color: var(--text-2); font-size: 13.5px; font-weight: 600; text-decoration: none; }
+.subswitch a:hover { color: var(--text); }
+.subswitch a.on { background: var(--panel-3); color: var(--text); }

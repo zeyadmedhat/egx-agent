@@ -535,6 +535,17 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def market(d: views.Data = Depends(get_data)):
         return JSON(views.market_view(d))
 
+    @app.get("/api/flow/live")
+    def money_flow_live(d: views.Data = Depends(get_data)):
+        try:
+            return JSON(prices.live_market(d.cfg.get("symbol_aliases")))
+        except Exception:           # offline or TradingView refused: the page just leaves the live part out
+            return JSON({})
+
+    @app.get("/api/flow")
+    def money_flow(d: views.Data = Depends(get_data)):
+        return JSON(views.money_flow(d))
+
     @app.get("/api/egx30")
     def egx30(d: views.Data = Depends(get_data)):
         return JSON(views.index_view(d))

@@ -899,6 +899,41 @@ def test_market_movers_leave_out_splits_the_prices_dont_show_yet(tmp_path, cfg):
     assert 0 < sum(r["usual"] for r in money) <= 1 + 1e-9
 
 
+
+def test_money_flow_counts_money_in_on_up_days_and_skips_a_split(tmp_path, cfg):
+    from app import views
+    conn = db.connect(_site_db(tmp_path / "egx.db"))
+    last = conn.execute("SELECT MAX(date) FROM prices").fetchone()[0]
+    conn.execute("UPDATE prices SET close = close / 4 WHERE symbol='BBB' AND date=?", (last,))   # a 1:4 split
+    conn.commit()
+    f = views.money_flow(views.Data(conn, cfg, views.Cache()))
+    day = f["spans"]["1"]
+    assert day["in"] - day["out"] == pytest.approx(day["net"])
+    assert day["in"] + day["out"] <= day["value"] + 1e-6
+    assert "BBB" not in {r["symbol"] for r in day["stocks"]}          # the split's drop isn't money out
+    assert sum(r["net"] for r in day["sectors"]) == pytest.approx(day["net"])
+
+
+def test_whale_footprints_spot_a_huge_flat_day_and_closes_near_the_high():
+    import numpy as np
+    import pandas as pd
+    from app import views
+    n = 100
+    idx = pd.Index([f"d{i:03d}" for i in range(n)])
+    close = pd.DataFrame({"AAA": 10.0, "BBB": 10.0}, index=idx)
+    high, low = close * 1.02, close * 0.98
+    high.iloc[-10:, 1] = close.iloc[-10:, 1] * 1.001        # BBB closes at its high the last 10 sessions
+    volume = pd.DataFrame({"AAA": 1e6, "BBB": 1e6}, index=idx)
+    volume.iloc[-2, 0] = 4e6                                 # AAA: 4× its money, price unchanged
+    volume.iloc[-20:, 1] = 1.5e6                             # BBB: 1.5× usual for 20 sessions
+    traded = close * volume
+    chg = close.pct_change()
+    out = {r["symbol"]: r for r in views.footprints(close, high, low, volume, traded, chg,
+                                                       pd.Series(True, index=close.columns),
+                                                       pd.Series("X", index=close.columns))}
+    assert out["AAA"]["kinds"] == ["big_flat"] and out["AAA"]["big"]["x"] == pytest.approx(4)
+    assert "buying_streak" in out["BBB"]["kinds"] and "quiet_buying" in out["BBB"]["kinds"]
+
 def test_friends_set_alerts_in_telegram_and_get_them_after_a_close(tmp_path, monkeypatch):
     from app import alerts
     conn = db.connect(_site_db(tmp_path / "egx.db"))

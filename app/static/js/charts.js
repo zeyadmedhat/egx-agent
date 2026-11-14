@@ -261,7 +261,7 @@ export function PriceChart({ series, levels = [], fills = [], bars = 250, show, 
 const PICS = {
   waves: ['Elliott waves', 'M4 52 L22 34 L30 42 L52 14 L62 26 L80 6 L92 22 L100 14 L116 34',
     [[22, 34, '1'], [30, 42, '2'], [52, 14, '3'], [62, 26, '4'], [80, 6, '5'], [92, 22, 'A'], [100, 14, 'B'], [116, 34, 'C']],
-    'The theory: a price moves in 5 steps (1, 3 and 5 go with the move, 2 and 4 are small pullbacks), then pulls back in 3 (A, B, C).',
+    'The theory: a price moves in 5 steps. Steps 1, 3 and 5 go with the move. Steps 2 and 4 are small pullbacks. Then it pulls back in 3 steps (A, B, C).',
     'The numbers on the chart mark these steps. People often count the same chart differently.'],
   gann: ['Gann', 'M6 54 L40 4 M6 54 L76 4 M6 54 L116 18 M6 54 L116 36 M6 54 L116 46',
     [[110, 14, '1×1']],

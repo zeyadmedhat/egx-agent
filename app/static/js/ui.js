@@ -325,7 +325,7 @@ export function SectionHead({ title, count, hint, children }) {
 }
 
 export function Disclaimer() {
-  return html`<div class="disclaimer">${t('Rules-based signals to support your own decisions. Not investment advice: you decide and place every order yourself. Past (backtest) results do not guarantee future returns.')}</div>`;
+  return html`<div class="disclaimer">${t('Rules-based signals to help you decide. Not investment advice. You decide and place every order. Past results don\'t promise future ones.')}</div>`;
 }
 
 // ------------------------------------------------------------------ plain-language helpers (ideas from esthmr.com)

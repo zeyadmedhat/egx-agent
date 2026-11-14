@@ -315,8 +315,8 @@ def save_corporate_actions(conn: sqlite3.Connection, rows: list[dict]) -> int:
 KNOWN_ACTIONS = [
     {"symbol": "KORA", "type": "Capital Increase - Rights Issue", "kind": "rights", "announced": "2026-10-04",
      "effective": "2026-10-14",
-     "note": "0.9 new share for each share held, at 0.205 EGP each (0.20 + 0.005 fees). Subscription 18 Oct to "
-             "10 Nov 2026 (first round to 1 Nov at QNB, 29 Oct on Thndr); the rights trade on their own 18 to 27 Oct, between Egyptians only.",
+     "note": "0.9 new share for each share held, at 0.205 EGP each (with 0.005 fees). Subscription: 18 Oct to "
+             "10 Nov 2026 (QNB's first round to 1 Nov, Thndr to 29 Oct). The rights traded alone 18–27 Oct, between Egyptians only.",
      # the rights page's milestones (Thndr's, Amwal Al Ghad / Al Mal News 12–13 Oct 2026): [day, Cairo time, what,
      # what the shares did then, their close (raw, before TradingView's re-base)]
      "schedule": [["2026-10-04", "", "Announced", "KORA closed at 6.87", 6.87],
@@ -647,7 +647,7 @@ def cautions(conn: sqlite3.Connection, symbol: str, today: str, hold_days: int =
     if results and tomorrow <= results <= end:
         # A guide, not a rule: the agent's tests don't cover results days, so it neither skips nor sizes for them.
         out.append({"kind": "results", "date": results, "level": "info",
-                    "text": f"Results expected around {results} (TradingView's estimate): the price can move a lot "
+                    "text": f"Results expected around {results} (TradingView's estimate). The price can move a lot "
                             "either way when they come out."})
     since = (day - timedelta(days=news_days)).strftime("%Y-%m-%dT00:00")
     for n in _rows(conn.execute(

@@ -392,6 +392,24 @@ def sanity_flags(df: pd.DataFrame, index_last: pd.Timestamp | None = None) -> li
 SCREENER = "https://scanner.tradingview.com/egypt/scan"
 
 
+def live_market(aliases: dict[str, str] | None = None) -> dict:
+    """Every EGX stock's session so far from TradingView's screener (about 15 minutes late), for the Money flow page:
+    {at, rows: [[symbol, price, change, traded EGP, volume against its 10-day average]]}. The same as worker/bot.js flow."""
+    import requests
+
+    back = {v: k for k, v in {**TV_ALIASES, **{k.upper(): v.upper() for k, v in (aliases or {}).items()}}.items()}
+    r = requests.post(SCREENER, json={"columns": ["name", "close", "change", "Value.Traded", "relative_volume_10d_calc"],
+                                      "range": [0, 400]}, timeout=10)
+    r.raise_for_status()
+    rows = []
+    for row in r.json().get("data") or []:
+        name, price, change, value, rel = (row.get("d") or [None] * 5)[:5]
+        if name and price and price > 0:
+            rows.append([back.get(name, name), float(price), None if change is None else float(change) / 100,
+                         float(value or 0), None if rel is None else float(rel)])
+    return {"at": int(time.time() * 1000), "rows": rows}
+
+
 def live_quotes(symbols: list[str], aliases: dict[str, str] | None = None) -> dict[str, dict]:
     """The latest price of a few stocks from TradingView's screener, about 15 minutes late during the session (the
     same as its own price boxes): {symbol: {price, change}}, change against the last close. Stocks it doesn't know

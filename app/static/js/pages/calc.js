@@ -228,9 +228,9 @@ function CertificateTool({ acct }) {
           ${real != null && html`<span class="k">${t('A year after inflation ({infl}%)', { infl: fmt.num(m.inflation, 1) })}</span>
             <span class=${cls('v', tone(real))}>${fmt.pct(real, 1)}</span>`}
         </div>
-        <p class="muted" style="font-size:13px;margin-top:12px">${t('To beat it, your trades need more than {rate}% a year after fees ({fee}% a side) and after the losing trades.', {
+        <p class="muted" style="font-size:13px;margin-top:12px">${t('To beat it, your trades need more than {rate}% a year. That\'s after fees ({fee}% a side) and after the losing trades.', {
           rate: fmt.num(rate * 100, 2), fee })}</p>
-        <p class="faint" style="font-size:12px;margin-top:10px">${t("The interest is fixed when you buy, isn't added to the amount (it's paid out), and the money is locked until the end: breaking a certificate early usually costs some of the interest. Your account against a bank deposit is on My Portfolio → Health.")}</p>
+        <p class="faint" style="font-size:12px;margin-top:10px">${t("The interest is fixed when you buy. It's paid out, not added to the amount. The money is locked until the end. Breaking a certificate early usually costs some interest. Your account against a bank deposit is on My Portfolio → Health.")}</p>
       </div>
     </div>`;
 }

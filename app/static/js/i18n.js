@@ -30,8 +30,8 @@ const NOTES = [
   // a stock's "Good to know now" (data/news.py cautions), after ui.js Cautions writes its dates as "11 Nov 2026"
   [/^Goes ex-dividend on (.+?)(?: \(([\d.]+) EGP a share\))?: the price drops by the dividend that morning and holders get it in cash\. The agent lowers the stop and target by the same amount that day\.$/,
     (m, d, a) => `تاريخ استحقاق التوزيع ${d}${a ? ` (${a} جنيه للسهم)` : ''}: ينخفض السعر بقيمة التوزيع صباح ذلك اليوم ويحصل المساهمون عليه نقدًا. يخفّض الوكيل الوقف والهدف بالقيمة نفسها في ذلك اليوم.`],
-  [/^Results expected around (.+?) \(TradingView's estimate\): the price can move a lot either way when they come out\.$/,
-    'النتائج متوقعة نحو $1 (تقدير TradingView): قد يتحرك السعر كثيرًا في أي اتجاه عند صدورها.'],
+  [/^Results expected around (.+?) \(TradingView's estimate\)[.:] [Tt]he price can move a lot either way when they come out\.$/,
+    'النتائج متوقعة نحو $1 (تقدير TradingView). قد يتحرك السعر كثيرًا في أي اتجاه عند صدورها.'],
   [/^(.+?) on (.+?): the price is re-based that day and you get more shares, so it isn't a loss\.$/,
     '$1 في $2: يُعدَّل السعر في ذلك اليوم وتحصل على أسهم أكثر، فهذه ليست خسارة.'],
   [/^Rights issue, ex-date (.+?): holders at the close before can subscribe to new shares(?:: (.+?))?\. That morning the price drops by the right's value, which isn't a loss\. Subscribe or sell the rights in time, or their value is lost\.$/,

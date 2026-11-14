@@ -168,7 +168,7 @@ def test_a_rights_issue_shows_the_rights_beside_the_shares_like_thndr(tmp_path):
     assert p["rights"]["value"] == pytest.approx(31674.96)
     assert "you also hold 13,653 rights (AAA_r1)" in p["reason"]
     [item] = [i for i in views.orders(d, [p])["items"] if i["kind"] == "adjust"]
-    assert item["title"] == "Record what you do with your AAA rights" and "Subscription 18 Oct" in item["detail"]
+    assert item["title"] == "Record what you do with your AAA rights" and "Subscription: 18 Oct" in item["detail"]
     [(_, title, detail)] = alerts._order_items(views.orders(d, [p]), [p], "ar")
     assert "حقوق اكتتاب AAA" in title and "13,653" in detail
 

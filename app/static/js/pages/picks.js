@@ -9,7 +9,6 @@ import {
 import { t, tp, tn } from '../i18n.js';
 import { useToday, buyHref } from './today.js';
 import { Health, Recent, RankMove } from './predict.js';
-import { ReachLine } from './range.js';
 
 const WK = 5;           // the model's week (predict.WEEK)
 
@@ -37,7 +36,7 @@ export function PicksPage() {
             odds=${data.odds} fee=${data.cfg.fee_pct_per_side} model=${data.model} key=${s.symbol}
             bell=${{ tg: data.telegram, bells, setBells }} />`)}</div>`
         : html`<div class="card"><${Empty} icon="shield" title="No BUY signals for the next session" text=${blocked
-          ? 'No new BUYs in a weak market (EGX30 below its 50-day average, or fewer than 40% of stocks above theirs). Sitting in cash is a valid decision. Below: what is close to a BUY once the market recovers.'
+          ? 'No new BUYs in a weak market. That means EGX30 below its 50-day average, or fewer than 40% of stocks above theirs. Sitting in cash is a valid choice. Below: what is close to a BUY once the market recovers.'
           : 'No stock met all the entry rules at the last close. Sitting in cash is a valid decision. Below: what is close to a BUY.'} /></div>`}
     </section>
     <section class="section">
@@ -59,7 +58,7 @@ function Light({ m, b, blocked }) {
   const gap = m.egx30_close / m.egx30_ema50 - 1;
   const [lt, head, text] = blocked
     ? ['bad', 'No new BUYs', t(m.weak_breadth && m.egx30_close >= m.egx30_ema50
-      ? 'Fewer than 40% of stocks are above their 50-day average, so the agent makes no new BUY calls until more of them recover. Focus on managing your open positions.'
+      ? 'Fewer than 40% of stocks are above their 50-day average. So the agent makes no new BUY calls until more recover. Focus on your open positions.'
       : 'EGX30 is below its 50-day average, so the agent makes no new BUY calls until it recovers. Focus on managing your open positions.')]
     : m.risk_off
       ? ['warn', 'Only the strongest BUYs', t('Weak market: only very strong signals (score ≥ {n}) and at most half the usual number of positions.', { n: fmt.int(m.buy_threshold) })]
@@ -90,7 +89,7 @@ function Odds({ s, odds }) {
   if (!odds || s.source === 'model') return null;
   const b = (odds.bands || []).find(x => s.score >= x.from && s.score < (x.to === 100 ? 101 : x.to));
   if (!b || !b.n) return null;
-  return html`<p class="odds-line">${t('In {years} of tests, BUYs scored {from}–{to} won {win} of the time, {avg} a trade on average after fees ({n} trades).', {
+  return html`<p class="odds-line">${t('In {years} of tests, BUYs scored {from}–{to} won {win} of the time. Average: {avg} a trade after fees ({n} trades).', {
     years: t('10 years'), from: b.from, to: b.to, win: fmt.pct(b.win_rate, 0, false), avg: fmt.pct(b.avg, 1), n: fmt.int(b.n) })}</p>`;
 }
 
@@ -187,7 +186,6 @@ function PickCard({ s, m, wk, odds, fee, model, bell }) {
       <div class="buy-line"><span><${Term} k="buyupto">${t('Buy up to')}<//> <b>${fmt.price(s.entry_high)}</b></span>
         <span class="faint">${t('last close')} ${fmt.price(s.close)}</span></div>
       <${PlanBar} p=${{ stop: s.stop, target: s.target, price: s.close, avg_price: s.entry_high }} />
-      <${ReachLine} r=${s.range} stop=${s.stop} target=${s.target} />
       <${BestIn} e=${{ kind: 'now', price: s.entry_high, stop: s.stop, target: s.target }} />
     </div>
     <${Checks} items=${checks(s, m)} />
@@ -203,7 +201,7 @@ function PickCard({ s, m, wk, odds, fee, model, bell }) {
               rank: fmt.int(s.pred.rank10), n: fmt.int(model.count), chance: html`<${Chance} p=${s.pred.p10} base=${model.base[10]} />` })}</div>
         ${s.pred.why10 && s.pred.why10.length > 0 && html`<${Why} items=${s.pred.why10} />`}`}
       ${cautions.length > 0 && html`<${Cautions} items=${cautions} />`}
-      ${cautions.some(c => c.kind === 'ex_dividend') && html`<p>${t('It goes ex-dividend before this trade would end. The price drops by the dividend that morning and you get it in cash, so the agent lowers the stop and target by the same amount (a to-do reminds you the evening before). Counting the dividend, BUYs this close to an ex-date did as well as the others in 10 years of tests.')}</p>`}
+      ${cautions.some(c => c.kind === 'ex_dividend') && html`<p>${t('It goes ex-dividend before this trade would end. That morning the price drops by the dividend, and you get it in cash. So the agent lowers the stop and target by the same amount. A to-do reminds you the evening before. With the dividend counted, BUYs this close to an ex-date did as well as others in 10 years of tests.')}</p>`}
       ${results && html`<p>${t('Results are expected around {date}, before this trade would end. The price can jump either way that day; the agent keeps the same stop.', {
         date: fmt.date(results.date, false) })}</p>`}
       <p class="faint">${t('Sizing')}: <span dir="auto">${tn(s.size_note)}</span> · ${t('hold at most until')} <b class="muted">${fmt.date(s.sell_by)}</b></p>
@@ -366,8 +364,4 @@ function TrackRecord({ rec, odds }) {
     </div>`;
 }
 
-const TRUST = 'The test replays the current rules on 10 years of prices, from the open after each signal, fees included. It '
-  + 'flatters them a little: it only knows the companies listed today (ones that failed and left the exchange are missing), '
-  + 'and the rules were chosen by testing on those same years. The track record is the honest check: every BUY the agent '
-  + 'published, followed the same way. Judge it after about 30 ended signals; a handful proves nothing either way. In the '
-  + 'test a higher score barely changed the odds, so treat every BUY about the same.';
+const TRUST = 'The test replays today\'s rules on 10 years of prices. It buys at the open after each signal, fees included. It flatters the rules a little. It only knows companies listed today, so failed ones are missing. And the rules were picked on those same years. The track record is the honest check: every BUY the agent published, followed the same way. Judge it after about 30 finished signals. A handful proves nothing. In the test, a higher score barely changed the odds. So treat every BUY about the same.';

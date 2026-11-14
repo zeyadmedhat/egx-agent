@@ -129,8 +129,8 @@ const KIND = { adjust: 'UPDATE', sell: 'SELL', stop: 'STOP', review: 'REVIEW', b
 
 // The last session before a break: a Thursday (the weekend follows) or the day before a public holiday. Tested on
 // EGX30 since 2016 (10 Nov 2026): these days rose more often than others, by about what a buy and a sell cost in fees.
-const BEFORE_HOLIDAY = '{day} is the last session before a holiday. Since 2016 EGX30 rose on 63% of these days (53% of other days), +0.4% on average: about what a buy and a sell cost in fees. A fact about timing, not a trade.';
-const BEFORE_WEEKEND = '{day} is the last session before the weekend. Since 2016 EGX30 rose on 60% of Thursdays (52% of other days), +0.2% on average: less than a buy and a sell cost in fees. A fact about timing, not a trade.';
+const BEFORE_HOLIDAY = '{day} is the last session before a holiday. Since 2016, EGX30 rose on 63% of these days. Other days: 53%. The average gain (+0.4%) is about the fees of a buy and a sell. A fact, not a trade.';
+const BEFORE_WEEKEND = '{day} is the last session before the weekend. Since 2016, EGX30 rose on 60% of Thursdays. Other days: 52%. The average gain (+0.2%) is less than the fees of a buy and a sell. A fact, not a trade.';
 
 export function breakAfter(day, holidays = (store.status && store.status.holidays) || {}) {
   const d = new Date(day + 'T12:00:00Z');

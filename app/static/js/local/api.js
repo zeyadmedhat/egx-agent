@@ -1108,6 +1108,13 @@ async function quotes(c, path) {
   return res && res.ok ? res.json().catch(() => ({})) : {};
 }
 
+async function liveFlow(c) {
+  const url = c.core.telegram && c.core.telegram.worker;
+  if (!url) return {};
+  const res = await fetch(`${url.replace(/\/$/, '')}/flow`).catch(() => null);
+  return res && res.ok ? res.json().catch(() => ({})) : {};
+}
+
 if (typeof document !== 'undefined') {       // not in the tests (tests/js/parity.mjs runs this in Node)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') { checkedAt = 0; syncBot(false); }
@@ -1142,6 +1149,7 @@ async function route(path, { method = 'GET', body } = {}) {
       case 'news': return newsView(c);
       case 'watchlist': return { symbols: c.book.watchlist || [] };
       case 'market': return load('market');
+      case 'flow': return b === 'live' ? liveFlow(c) : load('flow');
       case 'layers': return load('layers');
       case 'egx30': return load('egx30');
       case 'predict': return predictView(c);

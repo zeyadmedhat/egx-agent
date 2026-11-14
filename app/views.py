@@ -1188,7 +1188,7 @@ def orders(d: Data, positions: list[dict] | None = None) -> dict | None:
             r = p["rights"]
             items.append({**base, "key": f"adjust:{sym}", "kind": "adjust", "rights": r["units"],
                           "title": f"Record what you do with your {sym} rights",
-                          "detail": f"You hold {r['units']:,} rights ({r['symbol']}) from {nice_date(p['adjust']['ex_date'])}: "
+                          "detail": f"You hold {r['units']:,} rights ({r['symbol']}) from {nice_date(p['adjust']['ex_date'])}. "
                                     f"{r['note']} Once you subscribe or sell them, record it on My Portfolio. "
                                     "Its stop can't be checked until then."})
         elif st == "ADJUST":
@@ -1345,6 +1345,126 @@ def market_view(d: Data) -> dict:
                   "results": results_calendar(d), "mood": mood_data(d), "investors": flows.recent_split(d.conn),
                   **movers(d)})
 
+
+
+FLOW_SPANS = (("1", 1), ("5", 5), ("21", 21))   # the Money flow page's last session, week and month
+FLOW_USUAL = 60                                 # sessions before the span that count as "usual"
+FLOW_STOCKS = 40                                # stocks on the bubble chart: the most money moved in or out
+# Whale footprints: the patterns a big player's steady buying or selling leaves in daily prices (views.footprints).
+# Tested on EGX 2016–2026 (14 Nov 2026), next month against EGX30, every liquid stock-day beat it 44% of the time:
+# quiet buying 42%, quiet selling 42%, a huge day with a flat price 45%, closing near the high 46%: none found
+# winners. Closing near the low on heavy trading did 39% since 2022 (48% before, on few cases): a warning at most.
+FOOT_DAYS, FOOT_USUAL = 20, 60
+
+
+def money_flow(d: Data) -> dict:
+    """The Money flow page: where the traded money went. EGX doesn't say who traded which stock, so a stock's money
+    counts as "in" on a day it closed up and "out" on a day it closed down (the usual money-flow rule): the pounds
+    traded × the day's direction, summed over the span. Then the market's money against usual, the same by sector,
+    the stocks with the most money in or out (and how far it was from usual), the investor groups' net buying, and
+    the whales: block deals from the stocks' headlines and big owners changing their stakes."""
+    def build():
+        latest = d.conn.execute("SELECT MAX(date) FROM prices").fetchone()[0]
+        if not latest:
+            return {"has_data": False}
+        since = (pd.Timestamp(latest) - pd.Timedelta(days=240)).strftime("%Y-%m-%d")
+        px = pd.read_sql_query("SELECT symbol, date, high, low, close, volume FROM prices WHERE date >= ?", d.conn,
+                               params=(since,))
+        px = px[px["symbol"].isin(d.table.index)]
+        close = px.pivot(index="date", columns="symbol", values="close").sort_index()
+        high, low = (px.pivot(index="date", columns="symbol", values=k).reindex_like(close) for k in ("high", "low"))
+        volume = px.pivot(index="date", columns="symbol", values="volume").reindex_like(close).fillna(0)
+        traded = (close * volume).fillna(0)
+        chg = close.ffill(limit=5).pct_change(fill_method=None)
+        sign = np.sign(chg.where(chg.abs() <= JUMP)).fillna(0)        # a split's jump isn't money in or out
+        flow = traded * sign
+        sectors = d.table["sector"].reindex(close.columns).fillna("Other")
+        liquid = traded.tail(20).mean() >= d.cfg["min_avg_value_egp"]
+        dates = list(close.index)
+        spans = {}
+        for key, n in FLOW_SPANS:
+            if len(dates) < n + FLOW_USUAL:
+                continue
+            now, usual = traded.tail(n).sum(), traded.iloc[-n - FLOW_USUAL:-n].mean() * n
+            net = flow.tail(n).sum()
+            ret = (close.ffill(limit=5).iloc[-1] / close.ffill(limit=5).iloc[-1 - n] - 1).where(
+                chg.tail(n).abs().max() <= JUMP)
+            by = pd.DataFrame({"value": now, "usual": usual, "net": net}).groupby(sectors).sum()
+            sec = [{"sector": k, "value": float(r.value), "net": float(r.net),
+                    "vs": float(r.value / r.usual) if r.usual else None}
+                   for k, r in by.iterrows() if r.value > 0]
+            ok = [s for s in close.columns if liquid.get(s, False) and now[s] > 0 and pd.notna(ret.get(s))]
+            pick = sorted(ok, key=lambda s: -abs(net[s]))[:FLOW_STOCKS]
+            stocks = [{"symbol": s, "sector": sectors[s], "value": float(now[s]), "net": float(net[s]),
+                       "vs": float(now[s] / usual[s]) if usual[s] > 0 else None, "ret": float(ret[s])} for s in pick]
+            spans[key] = {"from": dates[-n], "to": dates[-1], "value": float(now.sum()),
+                          "vs": float(now.sum() / usual.sum()) if usual.sum() else None,
+                          "net": float(net.sum()), "in": float(flow.tail(n).clip(lower=0).sum().sum()),
+                          "out": float(-flow.tail(n).clip(upper=0).sum().sum()), "sectors": sorted(sec, key=lambda r: -r["net"]), "stocks": stocks}
+        day90 = (pd.Timestamp(latest) - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
+        named = [r[0] for r in d.conn.execute("SELECT DISTINCT symbol FROM news WHERE symbol != '' AND published >= ?",
+                                              (day90,))]
+        deals = sorted(({"symbol": s, "date": x["published"][:10], "side": x["side"], "who": x["who"],
+                         "value": x["value"], "title": x["title"], "url": x["url"]}
+                        for s in named if s in d.table.index for x in news.big_deals(d.conn, s, day90)),
+                       key=lambda r: r["date"], reverse=True)
+        owners = [{"symbol": m["symbol"], "date": m["seen"], "holder": m["holder"], "before": m["before"],
+                   "after": m["after"]} for m in ownership.recent_moves(d.conn, day90) if m["symbol"] in d.table.index]
+        total = traded.sum(axis=1)
+        return clean({"has_data": bool(spans), "date": latest, "spans": spans, "investors": flows.recent_split(d.conn),
+                      "deals": deals, "owners": owners,
+                      "footprints": footprints(close, high, low, volume, traded, chg, liquid, sectors),
+                      "sectors": {s: sectors[s] for s in close.columns},      # the live part groups by these
+                      "usual_day": float(total.iloc[-FLOW_USUAL:].mean()) if len(total) else None})
+    return d.cache.get(d.version, ("money_flow",), build)
+
+
+def footprints(close, high, low, volume, traded, chg, liquid, sectors) -> list[dict]:
+    """The liquid stocks whose last 20 sessions look like a big player's steady buying or selling:
+    quiet_buying / quiet_selling: traded 1.2× usual or more while the price stayed flat, closing mostly near the day's
+    high (or low): money flow (Chaikin's, 20 days) +0.15 or more (−0.15 or less); buying_streak / selling_streak:
+    7 of the last 10 sessions closed in the top (bottom) third of the day's range, on 1.2× usual money; big_flat: a
+    session of the last 5 traded 3× its usual money and the price moved 1% or less (someone took every share offered,
+    or sold into every bid). What it shows, not a prediction: see FOOT_DAYS."""
+    n = FOOT_DAYS
+    if len(close) < n + FOOT_USUAL + 1:
+        return []
+    rng = high - low
+    clv = (((close - low) - (high - close)) / rng.where(rng > 0)).fillna(0)
+    cmf = (clv * volume).tail(n).sum() / volume.tail(n).sum().where(lambda v: v > 0)
+    ret = close.ffill(limit=5).iloc[-1] / close.ffill(limit=5).iloc[-1 - n] - 1
+    usual = traded.iloc[-n - FOOT_USUAL:-n].mean()
+    vs = traded.tail(n).mean() / usual.where(usual > 0)
+    hi = (((close - low) >= rng * 2 / 3) & (rng > 0)).tail(10).sum()
+    lo = (((high - close) >= rng * 2 / 3) & (rng > 0)).tail(10).sum()
+    day_usual = traded.shift(1).rolling(FOOT_USUAL).mean()
+    big = (traded >= 3 * day_usual) & (chg.abs() <= 0.01)
+    jumped = (chg.abs() > JUMP).tail(n + 1).any()
+    out = []
+    for s in close.columns:
+        if not liquid.get(s, False) or jumped.get(s, False) or pd.isna(cmf.get(s)) or pd.isna(vs.get(s)) or pd.isna(ret.get(s)):
+            continue
+        kinds = []
+        heavy = vs[s] >= 1.2
+        if heavy and cmf[s] >= 0.15 and -0.03 <= ret[s] <= 0.05:
+            kinds.append("quiet_buying")
+        if heavy and cmf[s] <= -0.15 and -0.05 <= ret[s] <= 0.03:
+            kinds.append("quiet_selling")
+        if heavy and hi[s] >= 7:
+            kinds.append("buying_streak")
+        if heavy and lo[s] >= 7:
+            kinds.append("selling_streak")
+        days = big[s].tail(5)
+        last_big = days[days].index.max() if days.any() else None
+        if last_big is not None:
+            kinds.append("big_flat")
+        if kinds:
+            out.append({"symbol": s, "sector": sectors[s], "kinds": kinds, "cmf": float(cmf[s]), "ret": float(ret[s]),
+                        "vs": float(vs[s]), "hi": int(hi[s]), "lo": int(lo[s]), "value": float(traded[s].tail(n).sum()),
+                        "big": {"date": last_big, "x": float(traded.at[last_big, s] / day_usual.at[last_big, s]),
+                                "chg": float(chg.at[last_big, s])} if last_big is not None else None,
+                        "closes": [float(v) for v in close[s].tail(n).ffill()]})
+    return sorted(out, key=lambda r: -r["vs"])
 
 INDEX_PERIODS = (("1W", 5), ("1M", 21), ("3M", 63), ("6M", 126), ("1Y", 250), ("3Y", 750), ("5Y", 1250))
 
@@ -1576,8 +1696,7 @@ SETTINGS_SECTIONS = [
          "help": "Thndr: its exact fees on every order (EGP 2 + 0.1%, plus the exchange's and government's fees). "
                  "Thndr Trader: the same without Thndr's commission. Compare the two in Calculator → Thndr fees."},
         _f("fee_pct_per_side", "Fees per buy or sell", 0, 2, 0.01, "%",
-           "Only with another broker: commission + EGX, clearing and regulator fees + taxes, for ONE side of a "
-           "trade. Check your broker's fee sheet."),
+           "Only with another broker. Commission + EGX, clearing and regulator fees + taxes, for ONE side of a trade. Check your broker's fee sheet."),
     ]},
     {"title": "Risk per trade", "fields": [
         _f("risk_per_trade_pct", "Max loss per trade", 0.25, 5, 0.25, "% of account",
@@ -1590,18 +1709,13 @@ SETTINGS_SECTIONS = [
         _f("max_pct_of_adv", "Max position vs daily traded value", 0.5, 25, 0.5, "%",
            "Keeps you out of stocks too thin to exit quickly."),
         _f("max_month_loss_pct", "Loss brake", 0, 30, 0.5, "% in 30 days",
-           "When your trades closed in the last 30 days lost this much of your account, Picks and the Calculator "
-           "say to take a break from new buys. 0 turns it off."),
+           "If trades closed in the last 30 days lost this much of your account, Picks and the Calculator say to pause new buys. 0 turns it off."),
     ]},
     {"title": "Your stops", "fields": [
         {"key": "stop_moves", "label": "Your positions' stops move", "kind": "choice",
          "options": [{"value": "auto", "label": "By themselves: up to each newer support, never down (tested better)"},
                      {"value": "mine", "label": "Only when I change them"}],
-         "help": "By themselves: each evening the stop rises to just under the newest support, and once a position "
-                 "has gained 1× its risk it goes no lower than your price + 1.5%; the to-do list says when to move "
-                 "it at your broker. Tested 2016–2026: 31.8% a year with stops that follow support against 22.3% "
-                 "without. Only when I change them: the stop stays where it was set when you bought, until you "
-                 "change it (Sell or edit → Change the stop)."},
+         "help": "By themselves: each evening the stop rises to just under the newest support. Once a position gains 1× its risk, the stop goes no lower than your price + 1.5%. The to-do list says when to move it at your broker. Tested 2016–2026: 31.8% a year with stops that follow support, against 22.3% without. Only when I change them: the stop stays where it was set when you bought. It changes only when you change it (Sell or edit → Change the stop)."},
     ]},
     {"title": "Shariah", "fields": [
         {"key": "shariah_filter", "label": "Shariah filter for BUY signals", "kind": "select",
@@ -1635,18 +1749,13 @@ SETTINGS_SECTIONS = [
         _f("riskoff_score_bonus", "Risk-off score increase", 0, 30, 1, kind="int",
            help="Only used with the 'Stricter' option."),
         _f("model_picks", "Prediction model's own BUYs a day", 0, 5, 1, kind="int",
-           help="Its best-ranked stocks that also pass the liquidity and uptrend checks, with the usual stop and "
-                "target. Tested on years it never saw (2016–2026): the rules alone made 15% a year, plus its top 3 "
-                "27%, with the same worst drop. 0 = none. Either way it decides which BUYs get money first."),
+           help="Its best-ranked stocks that also pass the liquidity and uptrend checks. They get the usual stop and target. Tested on years it never saw (2016–2026). The rules alone made 15% a year. With its top 3: 27%. Same worst drop. 0 = none. Either way, it decides which BUYs get money first."),
     ]},
     {"title": "Exits", "fields": [
         {"key": "levels_mode", "label": "Stop-loss and target from", "kind": "choice",
          "options": [{"value": "chart", "label": "The chart: support, resistance, Fibonacci"},
                      {"value": "atr", "label": "A fixed rule: 2× the daily range, target 2× the risk"}],
-         "help": "Chart: the stop goes just under the nearest solid support and the target just under the first "
-                 "resistance. Tested 2016–2026 on years the model never saw: steadier (13% vs 9% a year in the first "
-                 "half, worst drop −22% vs −26%), but 24% vs 28% a year overall, because the fixed rule caught more "
-                 "of the 2021–26 boom."},
+         "help": "Chart: the stop goes just under the nearest solid support. The target goes just under the first resistance. Tested 2016–2026 on years the model never saw. Steadier: 13% vs 9% a year in the first half, worst drop −22% vs −26%. But 24% vs 28% a year overall, because the fixed rule caught more of the 2021–26 boom."},
         _f("target_min_r", "Chart target: at least", 1, 4, 0.25, "× the risk",
            "Resistance closer than this is passed; the target goes to the next one."),
         _f("target_max_r", "Chart target: at most", 1.5, 8, 0.25, "× the risk"),
