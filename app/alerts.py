@@ -453,6 +453,7 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
                   f"👀 <b>Close to a BUY</b>: {', '.join(names)}" + (f" and {more} more" if more > 0 else "") + "."]
     if week := _week_line(d, lang):
         lines.append(("" if near else "\n") + "📅 " + week)
+    lines += whale_lines(d, lang)
     if personal:
         lines += personal
     if ar:
@@ -469,6 +470,36 @@ def build_site_message(d: views.Data, site_url: str = "", lang: str = "en", pers
                   "<i>Rules-based signals, not investment advice. Send /stop to stop these messages.</i>"]
     text = "\n".join(lines)
     return text if len(text) <= MAX_LEN else text[:MAX_LEN - 20] + ("\n…المزيد على الموقع." if ar else "\n…more on the site.")
+
+
+WHALES_SHOWN = 6     # names per line in the message; the rest are on the site's Money flow tab
+
+
+def whale_lines(d: views.Data, lang: str = "en") -> list[str]:
+    """The site's whale footprints (views.footprints) in a few lines: stocks whose last 20 sessions look like a big
+    player buying or selling steadily, and a huge day with a flat price. [] when there are none."""
+    ar = lang == "ar"
+    feet = (views.money_flow(d) or {}).get("footprints") or []
+    if not feet:
+        return []
+    groups = [("🟢", "علامات شراء" if ar else "Signs of buying", ("quiet_buying", "buying_streak")),
+              ("🔴", "علامات بيع" if ar else "Signs of selling", ("quiet_selling", "selling_streak")),
+              ("⚪", "حجم ضخم والسعر ثابت" if ar else "Huge volume, flat price", ("big_flat",))]
+    lines = ["", "🐋 <b>آثار الحيتان</b> (آخر 20 جلسة)" if ar else "🐋 <b>Whale footprints</b> (last 20 sessions)"]
+    for dot, name, kinds in groups:
+        rows = [r for r in feet if any(k in kinds for k in r["kinds"])]
+        if not rows:
+            continue
+        def tag(r):
+            b = r.get("big") if "big_flat" in kinds else None
+            return f"<b>{_e(r['symbol'])}</b>" + (f" ({_date(b['date'], lang)}، {b['x']:.1f}×)" if b and ar else
+                                                  f" ({_date(b['date'])}, {b['x']:.1f}×)" if b else "")
+        more = len(rows) - WHALES_SHOWN
+        names = ("، " if ar else ", ").join(tag(r) for r in rows[:WHALES_SHOWN])
+        lines.append(f"{dot} {name}: {names}" + ((f" و{more} أخرى" if ar else f" and {more} more") if more > 0 else ""))
+    lines.append("<i>آثار وليست إشارات. في الاختبارات لم تختر أسهمًا رابحة.</i>" if ar else
+                 "<i>Footprints, not signals. In tests they didn't pick winners.</i>")
+    return lines
 
 
 def _week_line(d: views.Data, lang: str = "en") -> str | None:

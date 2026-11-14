@@ -239,3 +239,15 @@ def test_break_line_on_the_last_session_before_a_break(monkeypatch):
     assert "عطلة رسمية" in alerts.break_line("2026-11-11", "ar")
     assert alerts.break_line("2026-11-10") is None                       # an ordinary Tuesday
     holidays._offset.cache_clear()
+
+
+def test_whale_footprints_go_in_the_message_only_when_there_are_some(monkeypatch):
+    from app import alerts, views
+    monkeypatch.setattr(views, "money_flow", lambda d: {"footprints": []})
+    assert alerts.whale_lines(None) == []
+    feet = [{"symbol": "AAA", "kinds": ["quiet_buying"], "big": None},
+            {"symbol": "BBB", "kinds": ["big_flat"], "big": {"date": "2026-11-12", "x": 3.4}}]
+    monkeypatch.setattr(views, "money_flow", lambda d: {"footprints": feet})
+    en, ar = "\n".join(alerts.whale_lines(None)), "\n".join(alerts.whale_lines(None, "ar"))
+    assert "🟢 Signs of buying: <b>AAA</b>" in en and "<b>BBB</b> (12 Nov, 3.4×)" in en and "Signs of selling" not in en
+    assert "آثار الحيتان" in ar and "<b>BBB</b>" in ar
