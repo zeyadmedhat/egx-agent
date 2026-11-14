@@ -22,6 +22,7 @@ const TOP_RE = /^\/top(?:@\w+)?(?:\s+(10|20))?\s*$/i
 const BUYS_RE = /^\/(?:buys|signals)(?:@\w+)?\s*$/i
 const WEEK_RE = /^\/(?:week|next)(?:@\w+)?\s*$/i
 const EGX30_RE = /^\/(?:egx30|index)(?:@\w+)?\s*$/i
+const WHALES_RE = /^\/(?:whales?)(?:@\w+)?\s*$/i
 const HELP_RE = /^\/(?:help|start)(?:@\w+)?\s*$/i
 const CODE_LEN = 24           // the site's code (static_site.telegram_code); a longer /start carries a browser's link
 const NONCE_RE = /^[a-f0-9]{32}$/
@@ -52,6 +53,7 @@ const EN = {
     "/buys · today's BUY signals\n" +
     "/why COMI · why it is or isn't a BUY, its rating and levels\n" +
     "/egx30 · the index in brief\n" +
+    "/whales · stocks a big player may be buying or selling\n" +
     "📷 Send a screenshot of your broker's holdings to check it against the website\n\n" +
     "🔔 <b>Alerts</b> (checked after each close)\n" +
     "/watch COMI · when it gets a BUY signal\n" +
@@ -71,6 +73,7 @@ const EN = {
     "/lang ar · بالعربية\n" +
     "/stop · stop all messages",
   noData: "The website's data hasn't reached me yet. Try again after its next run.",
+  noWhales: "🐋 No whale footprints in the last 20 sessions.",
   unknown: s => `I don't know ${s}. Use the stock's EGX symbol, like COMI.`,
   notFound: s => `I didn't find “${s}”. Send a stock's symbol (COMI) or part of its Arabic name (التجاري), or /help.`,
   didYouMean: "Did you mean one of these?",
@@ -227,6 +230,7 @@ const AR = {
     "/buys · إشارات الشراء اليوم\n" +
     "/why COMI · لماذا هو إشارة شراء أو لا، وتقييمه ومستوياته\n" +
     "/egx30 · المؤشر باختصار\n" +
+    "/whales · أسهم قد يشتريها أو يبيعها لاعب كبير\n" +
     "📷 أرسل صورة لأسهمك في تطبيق السمسرة لأقارنها بالموقع\n\n" +
     "🔔 <b>التنبيهات</b> (تُفحص بعد كل إغلاق)\n" +
     "/watch COMI · عندما يحصل على إشارة شراء\n" +
@@ -246,6 +250,7 @@ const AR = {
     "/lang en · English\n" +
     "/stop · إيقاف كل الرسائل",
   noData: "بيانات الموقع لم تصلني بعد. حاول بعد تشغيله القادم.",
+  noWhales: "🐋 لا آثار للحيتان في آخر 20 جلسة.",
   unknown: s => `لا أعرف ${s}. استخدم رمز السهم في البورصة المصرية، مثل COMI.`,
   notFound: s => `لم أجد «${s}». أرسل رمز السهم (COMI) أو جزءًا من اسمه (التجاري)، أو /help.`,
   didYouMean: "هل تقصد أحد هذه الأسهم؟",
@@ -603,6 +608,11 @@ function ask(state, cid, text, lang) {
   if (BUYS_RE.test(text)) return info ? buys(info, lang) : reply(T.noData)
   if (WEEK_RE.test(text)) return info ? week(info, lang) : reply(T.noData)
   if (EGX30_RE.test(text)) return info ? egx30(info, lang) : reply(T.noData)
+  if (WHALES_RE.test(text)) {                          // the lines the website wrote (alerts.whale_lines)
+    if (!info || !info.wh) return reply(T.noData)
+    const app = appButton(info, lang, "flow")
+    return reply(info.wh[lang] || info.wh.en || T.noWhales, app ? [[app]] : undefined)
+  }
   if (HELP_RE.test(text)) {
     const app = appButton(info, lang)
     return reply(T.help, [...menuButtons(T), ...(app ? [[app]] : [])])
@@ -1030,14 +1040,15 @@ async function telegram(env, method, params) {
 // The bot's menu, in English and Arabic (Telegram shows the one matching each person's app language).
 const COMMANDS = {
   en: [["stock", "A stock's price, signal and chances"], ["buys", "Today's BUY signals"],
-       ["week", "Next week's best chances"], ["top", "Best chances to reach the target"], ["egx30", "EGX30 in brief"], ["portfolio", "Your positions and what to do"],
+       ["week", "Next week's best chances"], ["top", "Best chances to reach the target"], ["egx30", "EGX30 in brief"],
+       ["whales", "Whale footprints"], ["portfolio", "Your positions and what to do"],
        ["watchlist", "The stocks you starred"], ["watch", "Alert me about a stock"], ["unwatch", "Stop a stock's alerts"],
        ["why", "Why a stock is or isn't a BUY"], ["list", "My alerts"],
        ["quiet", "Only message me when there's something to do"], ["morning", "The 9:30 reminder on or off"],
        ["weekly", "The Thursday summary on or off"], ["lang", "العربية / English"], ["link", "Link your website portfolio"],
        ["unlink", "Unlink it"], ["help", "What I can do"], ["stop", "Stop all messages"]],
   ar: [["stock", "سعر السهم وإشارته وفرصه"], ["buys", "إشارات الشراء اليوم"], ["week", "أفضل فرص الأسبوع القادم"],
-       ["top", "أفضل فرص الوصول للهدف"], ["egx30", "مؤشر EGX30 باختصار"],
+       ["top", "أفضل فرص الوصول للهدف"], ["egx30", "مؤشر EGX30 باختصار"], ["whales", "آثار الحيتان"],
        ["portfolio", "مراكزك وما تفعله"], ["watchlist", "الأسهم المميزة بنجمة"], ["watch", "نبّهني بخصوص سهم"],
        ["unwatch", "أوقف تنبيهات سهم"], ["why", "لماذا السهم إشارة شراء أو لا"], ["list", "تنبيهاتي"],
        ["quiet", "راسلني فقط عندما يوجد ما أفعله"], ["morning", "تذكير 9:30 تشغيل أو إيقاف"],

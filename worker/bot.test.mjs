@@ -445,5 +445,10 @@ console.log("why, morning, screenshots ok")
   assert.match(await handle({ ...st, info: { ...st.info, x30: null } }, u("/egx30")), /hasn't reached me/)
   assert.doesNotMatch(await handle({ ...st, info: { ...info, x30: { ...info.x30, sr: undefined } } }, u("/egx30")),
     /Support & resistance/)                                // the Mac's older data: no levels line
+  assert.match(await q("/whales"), /hasn't reached me/)
+  assert.equal(await handle({ ...s2, info: { ...info, wh: { en: "🐋 <b>Whale footprints</b>\n🔴 Signs of selling: <b>ADRI</b>" } } }, u("/whales")),
+    "🐋 <b>Whale footprints</b>\n🔴 Signs of selling: <b>ADRI</b>")
+  assert.match(await handle({ ...s2, info: { ...info, wh: { en: "", ar: "" } } }, u("/whales")), /No whale footprints/)
+  assert.match(await q("/help"), /\/whales · stocks a big player/)
   console.log("week and egx30 ok")
 }

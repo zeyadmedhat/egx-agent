@@ -1069,7 +1069,9 @@ def bot_info(conn: sqlite3.Connection, cfg: dict) -> dict:
             "stocks": stocks, "bands": [[b["from"], b["to"], _r(b["hit"], 4), _r(b["ret"], 4)] for b in preds.get("bands") or []],
             "base10": _r((preds.get("base") or {}).get("10"), 4), "rated": preds.get("count") or 0,
             "min_value": cfg["min_avg_value_egp"], "week": week, "x30": x30,
-            "hol": [h["date"] for h in holidays.upcoming()]}     # the Worker asks for no scans on these
+            "hol": [h["date"] for h in holidays.upcoming()],     # the Worker asks for no scans on these
+            # /whales: the after-close message's whale lines, ready to send ("" when there are none)
+            "wh": {lang: "\n".join(whale_lines(d, lang)[1:]) for lang in ("en", "ar")}}
 
 
 def worker_state(conn: sqlite3.Connection, code: str, cfg: dict | None = None, extra: dict | None = None) -> dict:
