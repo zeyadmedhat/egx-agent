@@ -12,6 +12,8 @@ on:
     - cron: "30 7 * * 0-4"      # Each has a summer (UTC+3) and a winter (UTC+2) time; the "when" job lets a run go
     - cron: "30 12 * * 0-4"     # on if nothing was published since the last of those. During the session the bot asks for a
     - cron: "30 13 * * 0-4"     # run every half hour, 10:30–14:00, and backs these two up (worker/bot.js scanDue).
+    - cron: "30 14 * * 0-4"     # 17:30 Cairo: Youm7 posts the day's "who bought and who sold" about 17:00
+    - cron: "30 15 * * 0-4"     # (egx_agent/data/flows.py), after the 15:30 run. Friends get one message a day anyway.
   workflow_dispatch:            # "Run workflow": the Run scan button on the site opens this page for the owner
     inputs:
       force_scan:
@@ -34,7 +36,7 @@ concurrency:
 
 jobs:
   when:
-    # A scheduled run goes on only if the live site has nothing built since the last 9:30 or 15:30 Cairo, however late
+    # A scheduled run goes on only if the live site has nothing built since the last 9:30, 15:30 or 17:30 Cairo, however late
     # GitHub starts it (7–8 hours in Nov 2026); every other run does. No answer from the site counts as nothing built.
     runs-on: ubuntu-24.04
     outputs:
@@ -44,7 +46,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           now=$(TZ=Africa/Cairo date +%H%M)
-          if [ "$now" -ge 1530 ]; then due=15:30; elif [ "$now" -ge 930 ]; then due=09:30; else due=; fi
+          if [ "$now" -ge 1730 ]; then due=17:30; elif [ "$now" -ge 1530 ]; then due=15:30; elif [ "$now" -ge 930 ]; then due=09:30; else due=; fi
           built=$(curl -fsS --max-time 20 "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/site.json" | jq -r '.built // empty') || built=
           go=false
           if [ -n "$due" ] && [[ "$built" < "$(TZ=Africa/Cairo date +%F)T$due" ]]; then go=true; fi

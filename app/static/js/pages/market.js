@@ -3,7 +3,7 @@
 import { html, useApi, useState, useStore, fmt, tone, stockHref } from '../lib.js';
 import {
   Kpi, Callout, PageHead, SectionHead, PageLoading, DataTable, Empty, MarketSwitch, Seg, Term, SessionBadge,
-  Fold, More,
+  Fold, More, sessionState,
 } from '../ui.js';
 import { t, tp, tn } from '../i18n.js';
 import { BreadthChart, MoodChart } from '../charts.js';
@@ -225,7 +225,9 @@ export function Investors({ days, latest }) {
   return html`<section class="card inv">
     <div class="inv-top"><div class="card-title" style="margin:0">${t('Who bought and who sold')}</div>
       <${Seg} options=${SPANS} value=${n} onChange=${setN} /></div>
-    ${latest > last && html`<p class="faint s" style="margin:6px 0 0">${t("{date}'s numbers aren't out yet. These go up to {last}.", { date: fmt.date(latest, false), last: fmt.date(last, false) })}</p>`}
+    ${latest > last && html`<p class="faint s" style="margin:6px 0 0">${t(latest === sessionState().day
+      ? "{date}'s numbers come out about 5 pm. These go up to {last}." : 'No numbers for {date}. These go up to {last}.',
+      { date: fmt.date(latest, false), last: fmt.date(last, false) })}</p>`}
     <p class="inv-say">${top.v > 0 && html`<b class="up">${who(top)}</b> ${t('bought the most ({v})', { v: money(top.v) })}`}${top.v > 0 && low.v < 0 ? '; ' : ''}${low.v < 0 && html`<b class="down">${who(low)}</b> ${t('sold the most ({v})', { v: money(low.v) })}`}.</p>
     <div class="inv-axis"><span></span><div><span>${t('Sold')}</span><span>${t('Bought')}</span></div><span></span></div>
     ${rows.map(r => html`<div class="inv-group">
