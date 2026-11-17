@@ -10,6 +10,7 @@ same statement's next sentence (see parse_split).
 from __future__ import annotations
 
 import html
+import os
 import re
 import sqlite3
 import time
@@ -268,6 +269,7 @@ def fetch_split(day: date, s: requests.Session, backup: bool = False, delay: flo
 # جنيه، مقابل 95.009 مليون جنيه صافي شراء من الافراد" / "…العرب نحو الشراء محققين صافي بقيمة 115.018 مليون جنيه، منها
 # 84.042 مليون جنيه للمؤسسات، و30.976 مليون جنيه للافراد". Its robots.txt allows everything; its JSON feed is closed.
 HAPI_DAY = "https://hapijournal.com/{y}/{m:02d}/{d:02d}/"
+ON_GITHUB = os.environ.get("GITHUB_ACTIONS") == "true"   # Hapi turns GitHub's runs away: the Mac reads it (app/macfeed.py)
 HAPI_PAGES = 6                 # the day's list, 20 stories a page, newest first
 _SELL = re.compile(r"بيع|البيعي")
 _BUY = re.compile(r"شراء|الشرائي")
@@ -298,6 +300,15 @@ def parse_hapi(text: str) -> dict[str, dict[str, float]] | None:
     return {g: {k: out[g][k] for k in KINDS} for g in SERIES} if _even(flat) else None
 
 
+def _after_close(page: str, day: date) -> bool:
+    """Posted that day after the close (Cairo): a morning story repeats an earlier session's numbers (16 Nov 2026)."""
+    m = re.search(r'article:published_time" content="([^"]+)"', page)
+    if not m:
+        return False
+    at = datetime.fromisoformat(m.group(1)).astimezone(ZoneInfo("Africa/Cairo"))
+    return at.date() == day and at.strftime("%H:%M") >= CLOSE
+
+
 def fetch_hapi(day: date, s: requests.Session, delay: float = 2.0) -> dict | None:
     """Hapi's story for that day: its day pages list the stories; the market ones are read until one has the split."""
     base = HAPI_DAY.format(y=day.year, m=day.month, d=day.day)
@@ -313,7 +324,7 @@ def fetch_hapi(day: date, s: requests.Session, delay: float = 2.0) -> dict | Non
             tried.add(url)
             time.sleep(delay)
             page = s.get(url, timeout=60)
-            got = parse_hapi(page.text) if page.ok else None
+            got = parse_hapi(page.text) if page.ok and _after_close(page.text, day) else None
             if got:
                 return got
         if f"{base}page/{n + 1}/" not in r.text:
@@ -349,7 +360,7 @@ def update_split(conn: sqlite3.Connection, session: requests.Session | None = No
     for i, day in enumerate(new + again + older):
         if i:
             time.sleep(delay)
-        got = fetch_split(date.fromisoformat(day), s, backup=day in new, delay=delay)
+        got = fetch_split(date.fromisoformat(day), s, backup=day in new and not ON_GITHUB, delay=delay)
         if got and max(abs(v) for g in got.values() for v in g.values()) > MAX_NET:
             got = None                         # the debt market, not shares (drop_impossible)
         if got:

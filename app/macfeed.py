@@ -28,7 +28,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from egx_agent import config, db
-from egx_agent.data import ownership
+from egx_agent.data import flows, ownership
 
 from .backup import _key
 
@@ -46,7 +46,18 @@ def export(conn: sqlite3.Connection) -> dict:
     news = conn.execute(f"SELECT {','.join(NEWS_COLS)} FROM news WHERE source = 'mubasher' AND symbol != '' "
                         "AND published >= ? ORDER BY published, id, symbol", (since,)).fetchall()
     owners = conn.execute(f"SELECT {','.join(OWNER_COLS)} FROM ownership ORDER BY symbol").fetchall()
-    return {"news": [list(r) for r in news], "owners": [list(r) for r in owners]}
+    return {"news": [list(r) for r in news], "owners": [list(r) for r in owners], "flows": _flows(conn, since)}
+
+
+FLOW_SERIES = (*flows.SERIES.values(), *flows.SPLIT.values())
+
+
+def _flows(conn: sqlite3.Connection, since: str) -> list[list]:
+    """Who bought and sold, for the days the Mac has the split of (Hapi Journal turns GitHub's runs away)."""
+    return [list(r) for r in conn.execute(
+        f"SELECT series, date, value FROM macro WHERE series IN ({','.join('?' * len(FLOW_SERIES))}) AND date >= ? "
+        "AND date IN (SELECT date FROM macro WHERE series = ?) ORDER BY date, series",
+        (*FLOW_SERIES, since, flows.SPLIT[("foreigners", "institutions")]))]
 
 
 def lock(payload: dict, token: str) -> bytes:
@@ -81,7 +92,7 @@ def send(conn: sqlite3.Connection, cfg: dict, now: datetime | None = None, up=No
         return "not sent (no Telegram bot token in the settings)"
     now = now or datetime.now()
     payload = export(conn)
-    if not payload["news"] and not payload["owners"]:
+    if not payload["news"] and not payload["owners"] and not payload["flows"]:
         return "not sent (nothing read from Mubasher yet)"     # an empty file would tell the website nothing
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     last = json.loads(db.get_meta(conn, "mac_feed_sent") or "{}")
@@ -106,11 +117,16 @@ def apply(conn: sqlite3.Connection, path: Path, token: str) -> str:
     for row in data["owners"]:            # noting each big owner's move, as on the Mac
         sym, holders, _, updated, af = (row + [None])[:5]          # a file from before Arab Finance has the first 4
         ownership.save(conn, sym, json.loads(holders or "[]"), json.loads(af) if af else None, updated)
+    key = flows.SPLIT[("foreigners", "institutions")]
+    have = {r[0] for r in conn.execute("SELECT date FROM macro WHERE series = ?", (key,))}
+    days = {r[1] for r in data.get("flows", [])} - have           # only the days this run has no split of
+    conn.executemany("INSERT OR REPLACE INTO macro(series, date, value) VALUES (?,?,?)",
+                     [r for r in data.get("flows", []) if r[1] in days])
     conn.commit()
     db.set_meta(conn, "mac_feed", data["made"])
     if new:
         db.set_meta(conn, "news_updated", datetime.now().isoformat(timespec="seconds"))
-    return f"{new} new headlines, {len(data['owners'])} owners lists (made {data['made'][:16].replace('T', ' ')})"
+    return f"{new} new headlines, {len(data['owners'])} owners lists, {len(days)} days of who bought (made {data['made'][:16].replace('T', ' ')})"
 
 
 def main(argv: list[str] | None = None) -> int:

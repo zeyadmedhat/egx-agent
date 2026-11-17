@@ -349,6 +349,10 @@ def test_hapi_journal_is_read_when_youm7_has_no_roundup():
                                       "arabs": {"individuals": 30.976, "institutions": 84.042},
                                       "foreigners": {"individuals": 1.207, "institutions": 78.359}}
     assert flows.parse_hapi(text.replace("115.018", "15.018")) is None      # the parts don't add up: not read
+    from datetime import date
+    stamp = '<meta property="article:published_time" content="2026-11-16T{}:00+00:00" />'
+    assert flows._after_close(stamp.format("13:48"), date(2026, 11, 16))       # 15:48 Cairo: the closing story
+    assert not flows._after_close(stamp.format("09:00"), date(2026, 11, 16))   # 11:00: a morning one, skipped
 
 
 def test_past_rights_issues_are_measured_from_the_close_before_the_ex_date(tmp_path):

@@ -36,3 +36,21 @@ def test_the_macs_mubasher_file_reaches_the_website(tmp_path, monkeypatch):
         ("AAA", "Q", 55, 60)]                                                       # the website notes the move too
     assert macfeed.apply(site, sent[0], "123:abc") == "nothing newer from the Mac"
     assert macfeed.send(mac, {}).startswith("not sent")
+
+
+def test_the_macs_who_bought_days_fill_the_websites_gaps(tmp_path, monkeypatch):
+    from egx_agent.data import flows
+    monkeypatch.setattr(macfeed, "FILE", tmp_path / "mubasher.egxm")
+    mac, site = db.connect(tmp_path / "mac.db"), db.connect(tmp_path / "site.db")
+    day, kept = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d"), (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+    rows = [(s, d, 1.0) for d in (day, kept) for s in macfeed.FLOW_SERIES]
+    mac.executemany("INSERT INTO macro(series, date, value) VALUES (?,?,?)", rows)
+    mac.execute("INSERT INTO macro(series, date, value) VALUES ('flow_foreign', ?, 9.0)", ("2020-01-01",))   # too old
+    site.executemany("INSERT INTO macro(series, date, value) VALUES (?,?,?)", [(s, kept, 2.0) for s in macfeed.FLOW_SERIES])
+    site.execute("INSERT INTO macro(series, date, value) VALUES ('flow_foreign', ?, 999.0)", (day,))     # Amwal's total
+    sent = []
+    macfeed.send(mac, {"telegram_token": "123:abc"}, up=sent.append)
+    assert "1 days of who bought" in macfeed.apply(site, sent[0], "123:abc")
+    got = {(r[0], r[1]): r[2] for r in site.execute("SELECT series, date, value FROM macro")}
+    assert got[("flow_foreign", day)] == 1.0 and got[(flows.SPLIT[("arabs", "individuals")], day)] == 1.0
+    assert got[("flow_foreign", kept)] == 2.0            # a day the website already had the split of stays
