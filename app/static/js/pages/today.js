@@ -30,9 +30,9 @@ export function TodayPage() {
     <${PageHead} title="Today" sub=${t('From {date}', { date: fmt.date(m.date) })}>
       <${SessionBadge} dataDate=${m.date} /><//>
     <${Brief} data=${data} blocked=${blocked} alerts=${alerts} />
-    ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
-      ${m.warnings.map(w => html`<${Callout} tone="warn">${tn(w)}<//>`)}
-      <a class="faint" style="font-size:13px" href="#/health">${t('See data health')}</a></div>`}
+    ${m.warnings && m.warnings.length > 0 && html`<a class="data-note" href="#/health" title=${m.warnings.map(tn).join('\n')}>
+      <span class="health-dot warn"></span>${t(m.warnings.length === 1 ? '1 data source had a problem. The site still works.'
+        : '{n} data sources had a problem. The site still works.', { n: m.warnings.length })} <b>${t('See data health')}</b></a>`}
     ${data.week && html`<${WeekCard} w=${data.week} positions=${data.positions} />`}
     ${data.orders && html`<${OrdersCard} o=${data.orders} />`}
     ${data.positions.length > 0 && html`<${Changes} ch=${data.changes} positions=${data.positions} />`}

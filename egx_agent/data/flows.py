@@ -191,7 +191,7 @@ SITEMAP = "https://www.youm7.com/Sitemap/{y}/{m}/{d}"     # every story of that 
 ROUNDUP = "أخبار-البورصة-اليوم"                           # its daily market roundup's address
 KINDS = ("individuals", "institutions")
 SPLIT = {(g, k): f"{SERIES[g]}_{k[:3] if k == 'individuals' else k[:4]}" for g in SERIES for k in KINDS}
-SPLIT_TRIES = 3              # new sessions: at most this many back (the day's roundup can come late)
+SPLIT_TRIES = 6              # the last sessions without a split are tried each run (a roundup can come late or not at all)
 SPLIT_BACK_PER_RUN = 20      # older sessions filled in each run, newest first, until BACKFILL_DAYS are there
 READY = "15:30"              # Cairo: the day's roundup isn't out before this
 SPLIT_VERSION = "2"          # a newer reader: the last month's days with a group left out are read again, once
@@ -249,17 +249,75 @@ def _even(o: dict) -> bool:
     return abs(sum(o.values())) <= max(1.0, 0.03 * sum(abs(v) for v in o.values()))
 
 
-def fetch_split(day: date, s: requests.Session) -> dict | None:
-    """That session's split, from Youm7's roundup of the day (None if there's none or it doesn't read well)."""
+def fetch_split(day: date, s: requests.Session, backup: bool = False, delay: float = 2.0) -> dict | None:
+    """That session's split, from Youm7's roundup of the day, else (backup) Hapi Journal's closing story; None if
+    neither has it or it doesn't read well."""
     r = s.get(SITEMAP.format(y=day.year, m=day.month, d=day.day), timeout=60)
-    if r.status_code != 200:
+    if r.status_code == 200:
+        # only the roundup has the sentence (the day's closing stories don't); some days have none (16 Nov 2026)
+        for url in [u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if ROUNDUP in urllib.parse.unquote(u)][:2]:
+            page = s.get(url, timeout=60)
+            got = parse_split(page.text) if page.ok else None
+            if got:
+                return got
+    return fetch_hapi(day, s, delay) if backup else None
+
+
+# Hapi Journal's closing story repeats the exchange's statement one group a sentence: "وسيطر الاتجاه البيعي على تعاملات
+# المستثمرين المصريين وسجلوا صافي بقيمة 194.585 مليون جنيه، بضغط من المؤسسات التي حققت صافي بيع بقيمة 289.595 مليون
+# جنيه، مقابل 95.009 مليون جنيه صافي شراء من الافراد" / "…العرب نحو الشراء محققين صافي بقيمة 115.018 مليون جنيه، منها
+# 84.042 مليون جنيه للمؤسسات، و30.976 مليون جنيه للافراد". Its robots.txt allows everything; its JSON feed is closed.
+HAPI_DAY = "https://hapijournal.com/{y}/{m:02d}/{d:02d}/"
+HAPI_PAGES = 6                 # the day's list, 20 stories a page, newest first
+_SELL = re.compile(r"بيع|البيعي")
+_BUY = re.compile(r"شراء|الشرائي")
+
+
+def parse_hapi(text: str) -> dict[str, dict[str, float]] | None:
+    out: dict[str, dict[str, float]] = {}
+    for sent in re.split(r"(?<!\d)\.|\.(?!\d)|\n", _normal(text)):
+        words = [_who(w) for w in _WHO.findall(sent)]
+        groups = [v for r, v in words if r == "group"]
+        kinds = list(dict.fromkeys(_who(w)[1] for w in re.findall(r"افراد|مؤسسات", sent)))   # للمؤسسات too
+        nums = _amounts(sent.partition("بقيمة")[2] or sent)
+        if not groups or sorted(kinds) != sorted(KINDS) or len(nums) < 3 or groups[0] in out:
+            continue
+        lead = sent[:sent.find("بقيمة")] if "بقيمة" in sent else sent
+        sell, buy = bool(_SELL.search(lead)), bool(_BUY.search(lead))
+        if sell == buy:
+            continue
+        total = -nums[0] if sell else nums[0]
+        a, b = nums[1], nums[2]
+        fits = [(x, y) for x in (a, -a) for y in (b, -b) if abs(x + y - total) <= max(0.01, 0.005 * abs(total))]
+        if len(fits) != 1:
+            continue
+        out[groups[0]] = dict(zip(kinds, fits[0]))
+    if len(out) != 3:
         return None
-    # only the roundup has the sentence (the day's closing stories don't); some days have none
-    for url in [u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if ROUNDUP in urllib.parse.unquote(u)][:2]:
-        page = s.get(url, timeout=60)
-        got = parse_split(page.text) if page.ok else None
-        if got:
-            return got
+    flat = {(g, k): out[g][k] for g in out for k in KINDS}
+    return {g: {k: out[g][k] for k in KINDS} for g in SERIES} if _even(flat) else None
+
+
+def fetch_hapi(day: date, s: requests.Session, delay: float = 2.0) -> dict | None:
+    """Hapi's story for that day: its day pages list the stories; the market ones are read until one has the split."""
+    base = HAPI_DAY.format(y=day.year, m=day.month, d=day.day)
+    tried: set[str] = set()
+    for n in range(1, HAPI_PAGES + 1):
+        time.sleep(delay)
+        r = s.get(base if n == 1 else f"{base}page/{n}/", timeout=60)
+        if r.status_code != 200:
+            return None
+        links = [u for u in dict.fromkeys(re.findall(rf'href="({re.escape(base)}[^"/]+/)"', r.text))
+                 if "البورصة" in urllib.parse.unquote(u) and u not in tried]
+        for url in links:
+            tried.add(url)
+            time.sleep(delay)
+            page = s.get(url, timeout=60)
+            got = parse_hapi(page.text) if page.ok else None
+            if got:
+                return got
+        if f"{base}page/{n + 1}/" not in r.text:
+            return None
     return None
 
 
@@ -275,7 +333,9 @@ def update_split(conn: sqlite3.Connection, session: requests.Session | None = No
     sessions = [r[0] for r in conn.execute("SELECT date FROM prices WHERE symbol = ? AND date >= ? AND date <= ? "
                                            "ORDER BY date", (INDEX_SYMBOL, (now.date() - timedelta(days=BACKFILL_DAYS))
                                                               .isoformat(), today))]
-    new = [d for d in sessions if not newest or d > newest][-SPLIT_TRIES:]
+    have = {r[0] for r in conn.execute("SELECT date FROM macro WHERE series = ? AND date >= ?",
+                                       (key, sessions[-SPLIT_TRIES] if len(sessions) >= SPLIT_TRIES else ""))}
+    new = [d for d in sessions[-SPLIT_TRIES:] if d not in have]     # a day both sources missed is tried again
     new = [d for d in new if d < today or now.strftime("%H:%M") >= READY]
     back = db.get_meta(conn, "flows_split_back") or (new[0] if new else newest or today)   # the oldest one tried
     older = [d for d in sessions if d < back][::-1][:SPLIT_BACK_PER_RUN]
@@ -289,7 +349,7 @@ def update_split(conn: sqlite3.Connection, session: requests.Session | None = No
     for i, day in enumerate(new + again + older):
         if i:
             time.sleep(delay)
-        got = fetch_split(date.fromisoformat(day), s)
+        got = fetch_split(date.fromisoformat(day), s, backup=day in new, delay=delay)
         if got and max(abs(v) for g in got.values() for v in g.values()) > MAX_NET:
             got = None                         # the debt market, not shares (drop_impossible)
         if got:

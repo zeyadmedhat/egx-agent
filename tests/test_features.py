@@ -317,12 +317,12 @@ def test_the_split_fills_new_sessions_then_two_years_back_a_little_each_run(tmp_
     now = datetime.fromisoformat(f"{days[-1].date()}T16:00:00")
     flows.SPLIT_BACK_PER_RUN, back = 5, flows.SPLIT_BACK_PER_RUN
     try:
-        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 3 + 5      # the newest 3, then 5 older ones
+        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 6 + 5      # the newest 6, then 5 older ones
         assert flows.update_split(conn, Youm7(), delay=0, now=now) == 5          # 5 more each run
     finally:
         flows.SPLIT_BACK_PER_RUN = back
     rows = flows.recent_split(conn, 100)
-    assert len(rows) == 13 and rows[-1]["date"] == str(days[-1].date())
+    assert len(rows) == 16 and rows[-1]["date"] == str(days[-1].date())
     assert rows[-1]["foreigners"] == {"individuals": 0.0, "institutions": -100.0}
     assert flows.load(conn).iloc[-1].to_dict() == {"egyptians": 70.0, "arabs": 30.0, "foreigners": -100.0}   # replaces 999
     assert not any("/other/" in u for u in asked)
@@ -331,11 +331,24 @@ def test_the_split_fills_new_sessions_then_two_years_back_a_little_each_run(tmp_
     asked.clear()
     flows.SPLIT_BACK_PER_RUN, back = 0, flows.SPLIT_BACK_PER_RUN
     try:
-        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 13
+        assert flows.update_split(conn, Youm7(), delay=0, now=now) == 16
         assert flows.update_split(conn, Youm7(), delay=0, now=now) == 0       # once
     finally:
         flows.SPLIT_BACK_PER_RUN = back
     assert db.get_meta(conn, "flows_split_v") == flows.SPLIT_VERSION
+
+
+def test_hapi_journal_is_read_when_youm7_has_no_roundup():
+    from egx_agent.data import flows
+    text = ("<p>وسيطر الاتجاه البيعي على تعاملات المستثمرين المصريين وسجلوا صافي بقيمة 194.585 مليون جنيه، بضغط من "
+            "المؤسسات التي حققت صافي بيع بقيمة 289.595 مليون جنيه، مقابل 95.009 مليون جنيه صافي شراء من الأفراد.</p>"
+            "<p>واتجهت تعاملات المستثمرين العرب نحو الشراء محققين صافي بقيمة 115.018 مليون جنيه، منها 84.042 مليون جنيه "
+            "للمؤسسات، و30.976 مليون جنيه للأفراد.</p><p>وسجلت تعاملات المستثمرين الأجانب صافي شراء بقيمة 79.567 مليون "
+            "جنيه، منها 78.359 مليون جنيه للمؤسسات، و1.207 مليون جنيه للأفراد.</p>")
+    assert flows.parse_hapi(text) == {"egyptians": {"individuals": 95.009, "institutions": -289.595},
+                                      "arabs": {"individuals": 30.976, "institutions": 84.042},
+                                      "foreigners": {"individuals": 1.207, "institutions": 78.359}}
+    assert flows.parse_hapi(text.replace("115.018", "15.018")) is None      # the parts don't add up: not read
 
 
 def test_past_rights_issues_are_measured_from_the_close_before_the_ex_date(tmp_path):
