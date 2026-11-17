@@ -89,7 +89,7 @@ def test_a_scan_every_half_hour_during_the_session(tmp_path):
     assert session_scan_due(conn, at(4, 11, 0))                      # no scan yet
     db.set_meta(conn, "market", json.dumps({"finished": at(4, 10, 50).isoformat()}))
     assert not session_scan_due(conn, at(4, 11, 0))                  # 10 minutes ago
-    assert session_scan_due(conn, at(4, 11, 20))                     # 30 minutes ago
+    assert session_scan_due(conn, at(4, 11, 3))                      # 13 minutes ago: the bot asks every 15
     assert not session_scan_due(conn, at(4, 9, 50)) and not session_scan_due(conn, at(4, 15, 30))   # closed
     assert not session_scan_due(conn, at(9, 11, 20))                 # Friday
 

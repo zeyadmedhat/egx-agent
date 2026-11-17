@@ -4,7 +4,7 @@ compatibility_date = "2026-09-01"
 
 # Every 10 minutes: after each close, start the website's scan on GitHub if it hasn't run yet (bot.js, tick).
 [triggers]
-crons = ["*/10 * * * *"]
+crons = ["*/5 * * * *"]      # every 5 minutes, so a 15-minute session run starts within 5
 
 # The website's "Add from a screenshot": Cloudflare's free AI reads a broker screenshot (bot.js, read).
 [ai]

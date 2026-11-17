@@ -888,15 +888,14 @@ export function parseHoldings(text) {
 // ------------------------------------------------------------------ on-time scans
 // The website's runs (Cairo time, trading days only, not on the holidays EGX announced: info.hol from
 // egx_agent/holidays.py): GitHub's own timer starts one at 9:30 before the open and one at 15:30 after the close
-// (.github/workflows/site.yml), and the bot asks for one every half hour of the session, 10:30–14:00, for the live
-// prices. GitHub's timer runs late or not at all when it's busy, so the bot backs it up at the same two times: at
-// 10:05 if no run has reported since 9:30, and at 16:00 if that close's final scan hasn't arrived. If GitHub refuses
+// (.github/workflows/site.yml), and the bot asks for one every 15 minutes of the session, 10:30–14:15, for the live
+// prices (every 15 minutes since 17 Nov 2026). GitHub's timer runs late or not at all when it's busy, so the bot asks for those too, on time (scanDue). If GitHub refuses
 // the bot's run (its key expired on 3 Nov 2026, and nobody knew), the owner hears about it once a day (tick).
 const MORNING = [570, 600]                            // the reminder before the open: 9:30–10:00 Cairo
 const SESSION_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu"]
-const SESSION = [630, 869]                            // 10:30–14:00: the live prices every half hour (scan.session_scan_due)
-const MORNING_RUN = 570, MORNING_CHECK = 605          // GitHub's 9:30 run; the bot checks for it at 10:05
-const CLOSE_CHECK = 960, LAST_MINUTE = 1350           // after the close: checked from 16:00 (GitHub's run is at 15:30)
+const SESSION = [630, 869]                            // 10:30–14:15: the live prices every 15 minutes (scan.session_scan_due)
+const MORNING_RUN = 570                                // 9:30, before the open
+const CLOSE_RUN = 930, EVENING_RUN = 1050, LAST_MINUTE = 1350   // 15:30 (scan.DATA_READY) and 17:30 (Youm7's who bought)
 
 export function cairo(now = new Date()) {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit",
@@ -905,21 +904,27 @@ export function cairo(now = new Date()) {
   return { day: `${p.year}-${p.month}-${p.day}`, minute: +p.hour * 60 + +p.minute, weekday: p.weekday }
 }
 
-// The run to ask for now ("2026-09-30 s660" during the session, "… m570" or "… c960" as GitHub's backup), or why not.
-// lastRun: when a website run last reported to the bot (cairo()), or null.
+// The run to ask for now, or why not. The bot starts every run on time, because GitHub's own timer came 40 minutes to
+// 7 hours late every day in Nov 2026; GitHub's timer stays as a backup only (site.yml's "when" job skips it once the
+// site is fresh). Each run is asked for once: "2026-09-30 m570" at 9:30, "s630" … "s855" every 15 minutes of the
+// session, "c930" at 15:30 (asked again from the next tick on if the close's final scan still isn't in), and "e1050" at
+// 17:30 for the day's who bought and who sold. lastRun: when a website run last reported to the bot (cairo()), or null.
+const STEP = 15                                       // a session run every 15 minutes
+
 export function scanDue(info, now, lastRun = null) {
   if (!SESSION_DAYS.includes(now.weekday) || ((info && info.hol) || []).includes(now.day)) return { why: "no session today" }
   if (now.minute >= SESSION[0] && now.minute <= SESSION[1]) {
-    return { key: `${now.day} s${SESSION[0] + Math.floor((now.minute - SESSION[0]) / 30) * 30}` }
+    return { key: `${now.day} s${SESSION[0] + Math.floor((now.minute - SESSION[0]) / STEP) * STEP}` }
   }
-  if (now.minute >= MORNING_CHECK && now.minute < SESSION[0]) {
+  if (now.minute >= MORNING_RUN && now.minute < SESSION[0]) {
     const ran = lastRun && lastRun.day === now.day && lastRun.minute >= MORNING_RUN
     return ran ? { why: "the morning run is in" } : { key: `${now.day} m${MORNING_RUN}` }
   }
-  if (now.minute < CLOSE_CHECK) return { why: "not a run time" }
+  if (now.minute < CLOSE_RUN) return { why: "not a run time" }
   if (now.minute > LAST_MINUTE) return { why: "too late today" }
+  if (now.minute >= EVENING_RUN) return { key: `${now.day} e${EVENING_RUN}` }
   if (info && info.scan === now.day && info.final !== false) return { why: "today's scan is in" }
-  return { key: `${now.day} c${CLOSE_CHECK}` }
+  return { key: `${now.day} c${CLOSE_RUN}` }
 }
 
 // ------------------------------------------------------------------ the website inside Telegram (a mini app)
@@ -1431,8 +1436,8 @@ export default {
     if (url.pathname === "/flow" && req.method === "GET") return flow()
     return env.BOT.get(env.BOT.idFromName("bot")).fetch(req)
   },
-  // Every 10 minutes (wrangler.toml): only the morning (the reminder at 9:30 Cairo, UTC+2 or +3), the session (a scan
-  // every half hour) and the evening (a scan after the close) have anything to do, so the night returns at once.
+  // Every 5 minutes (wrangler.toml): only the morning (the reminder at 9:30 Cairo, UTC+2 or +3), the session (a scan
+  // every 15 minutes) and the evening (a scan after the close) have anything to do, so the night returns at once.
   scheduled(event, env, ctx) {
     const hour = new Date(event.scheduledTime).getUTCHours()
     if (!env.SYNC_KEY || hour < 6 || hour > 20) return

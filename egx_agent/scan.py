@@ -46,8 +46,8 @@ SESSION = (time(10, 15), time(14, 45))   # EGX trades 10:00–14:30 Cairo; price
 
 
 def session_scan_due(conn: sqlite3.Connection, now: datetime | None = None,
-                     every: timedelta = timedelta(minutes=25)) -> bool:
-    """During a session, a scan of the live prices every half hour (the site's runs ask about every 30 minutes). It
+                     every: timedelta = timedelta(minutes=12)) -> bool:
+    """During a session, a scan of the live prices every 15 minutes (the bot asks for a run every 15). It
     isn't final (scan_is_final), so it's scanned again after the close and Telegram waits for that one."""
     now = now or datetime.now(CAIRO)
     if not holidays.is_session(now.date()) or not SESSION[0] <= now.time() <= SESSION[1]:

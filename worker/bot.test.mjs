@@ -205,22 +205,24 @@ const at = (day, hm, weekday = "Wed") => ({ day, minute: +hm.slice(0, 2) * 60 + 
   assert.equal(sent.length, 1)
   assert.ok(sent[0][0] === "7" && sent[0][1].includes("EGX on-time scans") && sent[0][1].includes("401") && sent[0][1].includes("الموقع"))
 }
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:30")).key, undefined)          // GitHub's own run
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:55")).key, undefined)
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "16:00")).key, "2026-09-30 c960")  // it didn't come
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "19:20")).key, "2026-09-30 c960")  // the same ask: once
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:20")).key, undefined)          // the close isn't final yet
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "15:30")).key, "2026-09-30 c930")  // on time
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "16:20")).key, "2026-09-30 c930")  // the same ask: once
 assert.equal(scanDue({ scan: "2026-09-30", final: true }, at("2026-09-30", "16:20")).key, undefined)  // it's in
-assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "16:20")).key, "2026-09-30 c960")
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-10-02", "16:20", "Fri")).key, undefined)
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "16:20")).key, "2026-09-30 c930")
+assert.equal(scanDue({ scan: "2026-09-30", final: true }, at("2026-09-30", "17:30")).key, "2026-09-30 e1050")  // who bought
+assert.equal(scanDue({ scan: "2026-09-30", final: true }, at("2026-09-30", "21:00")).key, "2026-09-30 e1050")
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-10-02", "17:40", "Fri")).key, undefined)
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "23:00")).key, undefined)
 assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "10:35")).key, "2026-09-30 s630")   // session
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "10:50")).key, "2026-09-30 s645")   // every 15
 assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "11:05")).key, "2026-09-30 s660")
-assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "14:05")).key, "2026-09-30 s840")   // the last
+assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "14:20")).key, "2026-09-30 s855")   // the last
 assert.equal(scanDue({ scan: "2026-09-30", final: false }, at("2026-09-30", "14:30")).key, undefined)
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "09:40")).key, undefined)          // GitHub's 9:30 run
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "09:20")).key, undefined)          // before 9:30
+assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "09:30")).key, "2026-09-30 m570")  // on time
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "10:05"), at("2026-09-30", "09:48")).key, undefined)  // it ran
 assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "10:05"), at("2026-09-29", "16:10")).key, "2026-09-30 m570")
-assert.equal(scanDue({ scan: "2026-09-29" }, at("2026-09-30", "10:15")).key, "2026-09-30 m570")
 assert.equal(scanDue({ scan: "2026-10-07", hol: ["2026-10-08"] }, at("2026-10-08", "11:05", "Thu")).key, undefined)  // holiday
 assert.equal(scanDue({ scan: "2026-10-07", hol: ["2026-10-08"] }, at("2026-10-08", "16:20", "Thu")).key, undefined)
 assert.equal(scanDue({ scan: "2026-10-07", hol: ["2026-10-08"] }, at("2026-10-08", "10:10", "Thu")).key, undefined)
