@@ -1784,7 +1784,7 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .invt-key.dash { border-top-style: dashed; }
 .flow-plot { position: relative; }
 .flow-plot svg { width: 100%; height: 170px; display: block; overflow: visible; }
-.flow-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); }
+.fl-end { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); }
 @media (min-width: 900px) { .flow-plot svg { height: 230px; } }
 
 /* Market activity: big buttons for the chosen day, bars you can tap, the usual day as a labelled dashed line */
@@ -1802,3 +1802,8 @@ button.act-col { background: none; border: 0; padding: 0; cursor: pointer; font:
 .act-usual span:first-child { inset-inline-start: 0; }
 .act-usual span:last-child { inset-inline-end: 0; }
 .act-bars { height: 140px; }
+.wh-list { grid-template-columns: 4.5em minmax(0, 1fr); }
+.wh-list .v { text-align: start; }
+.wh-list > * { padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.wh-list .v a[dir="auto"] { text-align: left; }
+[dir="rtl"] .wh-list .v a[dir="auto"] { text-align: right; }

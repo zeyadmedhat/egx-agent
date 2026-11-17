@@ -299,9 +299,15 @@ function Rates({ r }) {
 const FLOW_COLORS = { egyptians: 'var(--accent)', arabs: 'var(--up)', foreigners: 'var(--warn)' };
 function FlowLines({ days }) {
   const W = 600, H = 170, P = 8;
+  // a one-off day far bigger than the rest (one block deal, or a misread report) would flatten every other line: it's
+  // left out of the lines (still in the table) and named under the chart
+  const size = d => GROUPS.reduce((a, [g]) => a + KINDS.reduce((b, [k]) => b + Math.abs((d[g] || {})[k] || 0), 0), 0);
+  const sizes = days.map(size).sort((a, b) => a - b);
+  const mid = sizes[Math.floor(sizes.length / 2)] || 1;
+  const odd = days.filter(d => size(d) > 6 * mid);
   const lines = GROUPS.flatMap(([g]) => KINDS.map(([k]) => {
     let run = 0;
-    return { g, k, pts: days.map(d => (run += ((d[g] || {})[k] || 0))) };
+    return { g, k, pts: days.map(d => (run += odd.includes(d) ? 0 : ((d[g] || {})[k] || 0))) };
   }));
   const all = lines.flatMap(l => l.pts).concat(0);
   const lo = Math.min(...all), hi = Math.max(...all), span = hi - lo || 1;
@@ -312,7 +318,8 @@ function FlowLines({ days }) {
       ${lines.map(l => html`<path d=${l.pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')}
         fill="none" stroke=${FLOW_COLORS[l.g]} stroke-width="2.2" stroke-dasharray=${l.k === 'individuals' ? '5 4' : ''}
         stroke-linejoin="round" vector-effect="non-scaling-stroke" />`)}
-    </svg>${lines.map(l => html`<i class="flow-dot" style=${`left:${(x(l.pts.length - 1) / W) * 100}%;top:${(y(l.pts[l.pts.length - 1]) / H) * 100}%;background:${FLOW_COLORS[l.g]}`}></i>`)}</div>
-    <p class="faint s">${t('Added up over the last {n} sessions ({from} – {to}). Solid: institutions. Dashed: individuals.', { n: days.length, from: fmt.date(days[0].date, false), to: fmt.date(days[days.length - 1].date, false) })}</p>
+    </svg>${lines.map(l => html`<i class="fl-end" style=${`left:${(x(l.pts.length - 1) / W) * 100}%;top:${(y(l.pts[l.pts.length - 1]) / H) * 100}%;background:${FLOW_COLORS[l.g]}`}></i>`)}</div>
+    <p class="faint s">${t('Added up over the last {n} sessions ({from} – {to}). Solid: institutions. Dashed: individuals.', { n: days.length, from: fmt.date(days[0].date, false), to: fmt.date(days[days.length - 1].date, false) })}${odd.length
+      ? ' ' + t('Left out of the lines, far bigger than a usual day: {days}.', { days: odd.map(d => fmt.date(d.date, false)).join(', ') }) : ''}</p>
   </div>`;
 }

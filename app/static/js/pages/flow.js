@@ -2,7 +2,7 @@
 // money counts as "in" on a day it closed up and "out" on a day it closed down. Then the whales: block deals from the
 // stocks' headlines and big owners changing their stakes. Where money went, not where it will go: the rules don't use it.
 import { html, useApi, useState, useEffect, api, fmt, tone, stockHref } from '../lib.js';
-import { PageHead, PageLoading, Empty, Seg, More, SessionBadge, sessionState } from '../ui.js';
+import { PageHead, PageLoading, Empty, Seg, More, SessionBadge, sessionState, ownerText } from '../ui.js';
 import { t, tp, tn } from '../i18n.js';
 import { Investors } from './market.js';
 
@@ -177,10 +177,10 @@ function Whales({ deals, owners, end }) {
         <title>${`${i.symbol} · ${fmt.date(i.date, false)}${i.value ? ` · ${egp(i.value)}` : ''}`}</title></a>`)}
     </svg>
     <p class="faint s" style="margin:2px 0 10px">${t('Circles: big deals, bigger for more money. Diamonds: a big owner\'s stake went up or down.')}</p>
-    <div class="stat-list">${shown.map(i => html`
+    <div class="stat-list wh-list">${shown.map(i => html`
       <span class="k">${fmt.date(i.date, false)}</span>
       <span class="v" style="font-weight:500"><a href=${stockHref(i.symbol)}><b>${i.symbol}</b></a> · ${i.kind === 'owner'
-        ? html`<bdi dir="auto">${i.holder}</bdi>: <bdi class=${i.side === 'buy' ? 'up' : 'down'}>${fmt.pct(i.before, 1, false)} → ${fmt.pct(i.after, 1, false)}</bdi>`
+        ? html`<bdi dir="auto" class=${i.side === 'buy' ? 'up' : 'down'}>${ownerText(i)}</bdi>`
         : html`<bdi class=${i.side === 'buy' ? 'up' : i.side === 'sell' ? 'down' : ''}>${t(i.side === 'buy' ? 'Bought' : i.side === 'sell' ? 'Sold' : 'Changed hands')}</bdi>${
           i.value != null ? html` · <bdi>${egp(i.value)}</bdi>` : ''}${i.who ? html` · <bdi>${t(DEAL_WHO[i.who])}</bdi>` : ''}
           <a class="faint" style="display:block;font-weight:400;font-size:12px" href=${i.url} target="_blank" rel="noopener noreferrer" dir="auto">${i.title}</a>`}

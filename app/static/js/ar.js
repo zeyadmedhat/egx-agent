@@ -298,6 +298,7 @@ export const AR = {
   "{p} above a usual day": "أعلى من اليوم المعتاد بـ {p}",
   "{p} below a usual day": "أقل من اليوم المعتاد بـ {p}",
   "Tap a day to see its numbers.": "اضغط على يوم لترى أرقامه.",
+  "Left out of the lines, far bigger than a usual day: {days}.": "مستبعد من الخطوط، أكبر بكثير من اليوم المعتاد: {days}.",
   "money traded · change on the day": "قيمة التداول · تغير اليوم",
   "Only actively traded stocks. A jump over 30% in one day is left out. That's a split or bonus shares, not a real move.": "الأسهم النشطة فقط. القفزة فوق 30% في يوم واحد مستبعدة. فهي تجزئة أو أسهم مجانية، وليست حركة حقيقية.",
   "At a 1-year high or low": "عند أعلى أو أدنى سعر في سنة",
