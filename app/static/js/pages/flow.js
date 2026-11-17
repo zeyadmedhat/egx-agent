@@ -25,13 +25,13 @@ export function FlowPage() {
   return html`
     <${PageHead} title="Money flow" sub=${t('Where the money traded on EGX went, up to {date}.', { date: fmt.date(data.date) })}>
       <${SessionBadge} dataDate=${data.date} /><//>
+    ${data.investors && data.investors.length > 0 && html`<${Investors} days=${data.investors} latest=${data.date} />`}
     <${Live} sectors=${data.sectors || {}} usual=${data.usual_day} />
     <div class="flow-span"><${Seg} options=${SPANS} value=${k} onChange=${setK} /><span class="faint">${span}</span></div>
     <${Market} s=${s} />
     <${Sectors} rows=${s.sectors} />
     <${Bubbles} rows=${s.stocks} />
     <${Footprints} list=${data.footprints || []} />
-    ${data.investors && data.investors.length > 0 && html`<${Investors} days=${data.investors} latest=${data.date} />`}
     <${Whales} deals=${data.deals} owners=${data.owners} end=${data.date} />
     <${More} label="How this is worked out"><p>${t(HOW)}</p><//>`;
 }
