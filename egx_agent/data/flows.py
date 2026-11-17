@@ -37,6 +37,11 @@ _NUM = re.compile(r"(\d+(?:\.\d+)?)\s*(مليار|مليون|الف)?")
 _CLAUSE = re.compile(r"(?<!\d)\.|\.(?!\d)|فيما|بينما|في حين|في المقابل|\n"
                      r"|،\s*(?=و?(?:قصد|اتجه|اتجهت|توجه|توجهت|مال|مالت|سجل|سجلت)\s)")   # "…، قصد الأجانب الشراء…"
 _UNIT = {"مليار": 1000.0, "مليون": 1.0, "الف": 0.001}
+# a story about the government debt market (bonds, treasury bills), not shares: on 16 Nov 2026 one said "the Arabs and
+# foreigners bought 29.38 billion" and was read as the share market's flows
+_DEBT = re.compile(r"ادوات دين|ادوات الدين|الدين الحكومي|سندات|اذون|السوق الثانوية")
+MAX_NET = 20_000.0     # million EGP: no group nets this much in shares in one session (11–13 billion foreign
+                       # buying on three days of 2025–26 may be real deals, so they stay)
 _KEY = {"عرب": "arabs", "اجانب": "foreigners", "مصري": "egyptians"}
 
 
@@ -74,7 +79,7 @@ def parse(text: str) -> dict[str, float] | None:
     total = sum(abs(v) for v in out.values())
     if len(out) == 2 and min(out.values()) < 0 < max(out.values()) and abs(sum(out.values())) <= max(1.0, 0.1 * total):
         out[next(k for k in SERIES if k not in out)] = -sum(out.values())
-    if len(out) != 3:
+    if len(out) != 3 or max(abs(v) for v in out.values()) > MAX_NET:
         return None
     even = lambda o: abs(sum(o.values())) <= max(1.0, 0.03 * sum(abs(v) for v in o.values()))   # noqa: E731
     if even(out):
@@ -106,7 +111,10 @@ def fetch(since: str, session: requests.Session | None = None, delay: float = 2.
             if day in titled or date.fromisoformat(day).weekday() in (4, 5) or not (closing or clock >= CLOSE) \
                     or (day in found and not closing):
                 continue
-            got = parse((p.get("content") or {}).get("rendered", ""))
+            body = (p.get("content") or {}).get("rendered", "")
+            if _DEBT.search(title):      # its title says so; a share report may mention bonds in passing
+                continue
+            got = parse(body)
             if got:
                 found[day] = got
                 if closing:
@@ -133,8 +141,22 @@ def update(conn: sqlite3.Connection, session: requests.Session | None = None) ->
     return saved
 
 
+def drop_impossible(conn: sqlite3.Connection) -> int:
+    """Forget every flow of a day where one group's net is beyond MAX_NET: the debt market read as shares (16 Nov 2026
+    from Amwal Al Ghad, 29 Oct 2026's 34 billion in a 7.6-billion session from Youm7). Returns how many days."""
+    names = list(SERIES.values()) + list(SPLIT.values())
+    marks = ",".join("?" * len(names))
+    days = [r[0] for r in conn.execute(f"SELECT DISTINCT date FROM macro WHERE series IN ({marks}) AND ABS(value) > ?",
+                                       (*names, MAX_NET))]
+    for day in days:
+        conn.execute(f"DELETE FROM macro WHERE series IN ({marks}) AND date = ?", (*names, day))
+    conn.commit()
+    return len(days)
+
+
 def update_totals(conn: sqlite3.Connection, session: requests.Session | None = None) -> int:
     """Download the sessions since the last one saved (about two years the first time). Returns how many were saved."""
+    drop_impossible(conn)
     last = conn.execute("SELECT MAX(date) FROM macro WHERE series = ?", (SERIES["foreigners"],)).fetchone()[0]
     if last and last >= date.today().isoformat():
         return 0
@@ -268,6 +290,8 @@ def update_split(conn: sqlite3.Connection, session: requests.Session | None = No
         if i:
             time.sleep(delay)
         got = fetch_split(date.fromisoformat(day), s)
+        if got and max(abs(v) for g in got.values() for v in g.values()) > MAX_NET:
+            got = None                         # the debt market, not shares (drop_impossible)
         if got:
             conn.executemany("INSERT OR REPLACE INTO macro(series, date, value) VALUES (?,?,?)",
                              [(SPLIT[(g, k)], day, got[g][k]) for g in SERIES for k in KINDS]

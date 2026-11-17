@@ -1004,6 +1004,35 @@ def history_data(d: Data) -> dict:
 MONEY_SINCE = "2022-01-01"     # the dollar, gold and interest rate history the site publishes (history_data)
 
 
+def market_strip(d: Data) -> dict:
+    """The Market page's top strip: EGX30, EGX70 (equal weight), the dollar and gold (EGP a gram of 24 carat, at the
+    world price) with their last change; and the interbank rate and yearly inflation with their last move in points."""
+    def last_two(series):
+        return [(r["date"], r["value"]) for r in d.conn.execute(
+            "SELECT date, value FROM macro WHERE series=? ORDER BY date DESC LIMIT 2", (series,))]
+    def moved(series):      # the last value and the one before it that was different (rates move rarely)
+        rows = [(r["date"], r["value"]) for r in d.conn.execute(
+            "SELECT date, value FROM macro WHERE series=? ORDER BY date DESC LIMIT 400", (series,))]
+        if not rows:
+            return None
+        before = next((r for r in rows if r[1] != rows[0][1]), None)
+        return {"value": rows[0][1], "date": rows[0][0], "change": rows[0][1] - before[1] if before else None,
+                "since": before[0] if before else None}
+    idx = d.prices(prices.INDEX_SYMBOL)["close"].tail(2)
+    out = []
+    if len(idx) == 2:
+        out.append({"name": "EGX30", "value": float(idx.iloc[-1]), "change": float(idx.iloc[-1] / idx.iloc[-2] - 1)})
+    for name, series in (("EGX70", "egx70"), ("USD/EGP", "usdegp")):
+        r = last_two(series)
+        if len(r) == 2:
+            out.append({"name": name, "value": r[0][1], "change": r[0][1] / r[1][1] - 1})
+    g, fx = last_two("gold"), last_two("usdegp")
+    if len(g) == 2 and len(fx) == 2:
+        now, prev = g[0][1] * fx[0][1] / macro.OUNCE_G, g[1][1] * fx[1][1] / macro.OUNCE_G
+        out.append({"name": "Gold 24k", "value": now, "change": now / prev - 1, "unit": "EGP/g"})
+    return clean({"indices": out, "rates": {"interest": moved("interbank"), "inflation": moved("inflation")}})
+
+
 def money_rates(conn: sqlite3.Connection) -> dict | None:
     """The latest dollar rate, gold (EGP a gram of 24-carat), interbank rate and yearly inflation (%): for the zakat
     and certificate calculators. None before the Egypt data is downloaded."""
@@ -1301,6 +1330,16 @@ def movers(d: Data) -> dict:
             ret = (c.iloc[-1] / c.iloc[-1 - n] - 1).reindex(liquid[clean_.to_numpy()]).dropna().sort_values()
             pick = lambda rs: [{"symbol": s, "ret": float(r), "close": float(close[s].iloc[-1])} for s, r in rs.items()]  # noqa: E731
             out[key] = {"up": pick(ret[::-1].head(6)), "down": pick(ret.head(6))}
+        today_value = traded.iloc[-1].reindex(today).dropna().sort_values(ascending=False).head(6)
+        day_ret = (c.iloc[-1] / c.iloc[-2] - 1).where(daily.iloc[-1] <= JUMP)
+        active = [{"symbol": s, "value": float(v), "close": float(close[s].iloc[-1]),
+                   "ret": None if pd.isna(day_ret.get(s)) else float(day_ret[s])} for s, v in today_value.items()]
+        # Market activity: the money and shares traded each session (every stock the agent follows), last 6 and the usual
+        vol = px.pivot(index="date", columns="symbol", values="volume").reindex_like(close)
+        days = traded.sum(axis=1, min_count=1).dropna()
+        activity = {"days": [{"date": dd, "value": float(days[dd]), "volume": float(vol.loc[dd].sum()),
+                              "stocks": int(close.loc[dd].notna().sum())} for dd in days.index[-6:]],
+                    "usual": float(days.iloc[-21:-1].mean()) if len(days) > 2 else None}
         last = close.iloc[-1].reindex(today)
         highs = [s for s in today if enough[s] and last[s] >= year[s].max() * 0.999]
         lows = [s for s in today if enough[s] and last[s] <= year[s].min() * 1.001]
@@ -1335,7 +1374,7 @@ def movers(d: Data) -> dict:
                           "share_before": float(month[1].get(name, 0) / month[1].sum())})
         trend.sort(key=lambda r: -r["ret21"])
         return clean({"movers": out, "highs": sorted(highs), "lows": sorted(lows), "tiles": tiles,
-                      "sector_money": sector_money, "sector_trend": trend})
+                      "sector_money": sector_money, "sector_trend": trend, "active": active, "activity": activity})
     return d.cache.get(d.version, ("movers",), build)
 
 
@@ -1444,7 +1483,7 @@ def market_view(d: Data) -> dict:
                 "investors": flows.recent_split(d.conn)}
     return clean({"breadth": b, "verdict": breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None), "market": m or None,
                   "results": results_calendar(d), "mood": mood_data(d), "investors": flows.recent_split(d.conn),
-                  **movers(d)})
+                  **market_strip(d), **movers(d)})
 
 
 

@@ -52,7 +52,7 @@ function lazy(file, name) {
 }
 
 const PAGES = Object.fromEntries(Object.entries({
-  today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), layers: lazy('layers', 'LayersPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), flow: lazy('flow', 'FlowPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), sectors: lazy('sectors', 'SectorsPage'), health: lazy('health', 'HealthPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
+  today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), layers: lazy('layers', 'LayersPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), flow: lazy('flow', 'FlowPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), sectors: lazy('sectors', 'SectorsPage'), compare: lazy('compare', 'ComparePage'), health: lazy('health', 'HealthPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
   stock: lazy('stock', 'StockPage'), rights: lazy('rights', 'RightsListPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
   calc: lazy('calc', 'CalcPage'), backtest: lazy('backtest', 'BacktestPage'), settings: lazy('settings', 'SettingsPage'), admin: lazy('admin', 'AdminPage'),
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
@@ -64,7 +64,7 @@ const SECTIONS = [
     tabs: [['today', 'Summary'], ['market', 'Market', [['market', 'Overview'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['sectors', 'Sectors']]],
       ['flow', 'Money flow'], ['news', 'News & dates', [['news', 'News'], ['dividends', 'Dividends & results']]]] },
   { id: 'picks', label: 'Picks', icon: 'target', tabs: [['signals', 'Picks'], ['predict', 'Rankings'], ['layers', '7 Layers'], ['record', 'Track record']] },
-  { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist'], ['rights', 'Rights issues']] },
+  { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['compare', 'Compare'], ['screener', 'Screener'], ['watchlist', 'Watchlist'], ['rights', 'Rights issues']] },
   { id: 'portfolio', label: 'Portfolio', icon: 'briefcase',
     tabs: [['portfolio', 'My portfolio'], ['paper', 'Practice'], ['calc', 'Calculator'], ['backtest', 'Rules test']] },
 ].map(s => ({ ...s, tabs: s.tabs.filter(([id]) => id in PAGES) }));

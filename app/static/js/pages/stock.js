@@ -10,6 +10,7 @@ import { PriceChart } from '../charts.js';
 import { AiForecast } from './ai.js';
 import { RightsPage } from './rights.js';
 import { LAYER_NAMES } from './layers.js';
+import { methodsFor, LEAN } from '../methods.js';
 
 const RANGES = [
   { value: 60, label: '3M' }, { value: 120, label: '6M' }, { value: 250, label: '1Y' }, { value: 500, label: '2Y' },
@@ -79,19 +80,19 @@ function StockMain({ route }) {
           : html`<div class="live-now">${t('Newest close')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /></div>`)}
         ${data.corporate && data.corporate.results && data.corporate.results.next && html`<div class="next-results">
           <${Term} k="results">${t('Next results')}<//>: <b>${t('expected around {date}', { date: fmt.date(data.corporate.results.next) })}</b></div>`}</div>`}
+      ${st && html`<div class="head-stats">
+        <div><span>${t('3-month change')}</span><b class=${tone(st.ret63)}>${fmt.pct(st.ret63, 0)}</b>
+          ${st.index_ret63 != null && html`<small>EGX30 ${fmt.pct(st.index_ret63, 0)}</small>`}</div>
+        <div><span>${t('1-year low – high')}</span><b>${fmt.price(st.low52)} – ${fmt.price(st.high52)}</b></div>
+        <div><span>${t('Traded a day')}</span><b>${fmt.short(st.value_avg20)} ${t('EGP')}</b></div>
+        ${pe != null && html`<div><span>${t('Price / earnings (P/E)')}</span><b>${pe > 0 ? `${fmt.num(pe, 1)}×` : t('loss-making')}</b>
+          ${pe > 0 && data.fundamentals.sector_median && data.fundamentals.sector_median.pe ? html`<small>${t('sector')} ${fmt.num(data.fundamentals.sector_median.pe, 1)}×</small>` : ''}</div>`}
+      </div>`}
     </div>
 
     ${!data.has_data ? html`<div style="margin-top:14px"><${Callout} tone="warn"><b>${t('No price data.')}</b> ${data.message}<//></div>`
       : html`
       <${Verdict} data=${data} />
-      <div class="kpis" style="margin-top:14px">
-        <${Kpi} compact label="3-month change" value=${fmt.pct(st.ret63, 0)} valueClass=${tone(st.ret63)}
-          sub=${st.index_ret63 != null ? `EGX30 ${fmt.pct(st.index_ret63, 0)}` : ''} />
-        <${Kpi} compact label="1-year low – high" value=${`${fmt.price(st.low52)} – ${fmt.price(st.high52)}`} />
-        <${Kpi} compact label="Traded a day" value=${`${fmt.short(st.value_avg20)} ${t('EGP')}`} sub="last 20 sessions" />
-        ${pe != null && html`<${Kpi} compact label="Price / earnings (P/E)" value=${pe > 0 ? `${fmt.num(pe, 1)}×` : t('loss-making')}
-          sub=${pe > 0 && data.fundamentals.sector_median && data.fundamentals.sector_median.pe ? `${t('sector')} ${fmt.num(data.fundamentals.sector_median.pe, 1)}×` : ''} />`}
-      </div>
       <div class="stock-layout">
         <div class="stack" style="min-width:0">
         <div class="card chart-card">
@@ -129,6 +130,7 @@ function StockMain({ route }) {
           <${EntryCard} data=${data} />
           ${data.chart && html`<${LevelsPanel} c=${data.chart} pos=${data.position} atr=${st.atr_pct * st.close} sym=${data.symbol} tg=${data.telegram} />`}
           <a class="btn block" href=${`#/calc/${encodeURIComponent(data.symbol)}`}><${Icon} name="coins" />${t('Size a buy with your rules')}</a>
+          <a class="btn block ghost" href=${`#/compare/${encodeURIComponent(data.symbol)}`}><${Icon} name="bars" />${t('Compare with another stock')}</a>
           ${!data.signal && !data.position && (data.checklist || []).length > 0 && html`<${Checklist} list=${data.checklist} />`}
           ${data.layers && html`<${LayersCard} l=${data.layers} />`}
           ${(data.fundamentals || data.free_float) && html`<${CompanyPanel} f=${data.fundamentals || { values: {} }} ff=${data.free_float} />`}
@@ -196,24 +198,32 @@ export function verdictFor(data) {
 
 const VERDICT_ICON = { buy: 'checkCircle', hold: 'briefcase', sell: 'sell', wait: 'history', avoid: 'xCircle' };
 
-// The page in one card: what to do (verdictFor) and the model's rating with its reason in one line.
+// The page in one card: what to do (verdictFor), what each method says as one line of chips (methods.js), and the
+// model's rating. The sentences behind each (the notes, the rating's reasons, each method's line) open under Details.
 function Verdict({ data }) {
   const v = verdictFor(data);
+  const m = methodsFor(data, (store.status || {}).market);
   const p = data.prediction;
   const b = p && p.rating != null && (p.bands || []).find(x => p.rating >= x.from && p.rating <= x.to);
   return html`<div class=${cls('card verdict', v.kind)}>
     <div class="verdict-head"><span class="verdict-chip"><${Icon} name=${VERDICT_ICON[v.kind]} size=${15} />${t(v.label)}</span>
       <span class="verdict-line">${v.line}</span></div>
-    ${v.notes.length > 0 && html`<ul class="verdict-notes">${v.notes.map(n => html`<li>${n}</li>`)}</ul>`}
-    <div class="verdict-rating">
-      <${Rating} v=${p ? p.rating : null} />
-      ${p && p.rating != null
-        ? html`<div><b>${t('Rating {v}/100', { v: p.rating })}</b>${b && b.hit != null ? html`<span class="faint"> · ${t('within 2 weeks, stocks rated like it reached the target before the stop {hit} of the time (average stock: {base})', {
-            hit: fmt.pct(b.hit, 0, false), base: fmt.pct(p.base && p.base[10], 0, false) })}</span>` : ''}
-            ${p.why10 && p.why10.length > 0 && html`<div style="margin-top:4px"><${Reason} items=${p.why10} /></div>`}</div>`
-        : html`<span class="muted">${t('No rating: the model rates only stocks with enough daily trading.')}</span>`}
-    </div>
-    <p class="faint verdict-foot">${t('A summary of the cards below, not advice.')}</p>
+    ${m.rows.length >= 3 && html`<div class="method-chips">
+      <span class=${cls('methods-chip', m.kind)}>${t('{a} of {b} lean to buy', { a: m.n.yes, b: m.rows.length })}</span>
+      ${m.rows.map(r => html`<span class="mchip" title=${r.text} key=${r.name}><span class=${LEAN[r.lean][1]}><${Icon} name=${LEAN[r.lean][0]} size=${13} /></span>${t(r.name)}</span>`)}
+    </div>`}
+    ${p && p.rating != null && b && b.hit != null && html`<p class="verdict-rate faint">${t('Rating {v}/100', { v: p.rating })} · ${t('within 2 weeks, stocks rated like it reached the target before the stop {hit} of the time (average stock: {base})', {
+      hit: fmt.pct(b.hit, 0, false), base: fmt.pct(p.base && p.base[10], 0, false) })}</p>`}
+    <${More} label="Details">
+      ${v.notes.length > 0 && html`<ul class="verdict-notes">${v.notes.map(n => html`<li>${n}</li>`)}</ul>`}
+      ${m.rows.length >= 3 && html`<ul class="methods-list">${m.rows.map(r => html`<li key=${r.name}>
+        <span class=${LEAN[r.lean][1]}><${Icon} name=${LEAN[r.lean][0]} size=${15} /></span>
+        <div><b>${t(r.name)}</b>${r.tested && html` <span class="tag sm">${t('tested')}</span>`}
+          <div class="muted">${r.text}</div></div></li>`)}</ul>`}
+      ${p && p.why10 && p.why10.length > 0 && html`<div class="verdict-why"><b>${t('Why this rating')}</b> <${Reason} items=${p.why10} /></div>`}
+      ${!(p && p.rating != null) && html`<p class="muted">${t('No rating: the model rates only stocks with enough daily trading.')}</p>`}
+      <p class="faint verdict-foot">${t('"Tested" methods helped in 10 years of EGX tests; the others are information. Counting agreement was not tested. Not advice.')}</p>
+    <//>
   </div>`;
 }
 
@@ -294,7 +304,7 @@ function layerLine(x, brk) {
 function LayersCard({ l }) {
   const s = l.study, pass = l.score >= l.pass_at;
   const rows = l.items.map((x, i) => ({ x, i })).reverse();
-  return html`<${Fold} open title=${html`<span>${t('7 layers')} · <b class=${pass ? 'up' : ''}>${l.score}/7</b></span>`}>
+  return html`<${Fold} title=${html`<span>${t('7 layers')} · <b class=${pass ? 'up' : ''}>${l.score}/7</b></span>`}>
     <div class="layers">${rows.map(({ x, i }) => html`<div class=${cls('layer', `l${i + 1}`, x.ok ? 'ok' : 'no')}>
       <span class="n">${i + 1}</span><div class="lw"><b>${t(LAYER_NAMES[x.key])}</b><span>${layerLine(x, l.last_break)}</span></div>
       <${Icon} name=${x.ok ? 'checkCircle' : 'xCircle'} size=${17} /></div>`)}</div>

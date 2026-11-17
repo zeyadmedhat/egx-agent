@@ -2,6 +2,7 @@
 // side. The Picks tab answers, in order: can I buy now (the market light), what (the BUY cards), what's coming (close
 // to a BUY, the model's week) and can I trust it now. Track record: how the published BUYs and the model did live.
 import { html, useApi, useState, fmt, tone, stockHref, cls, go } from '../lib.js';
+import { MethodsChip } from '../methods.js';
 import {
   Icon, Badges, IndexPills, Empty, Callout, PageHead, SectionHead, StockAvatar, Cautions, Term, DataTable,
   SessionBadge, More, ShariahNote, Rating, Reason, Why, Chance, useQuotes, sessionState, PlanBar, Bell, useBells,
@@ -180,7 +181,7 @@ function PickCard({ s, m, wk, odds, fee, model, bell }) {
         <div class="stock-name" dir="rtl" style="text-align:start">${i.name_ar}<span class="faint"> · ${tn(i.sector)}</span></div>
       </div>
     </div>
-    <div class="sig-tags"><${Badges} info=${i} compact /><${IndexPills} info=${i} />${s.free_float && html`<span class="idx-pill" title=${t('Free float: the share of the company anyone can trade (owners lists of Arab Finance and Mubasher)')}>${t('Free float {p}', { p: fmt.pct(s.free_float.value, 0, false) })}</span>`}</div>
+    <div class="sig-tags"><${MethodsChip} sym=${s.symbol} /><${Badges} info=${i} compact /><${IndexPills} info=${i} />${s.free_float && html`<span class="idx-pill" title=${t('Free float: the share of the company anyone can trade (owners lists of Arab Finance and Mubasher)')}>${t('Free float {p}', { p: fmt.pct(s.free_float.value, 0, false) })}</span>`}</div>
     <${Opinions} s=${s} wk=${wk} />
     <div>
       <div class="buy-line"><span><${Term} k="buyupto">${t('Buy up to')}<//> <b>${fmt.price(s.entry_high)}</b></span>
@@ -243,6 +244,7 @@ function NearBoxes({ rows, rated, bell }) {
       </div>
       ${over ? html`<div class="nb-over" title=${t('A BUY needs the close above the breakout price')}>${t('Above it now: wait for the close')}</div>`
         : away != null && html`<div class="nb-away"><b class=${near ? 'up' : ''}>${fmt.pct(away, 1)}</b> <span class="faint">${t('to break out')}</span></div>`}
+      <div class="nb-methods"><${MethodsChip} sym=${r.symbol} /></div>
       <div class=${cls('bar', over ? '' : 'up')}><span style=${`width:${away == null ? 0 : Math.max(4, Math.min(100, (1 - away / GAP) * 100))}%`}></span></div>
       <div class="nb-prices">
         <span><b>${fmt.price(now)}</b>${quote ? html` <span class="live-dot" title=${t('Live, about 15 minutes late')}></span>` : ''}

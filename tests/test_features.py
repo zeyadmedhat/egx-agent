@@ -245,6 +245,8 @@ def test_each_session_takes_its_closing_report_even_in_ramadan():
         {"date": "2026-03-04T13:50:00", "title": {"rendered": "البورصة المصرية تُغلق تعاملات الأربعاء"}, "content": {"rendered": say(50, 20, 30)}},
         {"date": "2026-03-05T15:05:00", "title": {"rendered": "صعود البورصة بختام تعاملات الخميس"}, "content": {"rendered": say(-40, 10, 30)}},
         {"date": "2026-03-05T19:00:00", "title": {"rendered": "حصاد الأسبوع"}, "content": {"rendered": say(900, 400, 500)}},
+        # Wednesday after the close: a government debt story (16 Nov 2026's read as 29.38 billion of shares)
+        {"date": "2026-03-04T16:26:00", "title": {"rendered": "تدفقات أجنبية وعربية لشراء أدوات دين مصرية"}, "content": {"rendered": say(-29380, 1000, 28380)}},
     ]
 
     class Feed:
@@ -254,6 +256,7 @@ def test_each_session_takes_its_closing_report_even_in_ramadan():
             return type("R", (), {"status_code": 200, "headers": {"X-WP-TotalPages": "1"},
                                   "raise_for_status": lambda self: None, "json": lambda self: posts})()
     got = flows.fetch("2026-03-01", session=Feed())
+    assert flows.parse(say(-29380, 1000, 28380)) is None                        # too big for shares, whatever the title
     assert got == {"2026-03-04": {"egyptians": 50.0, "arabs": -20.0, "foreigners": -30.0},
                    "2026-03-05": {"egyptians": -40.0, "arabs": 10.0, "foreigners": 30.0}}
 
@@ -496,3 +499,14 @@ def test_account_values_a_pending_bonus_position_fairly(tmp_path, cfg):
     db.add_price_event(conn, "BON", "2026-02-01", 1.25)
     s = portfolio.account_summary(conn, "real", cfg, {"BON": 8.0})    # 8 after the bonus = 10 before it
     assert s["unrealized"] == pytest.approx(0)
+
+
+def test_a_day_with_an_impossible_flow_is_forgotten(tmp_path):
+    from egx_agent import db
+    from egx_agent.data import flows
+    conn = db.connect(tmp_path / "egx.db")
+    rows = [("flow_egypt_inst", "2026-10-29", -34300.0), ("flow_egypt_ind", "2026-10-29", 2900.0),
+            ("flow_foreign", "2026-10-29", 29209.0), ("flow_egypt", "2026-10-28", -120.0)]
+    conn.executemany("INSERT INTO macro(series, date, value) VALUES (?,?,?)", rows)
+    assert flows.drop_impossible(conn) == 1                       # the debt market's 34 billion, read as shares
+    assert [tuple(r) for r in conn.execute("SELECT date, value FROM macro")] == [("2026-10-28", -120.0)]
