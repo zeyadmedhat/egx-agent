@@ -175,7 +175,6 @@ function Mood({ m }) {
 // one way from the middle line and sold the other, each bar with its amount.
 const GROUPS = [['egyptians', 'Egyptians'], ['arabs', 'Arabs'], ['foreigners', 'Foreigners']];
 const KINDS = [['individuals', 'Individuals'], ['institutions', 'Institutions']];
-const ADJ = { egyptians: 'Egyptian', arabs: 'Arab', foreigners: 'Foreign' };
 const SPANS = [{ value: 1, label: 'Last session' }, { value: 5, label: '1 week' }, { value: 21, label: '1 month' }];
 // million EGP, rounded to read at a glance: +484M, −7.7M, +1.3B
 const money = v => {
@@ -183,35 +182,37 @@ const money = v => {
   return `${v > 0.05 ? '+' : v < -0.05 ? '−' : ''}${a >= 1000 ? `${fmt.num(a / 1000, 1)}B` : `${fmt.num(a, a >= 100 ? 0 : 1)}M`}`;
 };
 
+// million EGP with 2 decimals, as the exchange's report gives them: −194.59M, +1.21B
+const net2 = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v) >= 1000 ? (Math.abs(v) / 1000).toFixed(2) + 'B' : Math.abs(v).toFixed(2) + 'M'}`;
+
 export function Investors({ days, latest }) {
   const [n, setN] = useState(1);
   const use = days.slice(-n);
   const sum = (g, k) => use.reduce((a, d) => a + ((d[g] || {})[k] || 0), 0);
-  const rows = GROUPS.map(([g, name]) => ({ g, name, cells: KINDS.map(([k, kn]) => ({ g, k, kn, v: sum(g, k) })) }));
-  const cells = rows.flatMap(r => r.cells);
-  const max = Math.max(1, ...cells.map(c => Math.abs(c.v)));
-  const top = cells.reduce((a, c) => (c.v > a.v ? c : a), { v: 0 });
-  const low = cells.reduce((a, c) => (c.v < a.v ? c : a), { v: 0 });
-  const who = c => t(`${ADJ[c.g]} ${c.k}`);
   const span = use.length === 1 ? fmt.date(use[0].date)
     : t('{from} – {to} · {n} sessions', { from: fmt.date(use[0].date, false), to: fmt.date(use[use.length - 1].date, false), n: use.length });
   const last = days[days.length - 1].date;
+  const swatch = (g, k) => html`<i class=${`invt-key ${k === 'individuals' ? 'dash' : ''}`} style=${`--c:${FLOW_COLORS[g]}`}></i>`;
   return html`<section class="card inv">
-    <div class="inv-top"><div class="card-title" style="margin:0">${t('Who bought and who sold')}</div>
-      <${Seg} options=${SPANS} value=${n} onChange=${setN} /></div>
-    ${latest > last && html`<p class="faint s" style="margin:6px 0 0">${t(latest === sessionState().day
+    <div class="card-title" style="margin:0">${t('Who bought and who sold')}</div>
+    <p class="muted invt-sub">${t('Net buying and selling on EGX by Egyptian, Arab and foreign investors. In pounds.')}</p>
+    ${latest > last && html`<p class="faint s" style="margin:4px 0 0">${t(latest === sessionState().day
       ? "{date}'s numbers come out about 5 pm. These go up to {last}." : 'No numbers for {date}. These go up to {last}.',
       { date: fmt.date(latest, false), last: fmt.date(last, false) })}</p>`}
-    <p class="inv-say">${top.v > 0 && html`<b class="up">${who(top)}</b> ${t('bought the most ({v})', { v: money(top.v) })}`}${top.v > 0 && low.v < 0 ? '; ' : ''}${low.v < 0 && html`<b class="down">${who(low)}</b> ${t('sold the most ({v})', { v: money(low.v) })}`}.</p>
     ${days.length > 2 && html`<${FlowLines} days=${days} />`}
-    <div class="inv-axis"><span></span><div><span>${t('Sold')}</span><span>${t('Bought')}</span></div><span></span></div>
-    ${rows.map(r => html`<div class="inv-group">
-      <div class="inv-name"><b>${t(r.name)}</b><b class=${tone(r.cells[0].v + r.cells[1].v)}>${money(r.cells[0].v + r.cells[1].v)}</b></div>
-      ${r.cells.map(c => html`<div class="inv-row"><span class="muted">${t(c.kn)}</span>
-        <div class="inv-track"><span class=${`inv-bar ${c.v >= 0 ? 'up' : 'down'}`}
-          style=${`${c.v >= 0 ? 'inset-inline-start' : 'inset-inline-end'}:50%;width:${(Math.abs(c.v) / max) * 50}%`}></span></div>
-        <b class="inv-v">${money(c.v)}</b></div>`)}</div>`)}
-    <p class="faint inv-note">${span}. ${t("Net buying (+) or selling (−), in pounds. From the exchange's daily report, via Youm7.")}
+    <div class="invt-seg"><${Seg} options=${SPANS} value=${n} onChange=${setN} /></div>
+    <table class="invt">
+      <thead><tr><th></th><th>${t('Net')}</th></tr></thead>
+      ${GROUPS.map(([g, name]) => {
+        const total = KINDS.reduce((a, [k]) => a + sum(g, k), 0);
+        return html`<tbody key=${g}>
+          <tr class="invt-group"><th>${t(name)}</th><td class=${tone(total)}>${net2(total)}</td></tr>
+          ${KINDS.map(([k, kn]) => html`<tr><th class="muted">${swatch(g, k)}${t(kn)}</th>
+            <td class=${tone(sum(g, k))}>${net2(sum(g, k))}</td></tr>`)}
+        </tbody>`;
+      })}
+    </table>
+    <p class="faint inv-note">${span}. ${t("From the exchange's daily report, via Youm7 or Hapi Journal.")}
       ${use.length < n ? ' ' + t('Only {k} sessions have these numbers so far.', { k: use.length }) : ''}</p>
   </section>`;
 }
@@ -291,23 +292,22 @@ function Rates({ r }) {
 // individuals, a colour for Egyptians, Arabs and foreigners. The last point is the total on the bars below.
 const FLOW_COLORS = { egyptians: 'var(--accent)', arabs: 'var(--up)', foreigners: 'var(--warn)' };
 function FlowLines({ days }) {
-  const W = 600, H = 150, P = 6;
+  const W = 600, H = 170, P = 8;
   const lines = GROUPS.flatMap(([g]) => KINDS.map(([k]) => {
     let run = 0;
     return { g, k, pts: days.map(d => (run += ((d[g] || {})[k] || 0))) };
   }));
   const all = lines.flatMap(l => l.pts).concat(0);
   const lo = Math.min(...all), hi = Math.max(...all), span = hi - lo || 1;
-  const x = i => P + (i / Math.max(days.length - 1, 1)) * (W - 2 * P), y = v => P + (1 - (v - lo) / span) * (H - 2 * P);
+  const x = i => P + (i / Math.max(days.length - 1, 1)) * (W - 2 * P - 6), y = v => P + (1 - (v - lo) / span) * (H - 2 * P);
   return html`<div class="flow-lines">
-    <svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label=${t('Flows added up over {n} sessions', { n: days.length })}>
+    <svg viewBox=${`0 0 ${W} ${H}`} role="img" aria-label=${t('Flows added up over {n} sessions', { n: days.length })}>
       <line x1=${P} x2=${W - P} y1=${y(0)} y2=${y(0)} class="zero" />
       ${lines.map(l => html`<path d=${l.pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')}
-        fill="none" stroke=${FLOW_COLORS[l.g]} stroke-width="2" stroke-dasharray=${l.k === 'individuals' ? '5 4' : ''}
-        vector-effect="non-scaling-stroke" />`)}
+        fill="none" stroke=${FLOW_COLORS[l.g]} stroke-width="2.2" stroke-dasharray=${l.k === 'individuals' ? '5 4' : ''}
+        stroke-linejoin="round" />
+        <circle cx=${x(l.pts.length - 1)} cy=${y(l.pts[l.pts.length - 1])} r="5" fill=${FLOW_COLORS[l.g]} />`)}
     </svg>
-    <div class="flow-key">${GROUPS.map(([g, gn]) => html`<span><i style=${`background:${FLOW_COLORS[g]}`}></i>${t(gn)}</span>`)}
-      <span class="faint">${t('solid: institutions · dashed: individuals')}</span></div>
-    <p class="faint s">${t('Added up over the last {n} sessions ({from} – {to}).', { n: days.length, from: fmt.date(days[0].date, false), to: fmt.date(days[days.length - 1].date, false) })}</p>
+    <p class="faint s">${t('Added up over the last {n} sessions ({from} – {to}). Solid: institutions. Dashed: individuals.', { n: days.length, from: fmt.date(days[0].date, false), to: fmt.date(days[days.length - 1].date, false) })}</p>
   </div>`;
 }
