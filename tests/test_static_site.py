@@ -897,6 +897,18 @@ def test_market_movers_leave_out_splits_the_prices_dont_show_yet(tmp_path, cfg):
     assert money and sum(r["share"] for r in money) == pytest.approx(1)
     assert [r["value"] for r in money] == sorted((r["value"] for r in money), reverse=True)
     assert 0 < sum(r["usual"] for r in money) <= 1 + 1e-9
+    for r in m["sector_trend"]:                  # Market → Sectors: liquid stocks only, money shares of 4 weeks
+        assert r["stocks"] >= 2 and 0 <= r["share"] <= 1 and 0 <= r["share_before"] <= 1
+
+
+def test_data_health_lists_every_source_failing_first(tmp_path, cfg):
+    from app import health, views
+    conn = db.connect(_site_db(tmp_path / "egx.db"))
+    health.note(conn, ["Al Borsa News"], ["Al Borsa News", "TradingView prices"])
+    rows = views.data_health(views.Data(conn, cfg, views.Cache()))["sources"]
+    assert [(r["name"], r["ok"], r["feeds"]) for r in rows] == [
+        ("Al Borsa News", False, "Headlines"), ("TradingView prices", True, "Prices, charts and signals")]
+    assert rows[0]["alarm"] is False and rows[1]["last_ok"]
 
 
 

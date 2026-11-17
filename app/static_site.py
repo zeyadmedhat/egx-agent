@@ -46,6 +46,13 @@ STOCK_COLS = views.SERIES_COLS + ("atr14", "sup", "ptgt")
 UNSTAMPED = {"core": ("built",), "news": ("updated",)}   # when a file was built or checked, not what's in it
 
 
+def _stamped(name: str, obj: dict) -> dict:
+    """What counts as a change for the stamp: Data health's times change every run, so only which sources work."""
+    if name == "health":
+        return {"sources": [[r["name"], r["ok"], r["alarm"]] for r in obj.get("sources", [])], "behind": obj.get("behind")}
+    return {**obj, **dict.fromkeys(UNSTAMPED.get(name, ()))}
+
+
 # ------------------------------------------------------------------ encryption
 def salt_for(site_id: str) -> bytes:
     """Stays the same for a site, so people's browsers keep working day after day with the same password."""
@@ -135,6 +142,7 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
                           **breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None)} if b else None,
         "mood_today": views.mood_brief(d),
         "changes": views.stock_changes(d),     # Home picks the stocks you hold
+        "week": views.week_recap(d),           # Home's This week card: the browser picks your stocks
         "strategy": strategy_settings(cfg),
         "personal_defaults": {k: SITE_DEFAULTS.get(k, config.DEFAULTS[k]) for k in personal_keys()},
         "sections": site_sections(),
@@ -155,7 +163,8 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
                               "screener": views.screener(d), "history": views.history_data(d),
                               "dividends": views.dividend_calendar(d), "news": views.news_feed(d),
                               "rights": corporate.rights_study(conn),   # the Rights issues page, loaded when opened
-                              "layers": views.layers_view(d)}           # Picks → 7 Layers
+                              "layers": views.layers_view(d),          # Picks → 7 Layers
+                              "health": views.data_health(d)}           # ⚙ → Data health
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
     hourly = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM intraday")}
     for sym in d.table.index:
@@ -259,7 +268,7 @@ def build(conn, cfg: dict, out: Path, password: str, site_id: str = "local", tel
     plain = {name: to_json(obj) for name, obj in files.items() if name != "core"}
     # The stamp changes only when the content does, so browsers reload only after a real update and a scheduled run
     # publishes only then. The times in UNSTAMPED don't count: every run checks the news, even when nothing new came.
-    same = {n: to_json({**files[n], **dict.fromkeys(UNSTAMPED[n])}) if n in UNSTAMPED else plain[n] for n in files}
+    same = {n: to_json(_stamped(n, files[n])) if n in UNSTAMPED or n == "health" else plain[n] for n in files}
     stamp = hashlib.sha256(b"".join(n.encode() + b"\0" + same[n] for n in sorted(same) if n != "core")
                            + same["core"]).hexdigest()[:16]
     plain["core"] = to_json({**files["core"], "stamp": stamp})

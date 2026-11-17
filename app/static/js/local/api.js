@@ -274,6 +274,7 @@ async function today(c) {
     spark: core.spark, orders: orders(c, positions), breadth: core.breadth_today, mood: core.mood_today || null, paper: null,
     changes: core.changes ? { since: core.changes.since, by_symbol: Object.fromEntries(positions
       .filter(p => core.changes.by_symbol[p.symbol]).map(p => [p.symbol, core.changes.by_symbol[p.symbol]])) } : null,
+    week: core.week || null,       // Home's This week card (views.week_recap)
     model: Object.keys(preds.by_symbol).length ? { base: preds.base, count: preds.count, date: preds.date } : null,
     cfg: { ...Object.fromEntries(['max_hold_days', 'review_day', 'riskoff_block_buys', 'buy_score',
       'shariah_filter'].map(k => [k, cfg[k]])), fee_pct_per_side: E.feePct(cfg) },
@@ -1149,6 +1150,7 @@ async function route(path, { method = 'GET', body } = {}) {
       case 'news': return newsView(c);
       case 'watchlist': return { symbols: c.book.watchlist || [] };
       case 'market': return load('market');
+      case 'sources': return load('health').catch(() => ({ sources: [] }));   // ⚙ → Data health
       case 'flow': return b === 'live' ? liveFlow(c) : load('flow');
       case 'layers': return load('layers');
       case 'egx30': return load('egx30');

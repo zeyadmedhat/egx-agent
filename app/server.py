@@ -531,6 +531,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def job_current(person: Person = Depends(get_person)):
         return JSON({"job": runner.status(person)})
 
+    @app.get("/api/sources")
+    def data_health(d: views.Data = Depends(get_data)):
+        return JSON(views.data_health(d))
+
     @app.get("/api/market")
     def market(d: views.Data = Depends(get_data)):
         return JSON(views.market_view(d))

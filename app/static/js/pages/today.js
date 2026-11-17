@@ -31,10 +31,39 @@ export function TodayPage() {
       <${SessionBadge} dataDate=${m.date} /><//>
     <${Brief} data=${data} blocked=${blocked} alerts=${alerts} />
     ${m.warnings && m.warnings.length > 0 && html`<div class="stack" style="margin-top:12px">
-      ${m.warnings.map(w => html`<${Callout} tone="warn">${tn(w)}<//>`)}</div>`}
+      ${m.warnings.map(w => html`<${Callout} tone="warn">${tn(w)}<//>`)}
+      <a class="faint" style="font-size:13px" href="#/health">${t('See data health')}</a></div>`}
+    ${data.week && html`<${WeekCard} w=${data.week} positions=${data.positions} />`}
     ${data.orders && html`<${OrdersCard} o=${data.orders} />`}
     ${data.positions.length > 0 && html`<${Changes} ch=${data.changes} positions=${data.positions} />`}
     ${data.positions.length > 0 && html`<${Positions} positions=${data.positions} cfg=${data.cfg} alerts=${alerts} />`}`;
+}
+
+// "This week": EGX30 and the stocks since the last close before Sunday (views.week_recap), yours first, then how the
+// week's and the 4 weeks before's BUY signals are doing. The same numbers as the weekly Telegram message.
+function WeekCard({ w, positions }) {
+  const move = (sym, ret) => html`<a class="recap-move" dir="ltr" href=${stockHref(sym)} key=${sym}>${sym}
+    <b class=${tone(ret)}>${fmt.pct(ret)}</b></a>`;
+  const mine = [...new Set(positions.map(p => p.symbol))].filter(s => w.moves && w.moves[s] != null)
+    .sort((a, b) => w.moves[b] - w.moves[a]);
+  const row = (label, items) => items.length > 0 && html`<div class="recap-row"><span class="faint">${t(label)}</span>
+    <div class="recap-list">${items}</div></div>`;
+  const e = w.egx30, p = w.past;
+  return html`<section class="section"><div class="card">
+    <div class="card-title"><${Icon} name="calendar" size=${15} />${t(w.done ? 'This week' : 'This week so far')}
+      <span class="right faint">${t('since {date}', { date: fmt.date(w.week, false) })}</span></div>
+    ${e && html`<p class="recap-big">EGX30 <b class=${tone(e.change)}>${fmt.pct(e.change)}</b>
+      <span class="faint">${fmt.int(e.close)}</span></p>`}
+    ${row('Your stocks', mine.map(s => move(s, w.moves[s])))}
+    ${row('Rose most', (w.best || []).map(x => move(x.symbol, x.ret)))}
+    ${row('Fell most', (w.worst || []).map(x => move(x.symbol, x.ret)))}
+    <p class="muted recap-note">${w.buys && w.buys.length
+      ? t(w.buys.length === 1 ? '1 BUY signal this week: {list}.' : '{n} BUY signals this week: {list}.',
+        { n: w.buys.length, list: w.buys.map(b => b.symbol).join(isAr() ? '، ' : ', ') })
+      : t('No BUY signals this week.')}
+    ${p && ' ' + t('The {n} BUYs of the 4 weeks before: {up} of {n} are up, {avg} on average.',
+      { n: p.n, up: p.up, avg: fmt.pct(p.avg) })}</p>
+  </div></section>`;
 }
 
 // "What changed for your stocks": since the session before the last close (views.stock_changes), each stock you hold

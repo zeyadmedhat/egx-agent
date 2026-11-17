@@ -40,6 +40,8 @@ def test_a_source_is_a_problem_only_after_failing_for_a_whole_day(conn):
     assert list(later) == ["source:Mubasher stock pages"] and "Tue 29 Sep 12:00" in later["source:Mubasher stock pages"]
     health.note(conn, [], ["Reuters/Zawya"], now=T0 + timedelta(hours=26))              # not tried: unchanged
     assert list(health.problems(conn, now=T0 + timedelta(hours=27))) == ["source:Mubasher stock pages"]
+    ok = json.loads(conn.execute("SELECT value FROM meta WHERE key='health_ok'").fetchone()[0])
+    assert ok == {"Reuters/Zawya": (T0 + timedelta(hours=26)).isoformat(timespec="seconds")}   # the Data health page
     health.note(conn, [], names, now=T0 + timedelta(hours=28))                          # works again
     assert health.problems(conn, now=T0 + timedelta(hours=29)) == {}
 

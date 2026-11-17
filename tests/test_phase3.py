@@ -369,3 +369,7 @@ def test_friends_get_the_weekly_summary_unless_they_turn_it_off(tmp_path, monkey
     assert alerts.send_weekly_to_subscribers(conn, "123:abc", text, "2026-09-27") == 0     # once a week
     mac = alerts.build_weekly(views.Data(conn, cfg, views.Cache()))
     assert "Your 1 position" in mac and "AAA" in mac
+    rc = views.week_recap(views.Data(conn, cfg, views.Cache()))      # Home's This week card: the same numbers
+    assert rc["week"] == alerts.week_of(rc["date"]) and rc["week"] <= rc["date"]
+    assert rc["moves"] and all(abs(v) < 0.5 for v in rc["moves"].values())
+    assert rc["egx30"] and f"{rc['egx30']['change']:+.1%} this week" in text

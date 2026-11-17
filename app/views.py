@@ -451,6 +451,7 @@ def today(d: Data) -> dict:
         "market": {**m, "buys": len(buys)} if m else None, "scan_date": scan_date, "buys": buys, "watch": watch,
         "positions": positions, "spark": spark, "orders": orders(d, positions),
         "changes": stock_changes(d, [p["symbol"] for p in positions]),
+        "week": week_recap(d),
         "breadth": {**{k: b[k] for k in ("above50", "stocks", "advancers", "decliners")},
                     **breadth.verdict(b, m.get("egx30_off", m.get("risk_off")) if m else None)} if b else None,
         "mood": mood_brief(d),
@@ -1318,9 +1319,109 @@ def movers(d: Data) -> dict:
         sector_money = sorted(({"sector": k, "value": float(last[k]), "share": float(last[k] / last.sum()),
                                 "usual": float(usual[k] / usual.sum()) if usual.sum() else None}
                                for k in by.columns if last[k] > 0), key=lambda r: -r["value"]) if last.sum() else []
+        # the sector trend: each sector's typical (median) liquid stock over a week and 4 weeks, and its share of the
+        # money traded in the last 4 weeks against the 4 weeks before: where money has been moving lately
+        sec = sectors.reindex(close.columns).fillna("Other")
+        month = by.iloc[-20:].sum(), by.iloc[-40:-20].sum()
+        trend = []
+        for name, syms in sec.groupby(sec).groups.items():
+            got = [s for s in syms if s in liquid]
+            r21, r5 = moves["ret21"].reindex(got).dropna(), moves["ret5"].reindex(got).dropna()
+            if len(r21) < 2 or not month[0].sum() or not month[1].sum():
+                continue
+            trend.append({"sector": name, "stocks": len(r21), "ret21": float(r21.median()),
+                          "ret5": float(r5.median()) if len(r5) else None,
+                          "share": float(month[0].get(name, 0) / month[0].sum()),
+                          "share_before": float(month[1].get(name, 0) / month[1].sum())})
+        trend.sort(key=lambda r: -r["ret21"])
         return clean({"movers": out, "highs": sorted(highs), "lows": sorted(lows), "tiles": tiles,
-                      "sector_money": sector_money})
+                      "sector_money": sector_money, "sector_trend": trend})
     return d.cache.get(d.version, ("movers",), build)
+
+
+# What each data source feeds, by a word in its name (the first match wins): the Data health page.
+SOURCE_FEEDS = (("hourly", "The 1-hour and 4-hour charts"), ("TradingView prices", "Prices, charts and signals"),
+                ("stock list", "The list of stocks and their sectors"), ("Kashif", "The Shariah filter"),
+                ("Egypt data", "The dollar, interest and inflation numbers"), ("Dividend", "Dividends and ex-dates"),
+                ("corporate actions", "Bonus shares, rights issues and dividends"),
+                ("stock pages", "Big owners and each stock's news"), ("Prediction model", "The model's picks"))
+
+
+def data_health(d: Data) -> dict:
+    """Every data source the runs try, failing ones first: when it last worked, since when it fails, and whether
+    that's long enough to be an alarm (health.FAIL_HOURS). Plus the last close and the model's age."""
+    from . import health
+    def meta(key):
+        try:
+            return json.loads(db.get_meta(d.conn, key) or "{}")
+        except ValueError:
+            return {}
+    failing, ok, now = meta("health_failing"), meta("health_ok"), datetime.now()
+    rows = []
+    for name in sorted(set(failing) | set(ok)):
+        since = failing.get(name)
+        rows.append({"name": name, "ok": not since, "last_ok": ok.get(name), "failing_since": since,
+                     "alarm": bool(since) and now - datetime.fromisoformat(since) >= timedelta(hours=health.FAIL_HOURS),
+                     "feeds": next((f for k, f in SOURCE_FEEDS if k.lower() in name.lower()), "Headlines")})
+    rows.sort(key=lambda r: (r["ok"], not r["alarm"], r["name"]))
+    last = db.get_meta(d.conn, "scan_data_date")
+    try:
+        model = predict.age_days(predict.load_meta(predict.model_dir(d.conn)) or {}, date.today())
+    except Exception:
+        model = None
+    return clean({"sources": rows, "last_close": last, "checked": meta("daily_last_run").get("at"),
+                  "behind": health.sessions_behind(last, scan.expected_session_date()) if last else None,
+                  "model_days": model, "model_every": predict.RETRAIN_DAYS})
+
+
+def week_of(day: str) -> str:
+    """The EGX week (Sunday–Thursday) a day belongs to, named by its Sunday."""
+    d = date.fromisoformat(day)
+    return (d - timedelta(days=(d.weekday() + 1) % 7)).isoformat()
+
+
+def week_recap(d: Data) -> dict | None:
+    """The week so far, from the last close before its Sunday: EGX30, every stock's move (Home picks yours), the liquid
+    stocks that rose and fell most, the week's BUY signals and how the 4 weeks before's BUYs are doing. Home's "This
+    week" card and the weekly Telegram message (alerts.build_weekly)."""
+    def build():
+        last = d.conn.execute("SELECT MAX(date) FROM prices WHERE symbol=?", (prices.INDEX_SYMBOL,)).fetchone()[0]
+        if not last:
+            return None
+        week = week_of(last)
+        px = pd.read_sql_query("SELECT symbol, date, close, volume FROM prices WHERE date >= ?", d.conn,
+                               params=((pd.Timestamp(week) - pd.Timedelta(days=45)).strftime("%Y-%m-%d"),))
+        close = px.pivot(index="date", columns="symbol", values="close").sort_index()
+        before = close[close.index < week]
+        if before.empty:
+            return None
+        base, now = before.ffill().iloc[-1], close.iloc[-1]
+        jumps = close[close.index >= before.index[-1]].ffill().pct_change(fill_method=None).abs().max()
+        chg = (now / base - 1).where(jumps <= JUMP)          # a split's jump isn't a real move
+        stocks = chg.reindex([s for s in d.table.index if s in chg.index]).dropna()
+        stocks = stocks[now.reindex(stocks.index).notna()]   # traded at the last close
+        value = (close * px.pivot(index="date", columns="symbol", values="volume").reindex_like(close)).tail(20).mean()
+        liquid = stocks[value.reindex(stocks.index) >= d.cfg["min_avg_value_egp"]].sort_values()
+        pick = lambda s: [{"symbol": k, "ret": float(v)} for k, v in s.items()]  # noqa: E731
+        buys = {}
+        for r in d.conn.execute("SELECT scan_date, symbol, source FROM scans WHERE action='BUY' AND scan_date >= ? "
+                                "ORDER BY scan_date", (week,)):
+            buys.setdefault(r["symbol"], {"symbol": r["symbol"], "date": r["scan_date"], "model": r["source"] == "model"})
+        month = (date.fromisoformat(week) - timedelta(days=28)).isoformat()
+        closes = d.closes()
+        moves = [closes[r["symbol"]] / r["close"] - 1 for r in d.conn.execute(
+            "SELECT symbol, close FROM scans WHERE action='BUY' AND scan_date >= ? AND scan_date < ?", (month, week))
+            if r["symbol"] in closes and r["close"]]
+        ix = prices.INDEX_SYMBOL
+        return clean({
+            "week": week, "date": last, "done": week_of(holidays.sessions_after(last, 1)) != week,
+            "egx30": {"close": float(now[ix]), "change": float(now[ix] / base[ix] - 1)} if ix in now and now[ix] == now[ix] else None,
+            "moves": {k: round(float(v), 4) for k, v in stocks.items()},
+            "best": pick(liquid[::-1].head(3)), "worst": pick(liquid.head(3)),
+            "buys": list(buys.values()),
+            "past": {"n": len(moves), "up": sum(x > 0 for x in moves), "avg": sum(moves) / len(moves)} if moves else None,
+        })
+    return d.cache.get(d.version, ("week_recap",), build)
 
 
 RESULTS_AHEAD_DAYS = 45       # the Market page's "Results coming" list

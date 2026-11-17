@@ -1640,3 +1640,33 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
   border-radius: var(--r-sm); color: var(--text-2); font-size: 13.5px; font-weight: 600; text-decoration: none; }
 .subswitch a:hover { color: var(--text); }
 .subswitch a.on { background: var(--panel-3); color: var(--text); }
+
+/* Home → This week (pages/today.js WeekCard) */
+.recap-big { font-size: 15px; margin: 2px 0 10px; }
+.recap-big b { font-size: 18px; margin: 0 6px; }
+.recap-row { display: grid; grid-template-columns: 84px 1fr; gap: 8px; align-items: baseline; margin: 6px 0; font-size: 13px; }
+.recap-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.recap-move { padding: 3px 8px; border-radius: 999px; background: var(--bg-2); border: 1px solid var(--border); font-weight: 600; color: inherit; text-decoration: none; }
+.recap-move b { margin-inline-start: 4px; }
+.recap-note { font-size: 13px; margin: 10px 0 0; }
+
+/* Data health (pages/health.js) */
+.health-row { display: grid; grid-template-columns: 14px 1fr; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+.health-row:first-child { border-top: 0; padding-top: 0; }
+.health-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--text-3); }
+.health-dot.ok { background: var(--up); }
+.health-dot.warn { background: var(--warn); }
+.health-dot.bad { background: var(--down); }
+.warn-text { color: var(--warn); }
+
+/* Market → Sectors (pages/sectors.js) */
+.sector-row { display: grid; grid-template-columns: minmax(120px, 1.2fr) 2fr 64px; gap: 4px 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+.sector-row:first-child { border-top: 0; padding-top: 0; }
+.sector-bar { position: relative; height: 8px; border-radius: 4px; background: var(--panel-3); }
+.sector-bar > span { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.sector-bar > span.up { background: var(--up); }
+.sector-bar > span.down { background: var(--down); }
+.sector-bar::after { content: ""; position: absolute; inset-inline-start: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--text-3); }
+.sector-pct { text-align: end; }
+.sector-money { grid-column: 1 / -1; font-size: 12px; }
+@media (max-width: 520px) { .sector-row { grid-template-columns: 1fr 64px; } .sector-bar { grid-column: 1 / -1; grid-row: 2; } .sector-money { grid-row: 3; } }

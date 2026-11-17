@@ -58,13 +58,15 @@ def note(conn: sqlite3.Connection, failed: Iterable[str], checked: Iterable[str]
     its state). A source is a problem once it has failed on every try for FAIL_HOURS."""
     now = now or _now()
     failed = set(failed)
-    failing = _meta(conn, "health_failing")
+    failing, ok = _meta(conn, "health_failing"), _meta(conn, "health_ok")
     for name in set(checked) | failed:
         if name in failed:
             failing.setdefault(name, now.isoformat(timespec="seconds"))
         else:
             failing.pop(name, None)
+            ok[name] = now.isoformat(timespec="seconds")      # the site's Data health page: when it last worked
     _set(conn, "health_failing", failing)
+    _set(conn, "health_ok", ok)
 
 
 def sessions_behind(data_date: str, expected: date) -> int:

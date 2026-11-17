@@ -1133,10 +1133,7 @@ HEALTH_WORDS = {"ok": "🟢 on track (its top picks keep beating the average sto
                 "early": "⚪ too early to judge its live results"}
 
 
-def week_of(day: str) -> str:
-    """The EGX week (Sunday–Thursday) a day belongs to, named by its Sunday."""
-    d = date.fromisoformat(day)
-    return (d - timedelta(days=(d.weekday() + 1) % 7)).isoformat()
+week_of = views.week_of      # the EGX week (Sunday–Thursday) a day belongs to, named by its Sunday
 
 
 def weekly_due(data_date: str | None, sent_for: str | None, today: date | None = None) -> bool:
@@ -1165,11 +1162,14 @@ def build_weekly(d: views.Data, site_url: str = "", mine: bool = True, lang: str
     week = week_of(data_date)
     lines = [f"📅 <b>EGX Agent · أسبوع {_date(week, lang)}</b>" if ar
              else f"📅 <b>EGX Agent · the week of {views.nice_date(week)}</b>"]
-    idx = d.prices(scan.prices.INDEX_SYMBOL)["close"]
-    before = idx[idx.index < pd.Timestamp(week)]
-    if len(idx) and len(before):
-        lines.append(f"EGX30 {idx.iloc[-1]:,.0f}: {idx.iloc[-1] / before.iloc[-1] - 1:+.1%} "
+    rc = views.week_recap(d) or {}
+    if rc.get("egx30"):
+        lines.append(f"EGX30 {rc['egx30']['close']:,.0f}: {rc['egx30']['change']:+.1%} "
                      + ("هذا الأسبوع" if ar else "this week"))
+    sep = "، " if ar else ", "
+    for key, en, arw in (("best", "Rose most", "الأكثر ارتفاعًا"), ("worst", "Fell most", "الأكثر انخفاضًا")):
+        if rc.get(key):
+            lines.append(f"{arw if ar else en}: " + sep.join(f"{_e(x['symbol'])} {x['ret']:+.1%}" for x in rc[key]))
     b = views.breadth_data(d)
     m = views.market_info(d.conn)
     if b:
@@ -1177,27 +1177,18 @@ def build_weekly(d: views.Data, site_url: str = "", mine: bool = True, lang: str
     if line := _mood_line(d, lang):
         lines.append(line)
 
-    week_rows = d.conn.execute("SELECT scan_date, symbol, source FROM scans WHERE action='BUY' AND scan_date >= ? "
-                               "ORDER BY scan_date", (week,)).fetchall()
-    first = {}
-    for r in week_rows:
-        first.setdefault(r["symbol"], r)
+    first = rc.get("buys") or []
     lines += ["", f"🟢 <b>إشارات الشراء هذا الأسبوع: {len(first)}</b>" if ar else f"🟢 <b>BUY signals this week: {len(first)}</b>"]
     if first:
         lines.append(("، " if ar else ", ").join(
-            f"{_e(s)}{' 🎯' if r['source'] == 'model' else ''} ({_date(r['scan_date'], lang)})" for s, r in first.items()))
-    month = (date.fromisoformat(week) - timedelta(days=28)).isoformat()
-    past = d.conn.execute("SELECT scan_date, symbol, close FROM scans WHERE action='BUY' AND scan_date >= ? "
-                          "AND scan_date < ?", (month, week)).fetchall()
-    closes = d.closes()
-    moves = [closes[r["symbol"]] / r["close"] - 1 for r in past if r["symbol"] in closes and r["close"]]
-    if moves:
-        up, avg = sum(x > 0 for x in moves), sum(moves) / len(moves)
+            f"{_e(r['symbol'])}{' 🎯' if r['model'] else ''} ({_date(r['date'], lang)})" for r in first))
+    if past := rc.get("past"):
+        n, up, avg = past["n"], past["up"], past["avg"]
         lines += [""]
-        lines.append(f"📈 إشارات الشراء الـ{len(moves)} في الأسابيع الأربعة السابقة: {avg:+.1%} في المتوسط منذ إغلاق "
-                     f"الإشارة، {up} من {len(moves)} صاعدة (قبل الوقف والهدف)." if ar else
-                     f"📈 The {len(moves)} BUY signals of the 4 weeks before: {avg:+.1%} on average "
-                     f"since their signal close, {up} of {len(moves)} up (before stops and targets).")
+        lines.append(f"📈 إشارات الشراء الـ{n} في الأسابيع الأربعة السابقة: {avg:+.1%} في المتوسط منذ إغلاق "
+                     f"الإشارة، {up} من {n} صاعدة (قبل الوقف والهدف)." if ar else
+                     f"📈 The {n} BUY signals of the 4 weeks before: {avg:+.1%} on average "
+                     f"since their signal close, {up} of {n} up (before stops and targets).")
 
     if mine:
         positions = views.open_positions(d)
@@ -1205,7 +1196,7 @@ def build_weekly(d: views.Data, site_url: str = "", mine: bool = True, lang: str
             lines += ["", f"💼 <b>Your {len(positions)} position{'s' if len(positions) != 1 else ''}</b>"]
             for p in positions:
                 lines.append(f"{_e(p['symbol'])} {p['pnl_pct']:+.1%} · {p['status'].lower()}")
-    paper = portfolio.account_summary(d.conn, "paper", d.cfg, closes)
+    paper = portfolio.account_summary(d.conn, "paper", d.cfg, d.closes())
     if paper["open_count"] or paper["realized"]:
         lines += ["", f"🧪 الحساب التجريبي {paper['equity']:,.0f} جنيه ({paper['return_pct']:+.1%} منذ بدايته)" if ar else
                   f"🧪 Paper account {paper['equity']:,.0f} EGP ({paper['return_pct']:+.1%} since it started)"]

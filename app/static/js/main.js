@@ -52,7 +52,7 @@ function lazy(file, name) {
 }
 
 const PAGES = Object.fromEntries(Object.entries({
-  today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), layers: lazy('layers', 'LayersPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), flow: lazy('flow', 'FlowPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
+  today: lazy('today', 'TodayPage'), signals: lazy('picks', 'PicksPage'), record: lazy('picks', 'RecordPage'), layers: lazy('layers', 'LayersPage'), news: lazy('news', 'NewsPage'), market: lazy('market', 'MarketPage'), flow: lazy('flow', 'FlowPage'), egx30: lazy('egx30', 'Egx30Page'), heatmap: lazy('heatmap', 'HeatmapPage'), sectors: lazy('sectors', 'SectorsPage'), health: lazy('health', 'HealthPage'), predict: lazy('predict', 'PredictPage'), dividends: lazy('dividends', 'DividendsPage'),
   stock: lazy('stock', 'StockPage'), rights: lazy('rights', 'RightsListPage'), screener: lazy('screener', 'ScreenerPage'), watchlist: lazy('watchlist', 'WatchlistPage'), portfolio: lazy('portfolio', 'PortfolioPage'), paper: lazy('paper', 'PaperPage'),
   calc: lazy('calc', 'CalcPage'), backtest: lazy('backtest', 'BacktestPage'), settings: lazy('settings', 'SettingsPage'), admin: lazy('admin', 'AdminPage'),
 }).filter(([id]) => !(STATIC && MAC_ONLY.includes(id))));
@@ -61,7 +61,7 @@ const PAGES = Object.fromEntries(Object.entries({
 // bookmarks still work (#/signals is Picks, #/predict its Rankings). Settings and Admin sit in the ⚙ menu.
 const SECTIONS = [
   { id: 'home', label: 'Home', icon: 'home',
-    tabs: [['today', 'Summary'], ['market', 'Market', [['market', 'Overview'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap']]],
+    tabs: [['today', 'Summary'], ['market', 'Market', [['market', 'Overview'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['sectors', 'Sectors']]],
       ['flow', 'Money flow'], ['news', 'News & dates', [['news', 'News'], ['dividends', 'Dividends & results']]]] },
   { id: 'picks', label: 'Picks', icon: 'target', tabs: [['signals', 'Picks'], ['predict', 'Rankings'], ['layers', '7 Layers'], ['record', 'Track record']] },
   { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['screener', 'Screener'], ['watchlist', 'Watchlist'], ['rights', 'Rights issues']] },
@@ -76,7 +76,7 @@ const pageTitle = page => {
     if (id === page) return label;
     for (const [g, gl] of group || []) if (g === page) return gl;
   }
-  return { settings: 'Settings', admin: 'Admin' }[page] || 'Summary';
+  return { settings: 'Settings', admin: 'Admin', health: 'Data health' }[page] || 'Summary';
 };
 
 // Counts on the sections: BUY signals for the next session, and your positions that need action.
@@ -171,6 +171,7 @@ function Menu({ onClose }) {
         <span class="avatar me">${(me.user.display_name || '?').slice(0, 1).toUpperCase()}</span>
         <span><b>${me.user.display_name}</b><small>${t('Password and sign out')}</small></span></button>`}
       <a class="menu-item" role="menuitem" href="#/settings" onClick=${onClose}><${Icon} name="sliders" />${t('Settings')}</a>
+      <a class="menu-item" role="menuitem" href="#/health" onClick=${onClose}><${Icon} name="activity" />${t('Data health')}</a>
       ${website && me.user.is_admin && html`<a class="menu-item" role="menuitem" href="#/admin" onClick=${onClose}>
         <${Icon} name="users" />${t('Admin')}</a>`}
       <button class="menu-item" role="menuitem" lang=${lang === 'ar' ? 'en' : 'ar'} onClick=${() => { setLang(lang === 'ar' ? 'en' : 'ar'); onClose(); }}>
