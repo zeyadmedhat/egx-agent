@@ -1782,3 +1782,7 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .invt tbody tr:last-child > * { padding-bottom: 10px; }
 .invt-key { display: inline-block; width: 18px; height: 0; border-top: 2.5px solid var(--c); margin-inline-end: 10px; vertical-align: middle; }
 .invt-key.dash { border-top-style: dashed; }
+.flow-plot { position: relative; }
+.flow-plot svg { width: 100%; height: 170px; display: block; overflow: visible; }
+.flow-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); }
+@media (min-width: 900px) { .flow-plot svg { height: 230px; } }

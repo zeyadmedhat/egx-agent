@@ -301,13 +301,12 @@ function FlowLines({ days }) {
   const lo = Math.min(...all), hi = Math.max(...all), span = hi - lo || 1;
   const x = i => P + (i / Math.max(days.length - 1, 1)) * (W - 2 * P - 6), y = v => P + (1 - (v - lo) / span) * (H - 2 * P);
   return html`<div class="flow-lines">
-    <svg viewBox=${`0 0 ${W} ${H}`} role="img" aria-label=${t('Flows added up over {n} sessions', { n: days.length })}>
-      <line x1=${P} x2=${W - P} y1=${y(0)} y2=${y(0)} class="zero" />
+    <div class="flow-plot"><svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label=${t('Flows added up over {n} sessions', { n: days.length })}>
+      <line x1=${P} x2=${W - P} y1=${y(0)} y2=${y(0)} class="zero" vector-effect="non-scaling-stroke" />
       ${lines.map(l => html`<path d=${l.pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')}
         fill="none" stroke=${FLOW_COLORS[l.g]} stroke-width="2.2" stroke-dasharray=${l.k === 'individuals' ? '5 4' : ''}
-        stroke-linejoin="round" />
-        <circle cx=${x(l.pts.length - 1)} cy=${y(l.pts[l.pts.length - 1])} r="5" fill=${FLOW_COLORS[l.g]} />`)}
-    </svg>
+        stroke-linejoin="round" vector-effect="non-scaling-stroke" />`)}
+    </svg>${lines.map(l => html`<i class="flow-dot" style=${`left:${(x(l.pts.length - 1) / W) * 100}%;top:${(y(l.pts[l.pts.length - 1]) / H) * 100}%;background:${FLOW_COLORS[l.g]}`}></i>`)}</div>
     <p class="faint s">${t('Added up over the last {n} sessions ({from} – {to}). Solid: institutions. Dashed: individuals.', { n: days.length, from: fmt.date(days[0].date, false), to: fmt.date(days[days.length - 1].date, false) })}</p>
   </div>`;
 }
