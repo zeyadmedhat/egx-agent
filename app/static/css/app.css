@@ -1786,3 +1786,19 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .flow-plot svg { width: 100%; height: 170px; display: block; overflow: visible; }
 .flow-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); }
 @media (min-width: 900px) { .flow-plot svg { height: 230px; } }
+
+/* Market activity: big buttons for the chosen day, bars you can tap, the usual day as a labelled dashed line */
+.act-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 30px; }
+.act-tab { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px; border-radius: 14px;
+  border: 1px solid transparent; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.act-tab b { font-size: 18px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.act-tab.on { background: var(--panel-3); border-color: var(--border-2); color: var(--text); }
+.act-tab.on b { color: var(--text); }
+button.act-col { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
+.act-col:hover .act-bar:not(.now) { border-color: var(--text-3); }
+.act-col span.on { color: var(--text); font-weight: 600; }
+.act-bar { transition: height .2s; }
+.act-usual span { position: absolute; top: -18px; font-size: 11.5px; color: var(--text-3); }
+.act-usual span:first-child { inset-inline-start: 0; }
+.act-usual span:last-child { inset-inline-end: 0; }
+.act-bars { height: 140px; }

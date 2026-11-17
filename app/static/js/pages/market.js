@@ -229,25 +229,31 @@ const weekday = iso => new Date(`${iso}T12:00`).toLocaleDateString(isAr() ? 'ar-
 // Market activity: the money (or shares) traded at each of the last sessions, with the usual day (20 sessions) as a
 // dashed line. A session still coming in (fewer stocks than the day before) says so.
 function Activity({ a }) {
-  const [k, setK] = useState('value');
   const days = a.days;
-  const usual = k === 'value' ? a.usual : null;
-  const top = Math.max(...days.map(d => d[k]), usual || 0) * 1.08;
+  const [k, setK] = useState('value');
+  const [pick, setPick] = useState(days.length - 1);
+  const i = Math.min(pick, days.length - 1), day = days[i];
+  const usual = k === 'value' ? a.usual : a.usual_volume;
+  const top = Math.max(...days.map(d => d[k]), usual || 0) * 1.06;
   const last = days[days.length - 1], prev = days[days.length - 2];
-  const partial = prev && last.stocks < prev.stocks - 5;
+  const partial = i === days.length - 1 && prev && last.stocks < prev.stocks - 5;
+  const kinds = [['value', 'Money traded', v => `${fmt.short(v)} ${t('EGP')}`], ['volume', 'Shares traded', v => fmt.short(v)]];
   return html`<div class="card">
-    <div class="inv-top"><div class="card-title" style="margin:0">${t('Market activity')}</div>
-      <${Seg} options=${[{ value: 'value', label: 'Money' }, { value: 'volume', label: 'Shares' }]} value=${k} onChange=${setK} /></div>
-    <p class="act-now"><b>${fmt.short(last[k])}</b> ${k === 'value' ? t('EGP') : t('shares')}
-      ${usual && html`<span class="faint"> · ${t('usual day {v}', { v: fmt.short(usual) })}</span>`}</p>
+    <div class="card-title" style="margin:0">${t('Market activity')}</div>
+    <p class="faint s" style="margin:4px 0 0">${fmt.date(day.date)}${day[k] && usual
+      ? ' · ' + t(day[k] >= usual ? '{p} above a usual day' : '{p} below a usual day', { p: fmt.pct(Math.abs(day[k] / usual - 1), 0, false) }) : ''}</p>
+    <div class="act-tabs">${kinds.map(([key, label, show]) => html`<button class=${'act-tab' + (k === key ? ' on' : '')}
+      onClick=${() => setK(key)}><span>${t(label)}</span><b>${show(day[key])}</b></button>`)}</div>
     <div class="act-bars">
-      ${usual && html`<div class="act-usual" style=${`bottom:${(usual / top) * 100}%`}></div>`}
-      ${days.map((d, i) => html`<div class="act-col" key=${d.date}>
-        <div class=${'act-bar' + (i === days.length - 1 ? ' now' : '')} style=${`height:${(d[k] / top) * 100}%`}
-          title=${`${fmt.date(d.date, false)}: ${fmt.short(d[k])}`}></div>
-        <span>${weekday(d.date)}</span></div>`)}
+      ${usual && html`<div class="act-usual" style=${`bottom:${(usual / top) * 100}%`}>
+        <span>${t('Usual')}</span><span>${fmt.short(usual)}</span></div>`}
+      ${days.map((d, j) => html`<button class="act-col" key=${d.date} onClick=${() => setPick(j)}
+          aria-label=${`${fmt.date(d.date, false)}: ${fmt.short(d[k])}`}>
+        <div class=${'act-bar' + (j === i ? ' now' : '')} style=${`height:${(d[k] / top) * 100}%`}></div>
+        <span class=${j === i ? 'on' : ''}>${weekday(d.date)}</span></button>`)}
     </div>
-    ${partial && html`<p class="faint s">${t('The last session is still coming in: {n} stocks so far.', { n: last.stocks })}</p>`}
+    <p class="faint s">${partial ? t('The last session is still coming in: {n} stocks so far.', { n: last.stocks })
+      : t('Tap a day to see its numbers.')}</p>
   </div>`;
 }
 

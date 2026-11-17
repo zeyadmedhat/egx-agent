@@ -1339,7 +1339,8 @@ def movers(d: Data) -> dict:
         days = traded.sum(axis=1, min_count=1).dropna()
         activity = {"days": [{"date": dd, "value": float(days[dd]), "volume": float(vol.loc[dd].sum()),
                               "stocks": int(close.loc[dd].notna().sum())} for dd in days.index[-6:]],
-                    "usual": float(days.iloc[-21:-1].mean()) if len(days) > 2 else None}
+                    "usual": float(days.iloc[-21:-1].mean()) if len(days) > 2 else None,
+                    "usual_volume": float(vol.loc[days.index].sum(axis=1).iloc[-21:-1].mean()) if len(days) > 2 else None}
         last = close.iloc[-1].reindex(today)
         highs = [s for s in today if enough[s] and last[s] >= year[s].max() * 0.999]
         lows = [s for s in today if enough[s] and last[s] <= year[s].min() * 1.001]
