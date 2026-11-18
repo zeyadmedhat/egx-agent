@@ -1718,11 +1718,18 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 @media (max-width: 600px) { .compare-pick { grid-template-columns: 1fr; } .compare-pick > .faint { text-align: center; } .compare-methods { grid-template-columns: 1fr; } }
 
 /* Stock page: the numbers strip in the head card, and the verdict's one line of method chips */
-.head-stats { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px 24px; padding-top: 10px; border-top: 1px solid var(--border); }
-.head-stats > div { display: flex; flex-direction: column; min-width: 0; }
+.head-stats { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.hs-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); }
 .head-stats span { font-size: 11.5px; color: var(--text-3); }
-.head-stats b { font-size: 15px; white-space: nowrap; }
+.head-stats b { font-size: 16px; white-space: nowrap; }
 .head-stats small { font-size: 11px; color: var(--text-3); }
+.hs-range { grid-column: span 2; }
+.hs-bar { position: relative; height: 8px; margin: 9px 0 4px; border-radius: 6px; background: linear-gradient(90deg, var(--down-soft), var(--up-soft)), color-mix(in srgb, var(--text-2) 10%, transparent); }
+.hs-bar i { position: absolute; top: 50%; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--panel); transform: translate(-50%, -50%); }
+[dir="rtl"] .hs-bar i { transform: translate(50%, -50%); }
+.hs-ends { display: flex; justify-content: space-between; }
+.price-line { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+@media (max-width: 700px) { .head-stats { grid-template-columns: 1fr 1fr; gap: 8px; } .hs-range { grid-column: 1 / -1; order: -1; } .price-line { justify-content: flex-start; } }
 .method-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: var(--bg-2); border: 1px solid var(--border); white-space: nowrap; cursor: default; }
 .mchip > span { display: inline-flex; }

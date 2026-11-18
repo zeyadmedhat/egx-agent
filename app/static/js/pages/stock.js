@@ -71,22 +71,24 @@ function StockMain({ route }) {
           <span class="faint">·</span><span class="stock-sector">${tn(info.sector || '')}</span></div>
         <${Badges} info=${info} />
       </div>
-      ${st && html`<div class="price"><div class="big">${fmt.price(st.close)}</div>
-        <div class="chg"><${Change} value=${st.change} pill /> <span class="faint" style="font-weight:500">${t('on the day')}</span></div>
+      ${st && html`<div class="price">
+        <div class="price-line"><span class="big">${fmt.price(st.close)}</span><${Change} value=${st.change} pill /></div>
         <div class="faint" style="font-size:12px">${t(store.status && store.status.final === false && st.last_bar === (store.status.market || {}).date ? 'Session price of {date}' : 'Close of {date}', { date: fmt.date(st.last_bar) })}</div>
         ${quote && Math.abs(quote.price - st.close) > 1e-9 && (sessionState().state === 'open'
           ? html`<div class="live-now"><span class="live-dot"></span>
               ${t('Live')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /> <span class="faint">${t('~15 min late')}</span></div>`
-          : html`<div class="live-now">${t('Newest close')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /></div>`)}
-        ${data.corporate && data.corporate.results && data.corporate.results.next && html`<div class="next-results">
-          <${Term} k="results">${t('Next results')}<//>: <b>${t('expected around {date}', { date: fmt.date(data.corporate.results.next) })}</b></div>`}</div>`}
+          : html`<div class="live-now">${t('Newest close')} <b>${fmt.price(quote.price)}</b> <${Change} value=${quote.change} /></div>`)}</div>`}
       ${st && html`<div class="head-stats">
-        <div><span>${t('3-month change')}</span><b class=${tone(st.ret63)}>${fmt.pct(st.ret63, 0)}</b>
+        <div class="hs-tile"><span>${t('3-month change')}</span><b class=${tone(st.ret63)}>${fmt.pct(st.ret63, 0)}</b>
           ${st.index_ret63 != null && html`<small>EGX30 ${fmt.pct(st.index_ret63, 0)}</small>`}</div>
-        <div><span>${t('1-year low – high')}</span><b>${fmt.price(st.low52)} – ${fmt.price(st.high52)}</b></div>
-        <div><span>${t('Traded a day')}</span><b>${fmt.short(st.value_avg20)} ${t('EGP')}</b></div>
-        ${pe != null && html`<div><span>${t('Price / earnings (P/E)')}</span><b>${pe > 0 ? `${fmt.num(pe, 1)}×` : t('loss-making')}</b>
+        ${st.high52 > st.low52 && html`<div class="hs-tile hs-range"><span>${t('1-year low – high')}</span>
+          <div class="hs-bar"><i style=${`inset-inline-start:${Math.min(100, Math.max(0, (st.close - st.low52) / (st.high52 - st.low52) * 100))}%`}></i></div>
+          <small class="hs-ends"><bdi>${fmt.price(st.low52)}</bdi><bdi>${fmt.price(st.high52)}</bdi></small></div>`}
+        <div class="hs-tile"><span>${t('Traded a day')}</span><b>${fmt.short(st.value_avg20)} ${t('EGP')}</b></div>
+        ${pe != null && html`<div class="hs-tile"><span>${t('Price / earnings (P/E)')}</span><b>${pe > 0 ? `${fmt.num(pe, 1)}×` : t('loss-making')}</b>
           ${pe > 0 && data.fundamentals.sector_median && data.fundamentals.sector_median.pe ? html`<small>${t('sector')} ${fmt.num(data.fundamentals.sector_median.pe, 1)}×</small>` : ''}</div>`}
+        ${data.corporate && data.corporate.results && data.corporate.results.next && html`<div class="hs-tile">
+          <span><${Term} k="results">${t('Next results')}<//></span><b>${fmt.date(data.corporate.results.next)}</b><small>${t('expected')}</small></div>`}
       </div>`}
     </div>
 
