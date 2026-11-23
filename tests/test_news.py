@@ -150,11 +150,11 @@ def test_update_reads_every_source_and_one_down_doesnt_stop_the_others(tmp_path)
         # the RSS feeds and Mubasher's latest-news pages are down
     })
     res = news.update(conn, first=["MHOT"], budget_s=60, fetcher=f)
-    assert res["actions"] == 5 + len(news.KNOWN_ACTIONS) and res["stocks"] == 3
+    # Mubasher's corporate-actions list wants a login since Nov 2026: not asked; the hand-kept lines (and TradingView's,
+    # none here) instead
+    assert res["actions"] == 0 and res["stocks"] == 3                         # a new database: no history to add to
+    assert not [u for u, _ in f.asked if "corporate-actions" in u]
     assert set(res["failed"]) == {"Al Borsa News", "Daily News Egypt", "Mubasher latest news"}
-    kinds = {(r["symbol"], r["kind"], r["announced"], r["effective"]) for r in news.actions(conn)}
-    assert ("ABUK", "bonus", "2026-02-24", "2026-10-07") in kinds
-    assert ("COMI", "dividend", "2024-04-08", "2024-04-08") in kinds              # never announced after its ex-date
     stock_pages = [u for u, _ in f.asked if "/markets/EGX/stocks/" in u]
     assert stock_pages[0].endswith("/MHOT/news")                                 # today's signals first
     assert {n["symbol"] for n in news.recent_news(conn, days=3650)} >= {"COMI", "MHOT", "ABUK"}
@@ -300,3 +300,19 @@ def test_big_deals_keep_one_per_deal(tmp_path):
     ], "COMI")
     got = news.big_deals(conn, "COMI", "2026-01-01")
     assert [(d["side"], d["who"], d["url"]) for d in got] == [("buy", "fund", "u2")]
+
+
+def test_tradingview_fills_the_corporate_actions_mubasher_stopped_giving(tmp_path):
+    conn = db.connect(tmp_path / "t.db")
+    news.save_corporate_actions(conn, [{"symbol": "AAA", "kind": "dividend", "type": "Cash Dividend",
+                                        "announced": "2026-11-01", "effective": "2026-11-20", "note": ""}])
+    conn.execute("UPDATE corp_actions SET first_seen='2026-11-12T22:00:00'")
+    conn.executemany("INSERT INTO cash_dividends(symbol, ex_date, pay_date, amount, first_seen) VALUES (?,?,?,?,?)",
+                     [("AAA", "2026-11-21", None, 1.0, "2026-11-15T18:00:00"),     # Mubasher has it (a day apart)
+                      ("BBB", "2026-11-25", None, 2.5, "2026-11-15T18:00:00"),     # new
+                      ("CCC", "2026-09-01", None, 1.0, "2026-08-20T18:00:00")])    # before Mubasher stopped
+    conn.executemany("INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES (?,?,?,?)",
+                     [("DDD", "2026-11-18", 1.25, "2026-11-19T17:00:00"), ("EEE", "2026-11-19", 0.5, "2026-11-20T17:00:00")])
+    assert news.tv_actions(conn) == 3 and news.tv_actions(conn) == 0
+    got = {(r[0], r[1], r[2]) for r in conn.execute("SELECT symbol, kind, effective FROM corp_actions WHERE type LIKE '%TradingView%'")}
+    assert got == {("BBB", "dividend", "2026-11-25"), ("DDD", "bonus", "2026-11-18"), ("EEE", "consolidation", "2026-11-19")}

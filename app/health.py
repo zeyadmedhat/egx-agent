@@ -53,12 +53,20 @@ def _when(iso: str) -> str:
 
 # ------------------------------------------------------------------ what's failing
 
+# Sources the runs stopped trying. Mubasher's corporate-actions list has wanted a login since 14 Nov 2026 (its API answers
+# 401); TradingView's dividends and re-based prices replace it (news.tv_actions).
+RETIRED = {"Mubasher corporate actions"}
+
+
 def note(conn: sqlite3.Connection, failed: Iterable[str], checked: Iterable[str], now: datetime | None = None) -> None:
     """Remember which sources failed this run. checked: every source this run tried (a source it didn't try keeps
     its state). A source is a problem once it has failed on every try for FAIL_HOURS."""
     now = now or _now()
     failed = set(failed)
     failing, ok = _meta(conn, "health_failing"), _meta(conn, "health_ok")
+    for name in RETIRED:            # a source the runs no longer try: off the Data health page and the alarms
+        failing.pop(name, None)
+        ok.pop(name, None)
     for name in set(checked) | failed:
         if name in failed:
             failing.setdefault(name, now.isoformat(timespec="seconds"))

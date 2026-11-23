@@ -20,7 +20,7 @@ import re
 import sqlite3
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Callable, Iterable
 from zoneinfo import ZoneInfo
@@ -332,9 +332,37 @@ KNOWN_ACTIONS = [
 
 
 def update_actions(conn: sqlite3.Connection, fetcher: Fetcher | None = None) -> int:
-    """Only the corporate actions (all of them the first time, about a minute): the prediction model needs them."""
-    full = conn.execute("SELECT COUNT(*) FROM corp_actions").fetchone()[0] == 0
-    return save_corporate_actions(conn, fetch_corporate_actions(fetcher or Fetcher(), 20 if full else 1) + KNOWN_ACTIONS)
+    """The corporate actions the prediction model and the site need. Mubasher's list has wanted a login since
+    14 Nov 2026 (its API answers 401), so new ones come from TradingView (tv_actions); the hand-kept ones stay. A
+    database without Mubasher's history gets nothing: a few lines aren't the history the model learns from."""
+    if not conn.execute("SELECT 1 FROM corp_actions LIMIT 1").fetchone():
+        return 0
+    return save_corporate_actions(conn, KNOWN_ACTIONS) + tv_actions(conn)
+
+
+def tv_actions(conn: sqlite3.Connection) -> int:
+    """New corporate actions from what TradingView already gives the agent, since Mubasher's list stopped: its cash
+    dividends (data/dividends.py: ex-date, amount) and its re-based price histories (prices.py price_events: a factor
+    above 1 is bonus shares or a split, below 1 a reverse split). A re-base can be a rights issue too; TradingView
+    can't tell them apart, so it's stored as bonus shares. Returns how many were new."""
+    last = conn.execute("SELECT MAX(first_seen) FROM corp_actions WHERE type NOT LIKE '%(TradingView)'").fetchone()[0]
+    # from two weeks before Mubasher's last new line; one it (or a hand-kept line) already has, within a week, is skipped
+    since = (datetime.fromisoformat(last) - timedelta(days=14)).date().isoformat() if last else ""
+    have = [(r[0], r[1], r[2]) for r in conn.execute("SELECT symbol, kind, effective FROM corp_actions WHERE effective != ''")]
+    resets = {"bonus", "split", "rights", "consolidation"}
+
+    def known(sym, ex, kinds):
+        return any(s == sym and k in kinds and abs((date.fromisoformat(e[:10]) - date.fromisoformat(ex)).days) <= 7
+                   for s, k, e in have)
+    rows = [{"symbol": s, "kind": "dividend", "type": "Cash dividend (TradingView)", "announced": (seen or ex)[:10],
+             "effective": ex, "note": f"{amt:g} EGP a share" if amt else ""}
+            for s, ex, amt, seen in conn.execute("SELECT symbol, ex_date, amount, first_seen FROM cash_dividends "
+                                                 "WHERE ex_date >= ?", (since,)) if not known(s, ex, {"dividend"})]
+    rows += [{"symbol": s, "kind": "bonus" if factor > 1 else "consolidation", "type": "Price re-base (TradingView)",
+              "announced": (seen or ex)[:10], "effective": ex, "note": ""}
+             for s, ex, factor, seen in conn.execute("SELECT symbol, ex_date, factor, detected FROM price_events "
+                                                     "WHERE ex_date >= ?", (since,)) if not known(s, ex, resets)]
+    return save_corporate_actions(conn, rows)
 
 
 def mac_sends(conn: sqlite3.Connection) -> bool:
@@ -366,8 +394,8 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
             res["failed"].append(name)
             return None
 
-    say("Dividends and bonus shares (Mubasher)…")
-    res["actions"] = attempt("Mubasher corporate actions", lambda: update_actions(conn, f)) or 0
+    say("Dividends and bonus shares (TradingView)…")
+    res["actions"] = attempt("Corporate actions (TradingView)", lambda: update_actions(conn, f)) or 0
 
     say("Reuters and Zawya (TradingView)…")
     items = attempt("Reuters/Zawya", lambda: fetch_tv(f))
