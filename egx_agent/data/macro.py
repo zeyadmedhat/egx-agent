@@ -24,6 +24,7 @@ SERIES = {
 }
 # Downloaded with them but not the model's: gold in dollars an ounce, for your returns in gold and the zakat nisab.
 EXTRA = {"gold": ("XAUUSD", "FX_IDC", 0)}
+CANDLES = {"egx70": "EGX70"}     # series whose daily candles are also kept (db index_prices), under this name
 OUNCE_G = 31.1035
 FULL_BARS = 5000     # the first download: all of it (the model learns from 2013 on)
 UPDATE_BARS = 60
@@ -41,13 +42,21 @@ def update(conn: sqlite3.Connection, provider: TvProvider | None = None) -> list
     """Download new values for every series. Returns the names that failed (the old values stay)."""
     provider = provider or TvProvider()
     have = {r[0] for r in conn.execute("SELECT DISTINCT series FROM macro")}
+    have |= {f"candles:{r[0]}" for r in conn.execute("SELECT DISTINCT symbol FROM index_prices")}
     failed = []
     for name, (symbol, exchange, _lag) in {**SERIES, **EXTRA}.items():
-        df = provider.fetch(symbol, UPDATE_BARS if name in have else FULL_BARS, exchange=exchange)
+        full = name not in have or (name in CANDLES and f"candles:{CANDLES[name]}" not in have)
+        df = provider.fetch(symbol, FULL_BARS if full else UPDATE_BARS, exchange=exchange)
         if df is None or df.empty:
             failed.append(name)
             continue
         db.upsert_macro(conn, name, df)
+        if name in CANDLES:          # EGX70's whole candles too, for its own chart page
+            conn.executemany("INSERT OR REPLACE INTO index_prices VALUES (?,?,?,?,?,?,?)",
+                             [(CANDLES[name], d, float(r.open), float(r.high), float(r.low), float(r.close),
+                               float(r.volume) if pd.notna(r.volume) else 0.0)
+                              for d, r in zip(df["date"], df.itertuples(index=False))])
+            conn.commit()
     return failed
 
 

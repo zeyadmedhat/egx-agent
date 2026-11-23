@@ -363,7 +363,8 @@ class MacroProvider:
         self.calls.append((symbol, exchange, n_bars))
         if symbol == "EGIRYY":
             return None
-        return pd.DataFrame({"date": ["2026-09-24", "2026-09-25"], "close": [1.0, 2.0]})
+        return pd.DataFrame({"date": ["2026-09-24", "2026-09-25"], "open": [0.9, 1.1], "high": [1.2, 2.1],
+                             "low": [0.8, 1.0], "close": [1.0, 2.0], "volume": [10.0, None]})
 
 
 def test_egypt_download_takes_everything_once_then_only_new_values(tmp_path):
@@ -379,6 +380,10 @@ def test_egypt_download_takes_everything_once_then_only_new_values(tmp_path):
                                                    "XAUUSD": macro.UPDATE_BARS}
     raw = db.load_macro(conn)
     assert set(raw.columns) == {"usdegp", "interbank", "egx70", "gold"} and raw["usdegp"].iloc[-1] == 2.0
+    # EGX70's whole candles are kept apart from the stocks, for its own chart page
+    e70 = db.load_index_prices(conn, "EGX70")
+    assert list(e70["high"]) == [1.2, 2.1] and list(e70["volume"]) == [10.0, 0.0]
+    assert not conn.execute("SELECT 1 FROM prices WHERE symbol LIKE 'EGX70%'").fetchone()
     # gold is for your returns and the zakat nisab, not the model: without inflation the Egypt data isn't ready
     assert not predict.egypt_data_ready(conn)
 

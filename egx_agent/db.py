@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS layer_picks (      -- each day's stocks at 6/7 layers
     close  REAL NOT NULL,
     PRIMARY KEY (date, symbol)
 );
+CREATE TABLE IF NOT EXISTS index_prices (     -- other indices' daily candles (EGX70 = TradingView's EGX70EWI), kept out
+    symbol TEXT NOT NULL,                      -- of prices so nothing counts them as a stock
+    date   TEXT NOT NULL,
+    open REAL, high REAL, low REAL, close REAL, volume REAL,
+    PRIMARY KEY (symbol, date)
+);
 CREATE TABLE IF NOT EXISTS rights_prices (    -- a rights issue's rights while they trade (KORA_r1: TradingView's
     symbol TEXT NOT NULL,                      -- KORAR1), kept: TradingView drops them once the issue is over
     date   TEXT NOT NULL,
@@ -446,6 +452,14 @@ def load_intraday(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
 def last_price_date(conn: sqlite3.Connection, symbol: str) -> str | None:
     row = conn.execute("SELECT MAX(date) AS d FROM prices WHERE symbol=?", (symbol,)).fetchone()
     return row["d"] if row else None
+
+
+def load_index_prices(conn: sqlite3.Connection, symbol: str) -> pd.DataFrame:
+    """An index's daily candles from index_prices (EGX70), like load_prices."""
+    df = pd.read_sql_query("SELECT date, open, high, low, close, volume FROM index_prices WHERE symbol=? ORDER BY date",
+                           conn, params=(symbol,))
+    df["date"] = pd.to_datetime(df["date"])
+    return df.set_index("date")
 
 
 def upsert_macro(conn: sqlite3.Connection, series: str, df: pd.DataFrame) -> int:

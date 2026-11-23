@@ -16,21 +16,30 @@ const PERIOD = { '1W': '1 week', '1M': '1 month', '3M': '3 months', '6M': '6 mon
   '3Y': '3 years', '5Y': '5 years' };
 const pct = v => (v == null ? html`<span class="faint">–</span>` : html`<b class=${tone(v)}>${fmt.pct(v, 1)}</b>`);
 
-export function Egx30Page() {
-  const { data, error } = useApi('/egx30');
+const INDICES = [{ value: 'EGX30', label: 'EGX30' }, { value: 'EGX70', label: 'EGX70' }];
+
+const ABOUT = { EGX30: "Egypt's 30 biggest and most traded companies, from {date}.",
+  EGX70: 'The next 70 companies after EGX30, each with the same weight, from {date}.' };
+const TV = { EGX30: 'EGX30', EGX70: 'EGX70EWI' };
+
+export function Egx30Page({ route }) {
+  const which = route && route.query && route.query.i === 'EGX70' ? 'EGX70' : 'EGX30';
+  const { data, error } = useApi(`/${which.toLowerCase()}`);
   const [bars, setBars] = useState(Number(remember('egx30-bars')) || 250);
   const [view, setView] = useState('agent');
   const [show, setShow] = useState({ zones: true, fib: false, ema: true, volume: false, rsi: true, macd: false });
   if (!data) return html`<${PageLoading} error=${error} />`;
   if (!data.has_data) {
-    return html`<${PageHead} title="EGX30" /><div class="card"><${Empty} icon="bars" title="No price data yet"
+    return html`<${PageHead} title=${which} /><div class="card"><${Empty} icon="bars" title="No price data yet"
       text="Run a scan first." /></div>`;
   }
   const d = data;
   const vs = v => d.close / v - 1;
   const avg = { v: fmt.int(d.ema50) };
   return html`
-    <${PageHead} title="EGX30" sub=${t("Egypt's 30 biggest and most traded companies, from {date}.", { date: fmt.date(d.date) })}>
+    <${PageHead} title=${which} extra=${html`<span class="idx-chips" role="group" aria-label=${t('Indices')}>${INDICES.map(x => html`<a
+        href=${x.value === 'EGX70' ? '#/egx30?i=EGX70' : '#/egx30'} class=${x.value === which ? 'on' : ''}
+        aria-current=${x.value === which ? 'page' : undefined}>${x.label}</a>`)}</span>`} sub=${t(ABOUT[which], { date: fmt.date(d.date) })}>
       <div class="egx30-price"><b class="num">${fmt.int(d.close)}</b> <${Change} value=${d.change} pill /></div><//>
     ${d.risk_off != null && html`<${Callout} tone=${d.risk_off ? 'warn' : 'ok'}>${d.risk_off
       ? html`<b>${t('Under its 50-day average ({v}).', avg)}</b> ${t('The agent gives no new BUYs until EGX30 closes back above it.')}`
@@ -56,18 +65,19 @@ export function Egx30Page() {
           <div class="right">${PANES.map(([k, label]) => html`<button class=${cls('toggle-chip', show[k] && 'on')}
             onClick=${() => setShow(s => ({ ...s, [k]: !s[k] }))}>${t(label)}</button>`)}</div>`}
       </div>
-      ${view === 'agent' ? html`<${PriceChart} series=${d.series} bars=${bars} show=${show} chart=${d.levels} />` : html`<${LiveChart} symbol="EGX30" />`}
+      ${view === 'agent' ? html`<${PriceChart} key=${which} series=${d.series} bars=${bars} show=${show} chart=${d.levels} />` : html`<${LiveChart} symbol=${TV[which]} />`}
     </div>
 
     ${d.levels && html`<${Levels} z=${d.levels} />`}
 
     <section class="section">
-      <${SectionHead} title="Returns" hint="In dollars: what a dollar investor made. EGX70: smaller companies, each with the same weight." />
+      <${SectionHead} title="Returns" hint=${which === 'EGX30' ? 'In dollars: what a dollar investor made. EGX70: smaller companies, each with the same weight.'
+        : 'In dollars: what a dollar investor made. EGX30 beside it: the 30 biggest companies.'} />
       <div class="card flush"><${DataTable} rows=${d.periods} rowKey=${r => r.key} columns=${[
         { key: 'key', label: 'Period', sortable: false, render: r => html`<b>${t(PERIOD[r.key] || r.key)}</b>` },
         { key: 'egp', label: 'In pounds', align: 'r', sortable: false, render: r => pct(r.egp) },
         { key: 'usd', label: 'In dollars', align: 'r', sortable: false, render: r => pct(r.usd) },
-        { key: 'egx70', label: 'EGX70', align: 'r', sortable: false, render: r => pct(r.egx70) },
+        { key: 'other', label: d.other_name, align: 'r', sortable: false, render: r => pct(r.other) },
       ]} /></div>
     </section>
 
@@ -77,8 +87,8 @@ export function Egx30Page() {
         { key: 'egp', label: 'In pounds', align: 'r', sortable: false, render: r => pct(r.egp) },
         { key: 'usd', label: 'In dollars', align: 'r', sortable: false, render: r => pct(r.usd) },
       ]} /><//>
-    ${d.usd_line.length > 0 && html`<${Fold} title="EGX30 in dollars" hint="A rise in pounds can be a loss in dollars when the pound falls." flush>
-      <${LineChart} lines=${[{ data: d.usd_line, color: '--accent', title: t('EGX30 in dollars'), area: true }]} format="usd" /><//>`}
+    ${d.usd_line.length > 0 && html`<${Fold} title=${t('{name} in dollars', { name: which })} hint="A rise in pounds can be a loss in dollars when the pound falls." flush>
+      <${LineChart} lines=${[{ data: d.usd_line, color: '--accent', title: t('{name} in dollars', { name: which }), area: true }]} format="usd" /><//>`}
     <${Fold} title="How jumpy it is" hint=${t('{v} a year (volatility)', { v: fmt.pct(d.volatility, 0, false) })}>
       <div class="kpis">
         <${Kpi} label="Biggest drop in the last year" value=${fmt.pct(d.drop_1y, 1)} valueClass="down" sub="from a high to the low after it" />

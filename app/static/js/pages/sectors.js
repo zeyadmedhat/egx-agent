@@ -4,6 +4,7 @@
 import { html, useApi, useState, fmt, tone, remember } from '../lib.js';
 import { PageHead, PageLoading, Seg, Empty, SessionBadge } from '../ui.js';
 import { t, tn } from '../i18n.js';
+import { SectorMoney } from './market.js';
 
 const PERIODS = [{ value: 'ret21', label: '4 weeks' }, { value: 'ret5', label: '1 week' }];
 
@@ -36,5 +37,6 @@ export function SectorsPage() {
         </div>`;
       })}
     </div>
+    ${data.sector_money && data.sector_money.length > 0 && html`<div style="margin-top:14px"><${SectorMoney} rows=${data.sector_money} /></div>`}
     <p class="faint" style="font-size:13px;margin-top:10px">${t('The move is the typical (middle) stock in each sector that trades 5 million pounds a day or more. Share of money: the last 4 weeks against the 4 weeks before. Tested on EGX since 2017: sectors that rose most did no better over the next 4 weeks. This shows where money went, not where it will go. Not advice.')}</p>`;
 }

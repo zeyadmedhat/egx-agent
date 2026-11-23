@@ -1651,12 +1651,24 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .flow-line.up { stroke: var(--up); } .flow-line.down { stroke: var(--down); }
 .flow-press { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin-top: 8px; font-size: 11px; }
 
-/* The switch inside a merged tab (main.js SubNav): Market → Overview / EGX30 / Heatmap */
-.subswitch { display: flex; width: max-content; margin: -8px 0 18px; }
-.subswitch a { display: inline-flex; align-items: center; white-space: nowrap; height: 30px; padding: 0 14px;
-  border-radius: var(--r-sm); color: var(--text-2); font-size: 13.5px; font-weight: 600; text-decoration: none; }
+/* The pages inside a tab (main.js SubNav): Market → Overview / Indices / Heatmap / Sectors. A level below the tabs,
+   so lighter: plain words, the open one bold with a short line under it. Boxed switches are for choices inside a page. */
+.subswitch { display: flex; gap: 22px; margin: -12px 0 18px; overflow-x: auto; scrollbar-width: none; }
+.subswitch::-webkit-scrollbar { display: none; }
+.subswitch a { position: relative; white-space: nowrap; padding: 6px 0; color: var(--text-3); font-size: 14px;
+  font-weight: 500; text-decoration: none; }
 .subswitch a:hover { color: var(--text); }
-.subswitch a.on { background: var(--panel-3); color: var(--text); }
+.subswitch a.on { color: var(--text); font-weight: 700; }
+.subswitch a.on::after { content: ""; position: absolute; inset-inline: 0; bottom: 0; height: 2px; border-radius: 2px;
+  background: var(--text-3); }
+.subswitch a:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 6px; }
+@media (max-width: 480px) { .subswitch { gap: 14px; } .subswitch a { font-size: 13.5px; } }
+/* a choice of what the page shows (EGX30 / EGX70): small chips in its title row */
+.idx-chips { display: inline-flex; gap: 6px; vertical-align: middle; margin-inline-start: 12px; }
+.idx-chips a { font-size: 12.5px; font-weight: 600; padding: 3px 11px; border-radius: 999px; border: 1px solid var(--border-2);
+  color: var(--text-2); text-decoration: none; }
+.idx-chips a:hover { color: var(--text); border-color: var(--text-3); }
+.idx-chips a.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 
 /* Home → This week (pages/today.js WeekCard) */
 .recap-big { font-size: 15px; margin: 2px 0 10px; }
@@ -1741,7 +1753,60 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 /* Market → Overview: the strip, activity, up and down, flows chart (pages/market.js) */
 .mkt-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; background: var(--border);
   border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
-.mkt-strip > div { background: var(--panel); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mkt-strip > div, .mkt-strip > a { background: var(--panel); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mkt-strip > a.mkt-link { position: relative; color: inherit; text-decoration: none; }
+.mkt-strip > a.mkt-link:hover { background: var(--panel-2); }
+.mkt-go { position: absolute; top: 10px; inset-inline-end: 12px; font-style: normal; color: var(--accent); font-weight: 700; }
+[dir="rtl"] .mkt-go, [dir="rtl"] .ov-go { transform: scaleX(-1); }
+/* Market → Overview cards: a title with an arrow to the full page (like Thndr's) */
+.mkt-pair { align-items: start; }
+.ov-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.ov-head .card-title { margin: 0; flex: 1; }
+.ov-go { font-size: 20px; line-height: 1; color: var(--text-2); text-decoration: none; padding: 2px 6px; border-radius: 8px; }
+.ov-go:hover { color: var(--accent); background: var(--accent-soft); }
+.fc-group { margin-top: 8px; }
+.fc-group > b { font-size: 13.5px; }
+.mv-tabs { display: flex; gap: 6px; margin: 4px 0 10px; flex-wrap: wrap; }
+.mv-tab { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-2); font: inherit; font-size: 13px; cursor: pointer; }
+.mv-tab i { font-style: normal; font-size: 10px; }
+.mv-tab.up i { color: var(--up); } .mv-tab.down i { color: var(--down); } .mv-tab.active i { color: var(--warn); }
+.mv-tab.on { background: var(--panel-2); color: var(--text); border-color: var(--border-2); font-weight: 700; }
+.mv-seg { margin-bottom: 6px; }
+.sh-map { position: relative; width: 100%; aspect-ratio: 100 / 70; margin: 6px 0 8px; }
+.sh-tile { position: absolute; box-sizing: border-box; border: 2px solid var(--panel); border-radius: 8px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center; overflow: hidden; color: var(--text); text-decoration: none; padding: 2px; }
+.sh-tile b { font-size: 12.5px; font-weight: 650; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-tile span { font-size: 12px; font-weight: 700; }
+.heat-tile small { font-size: .7em; opacity: .85; }
+.heat-total { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+.heat-total span { color: var(--text-3); }
+/* Market → Overview: Arrange boxes (pages/market.js) */
+.arrange-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin: -4px 0 10px; }
+.arrange-bar .faint { flex: 1; min-width: 200px; }
+.box-slot { min-width: 0; }
+.mkt-boxes { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: stretch; margin-bottom: 14px; }
+/* every box in a row as tall as the tallest one: no gaps under the short ones */
+.mkt-boxes > .box-slot { display: flex; flex-direction: column; }
+.mkt-boxes > .box-slot > .card { flex: 1; }
+@media (min-width: 900px) {
+  .mkt-boxes { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .box-slot.size-small { grid-column: span 2; }
+  .box-slot.size-half { grid-column: span 3; }
+  .box-slot.size-wide { grid-column: 1 / -1; }
+}
+.box-tools { flex-wrap: wrap; }
+.box-size { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.box-size button { border: 0; background: var(--panel); color: var(--text-2); font: inherit; font-size: 12px; padding: 6px 10px; cursor: pointer; }
+.box-size button + button { border-inline-start: 1px solid var(--border); }
+.box-size button.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.box-slot > .card { margin: 0; }
+.box-slot.arranging { outline: 2px dashed var(--border-2); outline-offset: 3px; border-radius: var(--radius); cursor: grab; }
+.box-slot.dragging { opacity: .45; }
+.box-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 13px; font-weight: 700; color: var(--text-2); }
+.box-tools span { flex: 1; }
+.box-tools .icon-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 16px; }
+.box-tools .icon-btn:disabled { opacity: .35; }
 .mkt-strip span { font-size: 12px; color: var(--text-2); }
 .mkt-strip b { font-size: 18px; white-space: nowrap; }
 .mkt-strip small { font-size: 12px; font-weight: 700; }
@@ -1791,7 +1856,14 @@ button.bell-btn { border: 0; background: none; cursor: pointer; padding: 0; }
 .invt-key.dash { border-top-style: dashed; }
 .flow-plot { position: relative; }
 .flow-plot svg { width: 100%; height: 170px; display: block; overflow: visible; }
-.fl-end { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); }
+.fl-end { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
+  box-shadow: 0 0 0 2px var(--panel); }
+.flow-plot { cursor: crosshair; touch-action: pan-y; user-select: none; -webkit-user-select: none; outline: none; }
+.flow-plot:focus-visible { box-shadow: 0 0 0 2px var(--accent-soft); border-radius: 8px; }
+.fl-guide { position: absolute; top: -4px; bottom: -4px; width: 0; border-inline-start: 1.5px dashed var(--text-3); pointer-events: none; }
+.flow-lines { position: relative; padding-top: 22px; }
+.fl-when { position: absolute; top: 0; transform: translateX(-50%); font-size: 12.5px; font-weight: 700; color: var(--text-2); white-space: nowrap; }
+.invt-when { margin: 10px 0 0; font-size: 13px; }
 @media (min-width: 900px) { .flow-plot svg { height: 230px; } }
 
 /* Market activity: big buttons for the chosen day, bars you can tap, the usual day as a labelled dashed line */

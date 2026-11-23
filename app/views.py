@@ -1349,8 +1349,10 @@ def movers(d: Data) -> dict:
         sectors = d.table["sector"]
         moves = {key: (c.iloc[-1] / c.iloc[-1 - n] - 1).where(daily.tail(n).max() <= JUMP)
                  for key, n in (("chg1", 1), ("ret5", 5), ("ret21", 21))}
+        # money traded over the last session, week and month (sums, EGP): the heatmap's size beside each move
+        spent = {f"v{n}": traded.tail(n).sum(min_count=1) for n in (1, 5, 21)}
         tiles = [{"symbol": s, "sector": sectors.get(s) or "Other", "cap": (firms.get(s) or {}).get("market_cap"),
-                  "value": value.get(s), **{k: m.get(s) for k, m in moves.items()}}
+                  "value": value.get(s), **{k: m.get(s) for k, m in moves.items()}, **{k: v.get(s) for k, v in spent.items()}}
                  for s in today if s in sectors.index]
         # money by sector: each sector's share of the money traded at the last close, and its usual share (the 20
         # sessions before), so you see where money is going now. One big deal day counts too.
@@ -1383,6 +1385,7 @@ def movers(d: Data) -> dict:
 SOURCE_FEEDS = (("hourly", "The 1-hour and 4-hour charts"), ("TradingView prices", "Prices, charts and signals"),
                 ("stock list", "The list of stocks and their sectors"), ("Kashif", "The Shariah filter"),
                 ("Egypt data", "The dollar, interest and inflation numbers"), ("Dividend", "Dividends and ex-dates"),
+                ("Corporate actions (TradingView)", "Dividends, bonus shares and splits"),
                 ("corporate actions", "Bonus shares, rights issues and dividends"),
                 ("stock pages", "Big owners and each stock's news"), ("Prediction model", "The model's picks"))
 
@@ -1398,7 +1401,7 @@ def data_health(d: Data) -> dict:
             return {}
     failing, ok, now = meta("health_failing"), meta("health_ok"), datetime.now()
     rows = []
-    for name in sorted(set(failing) | set(ok)):
+    for name in sorted((set(failing) | set(ok)) - health.RETIRED):     # a retired source shows nowhere, at once
         since = failing.get(name)
         rows.append({"name": name, "ok": not since, "last_ok": ok.get(name), "failing_since": since,
                      "alarm": bool(since) and now - datetime.fromisoformat(since) >= timedelta(hours=health.FAIL_HOURS),
@@ -1610,12 +1613,15 @@ def footprints(close, high, low, volume, traded, chg, liquid, sectors) -> list[d
 INDEX_PERIODS = (("1W", 5), ("1M", 21), ("3M", 63), ("6M", 126), ("1Y", 250), ("3Y", 750), ("5Y", 1250))
 
 
-def index_view(d: Data) -> dict:
-    """The EGX30 page: its chart with its averages, where it stands against them and its 1-year range, its returns
-    over each period and each calendar year in pounds and in dollars (and EGX70's beside it), how jumpy it is, and
-    the agent's own rule about it (no new BUYs while it is under its 50-day average)."""
+def index_view(d: Data, symbol: str = prices.INDEX_SYMBOL) -> dict:
+    """An index's page (EGX30, or EGX70 from index_prices): its chart with its averages, where it stands against them
+    and its 1-year range, its returns over each period and each calendar year in pounds and in dollars (and the other
+    index's beside it), how jumpy it is, and, for EGX30, the agent's own rule about it (no new BUYs while it is under
+    its 50-day average)."""
+    main = symbol == prices.INDEX_SYMBOL
+
     def build():
-        df = db.load_prices(d.conn, prices.INDEX_SYMBOL)
+        df = db.load_prices(d.conn, prices.INDEX_SYMBOL) if main else db.load_index_prices(d.conn, symbol)
         if len(df) < 60:
             return {"has_data": False}
         ind = add_indicators(df)
@@ -1629,7 +1635,12 @@ def index_view(d: Data) -> dict:
                 return None
             v = raw[name].dropna()
             return v.reindex(v.index.union(c.index)).ffill().reindex(c.index)
-        usd, e70 = on_days("usdegp"), on_days("egx70")
+        if main:
+            other = on_days("egx70")
+        else:       # EGX30 on this index's days
+            e30 = db.load_prices(d.conn, prices.INDEX_SYMBOL)["close"]
+            other = e30.reindex(e30.index.union(c.index)).ffill().reindex(c.index) if len(e30) else None
+        usd = on_days("usdegp")
         in_usd = c / usd if usd is not None else None
 
         def ret(s, n):
@@ -1637,11 +1648,11 @@ def index_view(d: Data) -> dict:
             return float(s.iloc[-1] / s.iloc[-1 - n] - 1) if s is not None and len(s) > n else None
 
         start = c[c.index.year < c.index[-1].year]    # this year so far: from last year's final close
-        periods = [{"key": k, "egp": ret(c, n), "usd": ret(in_usd, n), "egx70": ret(e70, n)} for k, n in INDEX_PERIODS]
+        periods = [{"key": k, "egp": ret(c, n), "usd": ret(in_usd, n), "other": ret(other, n)} for k, n in INDEX_PERIODS]
         if len(start):
             ytd = lambda s: float(s.iloc[-1] / s.loc[:start.index[-1]].dropna().iloc[-1] - 1) \
                 if s is not None and s.loc[:start.index[-1]].notna().any() else None  # noqa: E731
-            periods.insert(4, {"key": "YTD", "egp": ytd(c), "usd": ytd(in_usd), "egx70": ytd(e70)})
+            periods.insert(4, {"key": "YTD", "egp": ytd(c), "usd": ytd(in_usd), "other": ytd(other)})
         years = []
         ends = c.groupby(c.index.year).tail(1)            # each year's last close
         for i in range(1, len(ends)):
@@ -1651,10 +1662,10 @@ def index_view(d: Data) -> dict:
                 yr["usd"] = float(in_usd[b] / in_usd[a] - 1)
             years.append(yr)
         peak = c.cummax()
-        m = market_info(d.conn)
-        b = breadth_data(d)
+        m = market_info(d.conn) if main else None
+        b = breadth_data(d) if main else None
         return {
-            "has_data": True, "date": str(ind.index[-1].date()), "close": float(last.close),
+            "has_data": True, "symbol": symbol, "other_name": "EGX70" if main else "EGX30", "date": str(ind.index[-1].date()), "close": float(last.close),
             "change": float(last.close / ind["close"].iloc[-2] - 1), "ema20": float(last.ema20), "ema50": float(last.ema50),
             "ema200": float(ema200.iloc[-1]), "rsi14": float(last.rsi14), "high52": float(year["high"].max()),
             "low52": float(year["low"].min()), "ath": float(peak.iloc[-1]), "ath_date": str(c.idxmax().date()),
@@ -1671,7 +1682,7 @@ def index_view(d: Data) -> dict:
             "usd_line": [{"time": str(t.date()), "value": round(float(v), 2)} for t, v in in_usd.dropna().iloc[::-5][::-1].items()]
             if in_usd is not None else [],
         }
-    return clean(d.cache.get(d.version, "egx30", build))
+    return clean(d.cache.get(d.version, ("index", symbol), build))
 
 
 def predictions(d: Data) -> dict:

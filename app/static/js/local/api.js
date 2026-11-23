@@ -1154,6 +1154,7 @@ async function route(path, { method = 'GET', body } = {}) {
       case 'flow': return b === 'live' ? liveFlow(c) : load('flow');
       case 'layers': return load('layers');
       case 'egx30': return load('egx30');
+      case 'egx70': return load('egx70');
       case 'predict': return predictView(c);
       case 'quotes': return quotes(c, path);
       case 'settings': return settingsView(c);

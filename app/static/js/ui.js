@@ -312,8 +312,9 @@ export function Callout({ tone: tn = '', icon, children }) {
   return html`<div class=${cls('callout', tn)}><${Icon} name=${ic} /><div>${children}</div></div>`;
 }
 
-export function PageHead({ title, sub, children }) {
-  return html`<div class="page-head"><div><h1>${tx(title)}</h1>${sub && html`<div class="sub">${tx(sub)}</div>`}</div>
+// extra: small choices that belong in the title row (EGX30 / EGX70 chips), not in a tab row of their own
+export function PageHead({ title, sub, children, extra }) {
+  return html`<div class="page-head"><div><h1>${tx(title)}${extra}</h1>${sub && html`<div class="sub">${tx(sub)}</div>`}</div>
     ${children && html`<div class="row">${children}</div>`}</div>`;
 }
 
@@ -724,11 +725,16 @@ function matches(stocks, q) {
   return [...starts, ...contains, ...names].slice(0, 60);
 }
 
+// The top search also opens the two indices' charts (EGX30's page, and its EGX70 view).
+const INDEX_ROWS = [
+  { symbol: 'EGX30', name_ar: 'إيجي إكس 30', sector: 'Index', href: '#/egx30' },
+  { symbol: 'EGX70', name_ar: 'إيجي إكس 70', sector: 'Index', href: '#/egx30?i=EGX70' },
+];
 export function StockPicker({ value, onChange, starred = [], placeholder = 'Search stocks…', search, hotkey, invalid }) {
   const listed = useStore(s => s.stocks);
   // the top search also finds rights issues: KORA_r1 while it lasts (views.rights_list), and every past one, by date
   const rights = useStore(s => s.rights), past = useStore(s => s.rightsPast);
-  const stocks = useMemo(() => listed && (search ? [...listed, ...(rights || []),
+  const stocks = useMemo(() => listed && (search ? [...INDEX_ROWS, ...listed, ...(rights || []),
     ...(past || []).filter(p => !(rights || []).some(r => r.base === p.base && r.ex_date === p.ex))] : listed), [listed, rights, past, search]);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -761,7 +767,8 @@ export function StockPicker({ value, onChange, starred = [], placeholder = 'Sear
   }, [hi]);
 
   const pick = x => {
-    if (x.ex) go(`${stockHref(x.symbol)}?ex=${x.ex}`);       // a past rights issue
+    if (x.href) go(x.href);                                   // an index: its chart page
+    else if (x.ex) go(`${stockHref(x.symbol)}?ex=${x.ex}`);  // a past rights issue
     else onChange(x.symbol);
     setOpen(false);
     setQ('');
@@ -784,7 +791,7 @@ export function StockPicker({ value, onChange, starred = [], placeholder = 'Sear
       <div class=${cls('dd-item', i === hi && 'on')} onMouseDown=${e => { e.preventDefault(); pick(x); }} onMouseEnter=${() => setHi(i)}>
         <span class="s">${star.has(x.symbol) ? '⭐ ' : ''}${x.symbol}</span>
         <span class="n"><span dir="rtl">${x.name_ar || ''}</span> <span class="faint">· ${tn(x.sector || '')}</span></span>
-        <span class="p">${x.ex ? html`<span class="faint">${fmt.date(x.ex)}</span>` : x.close != null ? html`${fmt.price(x.close)} <${Change} value=${x.change} />` : html`<span class="faint">${t('no data')}</span>`}</span>
+        <span class="p">${x.href ? html`<span class="faint">${t('Index chart')}</span>` : x.ex ? html`<span class="faint">${fmt.date(x.ex)}</span>` : x.close != null ? html`${fmt.price(x.close)} <${Change} value=${x.change} />` : html`<span class="faint">${t('no data')}</span>`}</span>
       </div>`) : html`<div class="dd-empty">${t(stocks ? 'No stock matches.' : 'Loading stocks…')}</div>`}</div>`}
   </div>`;
 }

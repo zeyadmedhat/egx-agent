@@ -7,7 +7,8 @@ import { t, tn } from '../i18n.js';
 const PERIODS = [{ value: 'chg1', label: 'Last session' }, { value: 'ret5', label: '1 week' }, { value: 'ret21', label: '1 month' }];
 const SIZES = [{ value: 'cap', label: 'Company value' }, { value: 'value', label: 'Money traded' }];
 const FULL = { chg1: 0.05, ret5: 0.10, ret21: 0.20 };      // a move this big gets the strongest colour
-const LABEL_H = 18;                                         // a sector's name above its tiles
+const LABEL_H = 18;
+const SPENT = { chg1: 'v1', ret5: 'v5', ret21: 'v21' };       // money traded over the period's sessions                                         // a sector's name above its tiles
 
 // Squarified treemap (Bruls, Huizing & van Wijk): rectangles for `items` ({weight}) filling x, y, w, h, as close to
 // squares as it can, biggest first.
@@ -61,14 +62,15 @@ export function HeatmapPage() {
   }, [data]);
 
   const tiles = (data && data.tiles) || [];
-  const used = useMemo(() => tiles.filter(x => x[size] > 0), [tiles, size]);
+  const key = size === 'cap' ? 'cap' : SPENT[period];          // what a tile's size stands for
+  const used = useMemo(() => tiles.filter(x => x[key] > 0), [tiles, key]);
   const height = width < 600 ? Math.round(width * 1.45) : Math.round(Math.min(720, Math.max(420, width * 0.6)));
   const rects = useMemo(() => {
     if (!width || !used.length) return [];
     const bySector = new Map();
     for (const x of used) {
       const s = bySector.get(x.sector) || [];
-      s.push({ ...x, weight: x[size] });
+      s.push({ ...x, weight: x[key] });
       bySector.set(x.sector, s);
     }
     const sectors = squarify([...bySector].map(([name, list]) => ({ name, list, weight: list.reduce((m, r) => m + r.weight, 0) })),
@@ -78,7 +80,7 @@ export function HeatmapPage() {
       return { ...sec, label, stocks: squarify(sec.list, sec.x + 1, sec.y + (label ? LABEL_H : 1), sec.w - 2,
         sec.h - (label ? LABEL_H : 1) - 1) };
     });
-  }, [used, size, width, height]);
+  }, [used, key, width, height]);
 
   if (!data) return html`<${PageHead} title="Heatmap" /><${PageLoading} error=${error} />`;
   if (!tiles.length) {
@@ -112,9 +114,10 @@ export function HeatmapPage() {
             return html`<a class=${strong ? 'heat-tile strong' : 'heat-tile'} key=${x.symbol} href=${stockHref(x.symbol)}
               onClick=${e => { e.preventDefault(); go(stockHref(x.symbol)); }}
               style=${`left:${x.x}px;top:${x.y}px;width:${Math.max(0, x.w - 1)}px;height:${Math.max(0, x.h - 1)}px;background:${colour(v, full)};font-size:${fs}px`}
-              title=${`${x.symbol} · ${tn(x.sector)} · ${v == null ? '–' : fmt.pct(v, 1)} · ${fmt.short(x[size])} EGP`}>
+              title=${`${x.symbol} · ${tn(x.sector)} · ${v == null ? '–' : fmt.pct(v, 1)} · ${fmt.short(x[key])} ${t('EGP')}`}>
               ${x.w > 30 && x.h > 16 && html`<b>${x.symbol}</b>`}
-              ${x.w > 38 && x.h > 32 && html`<span>${v == null ? '–' : fmt.pct(Math.abs(v) < 0.0005 ? 0 : v, 1)}</span>`}</a>`;
+              ${x.w > 38 && x.h > 32 && html`<span>${v == null ? '–' : fmt.pct(Math.abs(v) < 0.0005 ? 0 : v, 1)}</span>`}
+              ${x.w > 64 && x.h > 54 && html`<small>${fmt.short(x[key])}</small>`}</a>`;
           })}`)}
       </div>
     </div>
@@ -123,8 +126,11 @@ export function HeatmapPage() {
       ${[-1, -0.6, -0.3, -0.1, 0, 0.1, 0.3, 0.6, 1].map(k => html`<i style=${`background:${colour(k * full, full)}`}></i>`)}
       <span>${fmt.pct(full, 0)}</span>
     </div>
+    <div class="heat-total"><span>${t(size === 'cap' ? 'Company value of these stocks' : 'Money traded')}</span>
+      <b>${fmt.short(used.reduce((m, x) => m + x[key], 0))} ${t('EGP')}</b>
+      ${size !== 'cap' && html`<small class="faint">${t({ chg1: 'last session', ret5: 'last 5 sessions', ret21: 'last 21 sessions' }[period])}</small>`}</div>
     <p class="faint" style="font-size:12px;margin-top:8px">${size === 'cap'
-      ? t("Size: the company's market value (TradingView). {n} stocks have none and are left out. Switch to Money traded to see them.", { n: left })
-      : t('Size: average money traded a day (last 20 sessions).')}
+      ? t("Size: the company's market value (TradingView, updated every evening). {n} stocks have none and are left out. Switch to Money traded to see them.", { n: left })
+      : t('Size: money traded in the stock over the chosen period (price × shares, each session added up).')}
       ${' '}${t('A move over 30% in one day shows as –. It\'s a split or bonus shares.')}</p>`;
 }

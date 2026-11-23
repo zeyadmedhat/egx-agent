@@ -61,7 +61,7 @@ const PAGES = Object.fromEntries(Object.entries({
 // bookmarks still work (#/signals is Picks, #/predict its Rankings). Settings and Admin sit in the ⚙ menu.
 const SECTIONS = [
   { id: 'home', label: 'Home', icon: 'home',
-    tabs: [['today', 'Summary'], ['market', 'Market', [['market', 'Overview'], ['egx30', 'EGX30'], ['heatmap', 'Heatmap'], ['sectors', 'Sectors']]],
+    tabs: [['today', 'Summary'], ['market', 'Market', [['market', 'Overview'], ['egx30', 'Indices'], ['heatmap', 'Heatmap'], ['sectors', 'Sectors']]],
       ['flow', 'Money flow'], ['news', 'News & dates', [['news', 'News'], ['dividends', 'Dividends & results']]]] },
   { id: 'picks', label: 'Picks', icon: 'target', tabs: [['signals', 'Picks'], ['predict', 'Rankings'], ['layers', '7 Layers'], ['record', 'Track record']] },
   { id: 'stocks', label: 'Stocks', icon: 'chart', tabs: [['stock', 'Stock'], ['compare', 'Compare'], ['screener', 'Screener'], ['watchlist', 'Watchlist'], ['rights', 'Rights issues']] },
@@ -131,8 +131,8 @@ function SubNav({ page }) {
   return html`<nav class="subnav" aria-label=${t(sec.label)}>${sec.tabs.map(x => html`<a href=${`#/${x[0]}`}
     class=${cls(x === tab && 'on')} aria-current=${x === tab ? 'page' : undefined}>${t(x[1])}
     ${x[0] === 'signals' && html`<${Count} id="signals" counts=${counts} />`}</a>`)}</nav>
-    ${group && group.length > 1 && html`<nav class="subswitch seg" aria-label=${t(tab[1])}>${group.map(([g, gl]) => html`<a href=${`#/${g}`}
-      class=${cls('seg-btn', g === page && 'on')} aria-current=${g === page ? 'page' : undefined}>${t(gl)}</a>`)}</nav>`}`;
+    ${group && group.length > 1 && html`<nav class="subswitch" aria-label=${t(tab[1])}>${group.map(([g, gl]) => html`<a href=${`#/${g}`}
+      class=${cls(g === page && 'on')} aria-current=${g === page ? 'page' : undefined}>${t(gl)}</a>`)}</nav>`}`;
 }
 
 // On a phone the sections move to a bar at the bottom of the screen, within reach of your thumb.

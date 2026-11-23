@@ -554,6 +554,10 @@ def create_app(db_path: Path | str = config.DB_PATH, autoscan: bool = True, mult
     def egx30(d: views.Data = Depends(get_data)):
         return JSON(views.index_view(d))
 
+    @app.get("/api/egx70")
+    def egx70(d: views.Data = Depends(get_data)):
+        return JSON(views.index_view(d, "EGX70"))
+
     @app.put("/api/orders/check")
     def order_check(body: CheckIn, conn=Depends(get_conn)):
         if body.done:

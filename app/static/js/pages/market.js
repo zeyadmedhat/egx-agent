@@ -1,12 +1,13 @@
 // Market overview: breadth (how many stocks rise with the index), the biggest movers and which sectors lead. Context
 // only; the BUY rules don't use it. The coming results dates are on the Dividends & results tab.
-import { html, useApi, useState, useStore, fmt, tone, stockHref } from '../lib.js';
+import { html, useApi, useState, useStore, fmt, tone, stockHref, remember } from '../lib.js';
 import {
-  Callout, PageHead, SectionHead, PageLoading, DataTable, Empty, MarketSwitch, Seg, SessionBadge,
+  Callout, PageHead, PageLoading, DataTable, Empty, MarketSwitch, Seg, SessionBadge,
   Fold, More, sessionState,
 } from '../ui.js';
 import { t, tp, tn, isAr } from '../i18n.js';
 import { BreadthChart, MoodChart } from '../charts.js';
+import { squarify } from './heatmap.js';
 
 const TONE = { ok: 'ok', warn: 'warn', bad: 'bad' };
 
@@ -17,8 +18,28 @@ function Heat({ v }) {
   return html`<span class="heat" style=${`background:color-mix(in srgb, ${color} ${strength}%, transparent)`}>${fmt.pct(v, 1)}</span>`;
 }
 
+// The overview's boxes, in the order you set (Arrange): kept in this browser.
+const BOXES = ['activity', 'flow', 'heat', 'movers', 'updown', 'rates', 'mood'];
+const savedOrder = () => {
+  let got = [];
+  try { got = JSON.parse(remember('market-order') || '[]'); } catch { /* the default order */ }
+  return [...got.filter(k => BOXES.includes(k)), ...BOXES.filter(k => !got.includes(k))];
+};
+// Each box's width on a laptop: a third, half or the whole row (a phone always shows one box a row).
+const SIZES = ['small', 'half', 'wide'];
+const SIZE_NAMES = { small: 'Small', half: 'Half', wide: 'Wide' };
+const DEFAULT_SIZES = { mood: 'wide' };
+const savedSizes = () => {
+  try { return { ...DEFAULT_SIZES, ...JSON.parse(remember('market-sizes') || '{}') }; } catch { return { ...DEFAULT_SIZES }; }
+};
+
 export function MarketPage() {
   const { data, error } = useApi('/market');
+  const flow = useApi('/flow').data;
+  const [order, setOrder] = useState(savedOrder);
+  const [sizes, setSizes] = useState(savedSizes);
+  const [arrange, setArrange] = useState(false);
+  const [drag, setDrag] = useState(null);
   if (!data) return html`<${PageLoading} error=${error} />`;
   const b = data.breadth;
   if (!b) {
@@ -27,15 +48,47 @@ export function MarketPage() {
   }
   const v = data.verdict;
   const change = v.change_week;
+  const boxes = {
+    activity: data.activity && data.activity.days.length > 0 && html`<${Activity} a=${data.activity} />`,
+    flow: flow && flow.investors && flow.investors.length > 0 && html`<${FlowCard} days=${flow.investors} latest=${b.date} />`,
+    heat: data.tiles && data.tiles.length > 0 && html`<${SectorHeat} tiles=${data.tiles} />`,
+    movers: data.movers && html`<${Movers} data=${data} />`,
+    updown: data.tiles && data.tiles.length > 0 && html`<${Participation} tiles=${data.tiles} />`,
+    rates: data.rates && (data.rates.interest || data.rates.inflation) && html`<${Rates} r=${data.rates} />`,
+    mood: data.mood && html`<${Mood} m=${data.mood} />`,
+  };
+  const shown = order.filter(k => boxes[k]);
+  const save = list => { setOrder(list); remember('market-order', JSON.stringify(list)); };
+  const resize = (k, size) => setSizes(s => { const n = { ...s, [k]: size }; remember('market-sizes', JSON.stringify(n)); return n; });
+  const reset = () => { save(BOXES); setSizes({ ...DEFAULT_SIZES }); remember('market-sizes', '{}'); };
+  // moves a shown box; boxes without data today keep their place in the saved order
+  const reorder = (from, to) => {
+    const list = order.filter(k => k !== from);
+    list.splice(list.indexOf(to) + (order.indexOf(from) < order.indexOf(to) ? 1 : 0), 0, from);
+    save(list);
+  };
+  const place = (from, to) => reorder(from, to);
+  const move = (i, step) => reorder(shown[i], shown[i + step]);
   return html`
     <${PageHead} title="Market" sub=${t('How many stocks rise with the index, from {date}.', { date: fmt.date(b.date) })}>
       <${SessionBadge} dataDate=${b.date} /><//>
     ${data.indices && data.indices.length > 0 && html`<${Strip} rows=${data.indices} />`}
-    <div class="grid grid-2 mkt-pair">
-      ${data.activity && data.activity.days.length > 0 && html`<${Activity} a=${data.activity} />`}
-      ${data.tiles && data.tiles.length > 0 && html`<${Participation} tiles=${data.tiles} />`}
+    <div class="arrange-bar">${arrange
+      ? html`<span class="faint s">${t('Drag a box, or use its arrows. Pick each box\'s size. Kept on this device.')}</span>
+        <button class="btn sm ghost" onClick=${reset}>${t('Reset')}</button>
+        <button class="btn sm" onClick=${() => setArrange(false)}>${t('Done')}</button>`
+      : html`<button class="btn sm ghost" onClick=${() => setArrange(true)}>⇅ ${t('Arrange boxes')}</button>`}</div>
+    <div class="mkt-boxes">
+      ${shown.map((k, i) => html`<div key=${k} class=${'box-slot size-' + (sizes[k] || 'half') + (arrange ? ' arranging' : '') + (drag === k ? ' dragging' : '')}
+          draggable=${arrange} onDragStart=${() => setDrag(k)} onDragEnd=${() => setDrag(null)}
+          onDragOver=${e => arrange && e.preventDefault()} onDrop=${e => { e.preventDefault(); if (drag && drag !== k) place(drag, k); setDrag(null); }}>
+        ${arrange && html`<div class="box-tools"><span>⠿ ${t(BOX_NAMES[k])}</span>
+          <button class="icon-btn" disabled=${i === 0} onClick=${() => move(i, -1)} aria-label=${t('Move up')}>↑</button>
+          <button class="icon-btn" disabled=${i === shown.length - 1} onClick=${() => move(i, 1)} aria-label=${t('Move down')}>↓</button>
+          <div class="box-size" role="group" aria-label=${t('Box size')}>${SIZES.map(z => html`<button
+            class=${(sizes[k] || 'half') === z ? 'on' : ''} onClick=${() => resize(k, z)}>${t(SIZE_NAMES[z])}</button>`)}</div></div>`}
+        ${boxes[k]}</div>`)}
     </div>
-    ${data.mood && html`<${Mood} m=${data.mood} />`}
     <${Callout} tone=${TONE[v.tone]}><b>${t(v.text)}</b>${change != null
       ? ' ' + t(change >= 0 ? '{pct} of {n} stocks are above their 50-day average. Up {pts} points in a week.'
         : '{pct} of {n} stocks are above their 50-day average. Down {pts} points in a week.',
@@ -43,49 +96,15 @@ export function MarketPage() {
       : ''}<//>
     ${v.switch && html`<div style="margin-top:10px"><${MarketSwitch} sw=${v.switch} compact /></div>`}
 
-    ${data.movers && html`<${Movers} data=${data} />`}
-    ${data.rates && (data.rates.interest || data.rates.inflation) && html`<${Rates} r=${data.rates} />`}
-
-    <section class="section">
-      <${SectionHead} title="Sectors" count=${b.sectors.length}
-        hint="The middle return of the sector's stocks. A sector of one or two stocks moves with those names." />
-      <${SectorBars} rows=${b.sectors} />
-      ${data.sector_money && data.sector_money.length > 0 && html`<${SectorMoney} rows=${data.sector_money} />`}
-    </section>
     <${Fold} title="Stocks in uptrend vs EGX30" hint="1 year. When most stocks are above their averages, breakouts have more support." flush>
       <${BreadthChart} h=${b.history} /><//>`;
-}
-
-// Sectors as bars from a middle line: right and green if its stocks rose (median), left and red if they fell.
-const SECTOR_SPANS = [{ value: 'r5', label: '1 week' }, { value: 'r21', label: '1 month' }, { value: 'r63', label: '3 months' }];
-function SectorBars({ rows }) {
-  const [k, setK] = useState('r21');
-  // a sector of one or two stocks is those names alone: they go last, under their own line
-  const list = rows.filter(r => r[k] != null).sort((a, b) => (a.stocks < 3) - (b.stocks < 3) || b[k] - a[k]);
-  if (!list.length) return null;
-  const sizes = list.map(r => Math.abs(r[k])).sort((a, b) => b - a);
-  const max = Math.max(0.001, sizes[1] ?? sizes[0]);       // one runaway sector fills its half instead of shrinking the rest
-  const big = list.filter(r => r.stocks >= 3);              // a sector of one or two stocks is those names alone
-  const [top, low] = big.length ? [big[0], big[big.length - 1]] : [list[0], list[list.length - 1]];
-  return html`<div class="card inv sec">
-    <div class="inv-top"><div class="card-title" style="margin:0">${t('Which sectors rose')}</div>
-      <${Seg} options=${SECTOR_SPANS} value=${k} onChange=${setK} /></div>
-    <p class="inv-say">${tp('Strongest: {a} ({x}); weakest: {b} ({y}).', {
-      a: html`<b class=${tone(top[k])}>${tn(top.sector)}</b>`, x: fmt.pct(top[k], 1),
-      b: html`<b class=${tone(low[k])}>${tn(low.sector)}</b>`, y: fmt.pct(low[k], 1) })}</p>
-    <div class="inv-axis"><span></span><div><span>${t('Fell')}</span><span>${t('Rose')}</span></div><span></span></div>
-    ${list.map((r, i) => html`${i > 0 && r.stocks < 3 && list[i - 1].stocks >= 3 && html`<p class="faint inv-small">${t('Sectors of one or two stocks')}</p>`}<div class="inv-row"><span class=${r.stocks < 3 ? 'faint' : ''} title=${tn(r.sector)}>${tn(r.sector)}</span>
-      <div class="inv-track"><span class=${`inv-bar ${r[k] >= 0 ? 'up' : 'down'}`}
-        style=${`${r[k] >= 0 ? 'inset-inline-start' : 'inset-inline-end'}:50%;width:${Math.min(1, Math.abs(r[k]) / max) * 50}%`}></span></div>
-      <b class=${`inv-v ${tone(r[k])}`}>${fmt.pct(r[k], 1)}</b></div>`)}
-  </div>`;
 }
 
 // Money by sector: each sector's share of the money traded at the last close (the bar) against its usual share over
 // the 20 sessions before (the line), biggest first (views.movers).
 const SECTORS_SHOWN = 8;
 const VS_USUAL = r => (r.usual == null ? '' : r.share >= r.usual * 1.25 ? 'up' : r.share <= r.usual * 0.8 ? 'down' : '');
-function SectorMoney({ rows }) {
+export function SectorMoney({ rows }) {
   const [all, setAll] = useState(false);
   const max = Math.max(...rows.map(r => Math.max(r.share, r.usual || 0)));
   const jump = rows.filter(r => r.usual && r.share >= 0.03).sort((a, b) => b.share / b.usual - a.share / a.usual)[0];
@@ -105,7 +124,14 @@ function SectorMoney({ rows }) {
   </div>`;
 }
 
+const BOX_NAMES = { activity: 'Market activity', flow: 'Who bought and who sold', heat: 'Heatmap', movers: 'Biggest movers',
+  updown: 'Up and down', rates: 'Interest and inflation', mood: 'Market mood' };
 const PERIODS = [{ value: 'chg1', label: 'Last session' }, { value: 'ret5', label: '1 week' }, { value: 'ret21', label: '1 month' }];
+
+function Head({ title, href, children }) {
+  return html`<div class="ov-head"><div class="card-title">${t(title)}</div>${children}
+    ${href && html`<a class="ov-go" href=${href} aria-label=${t('See all')} title=${t('See all')}>→</a>`}</div>`;
+}
 
 // The actively traded stocks that moved most, and the most traded: each a bar, longest = the biggest in the list.
 function Movers({ data }) {
@@ -122,18 +148,19 @@ function Movers({ data }) {
       ${extra && html`<span class=${`mbar-chg ${tone(r.ret)}`}>${fmt.pct(r.ret, 1)}</span>`}
     </a>`)}</div>`;
   const most = data.active && data.active.length ? Math.max(...data.active.map(r => r.value)) : 1;
-  return html`
-    <section class="section">
-      <${SectionHead} title="Biggest movers" hint="Actively traded stocks only. Splits and bonus shares are left out.">
-        <${Seg} options=${PERIODS} value=${period} onChange=${setPeriod} /><//>
-      <div class="grid grid-2">
-        <div class="card"><div class="card-title up">${t('Rose most')}</div>${bars(m.up, r => Math.abs(r.ret) / top, r => fmt.pct(r.ret, 1))}</div>
-        <div class="card"><div class="card-title down">${t('Fell most')}</div>${bars(m.down, r => Math.abs(r.ret) / top, r => fmt.pct(r.ret, 1))}</div>
-      </div>
-      ${data.active && data.active.length > 0 && html`<div class="card" style="margin-top:14px">
-        <div class="card-title">${t('Most traded at the last session')}<span class="right faint">${t('money traded · change on the day')}</span></div>
-        ${bars(data.active, r => r.value / most, r => `${fmt.short(r.value)} ${t('EGP')}`, true)}</div>`}
-    </section>`;
+  const [tab, setTab] = useState('up');
+  const tabs = [['up', 'Rose most', '▲'], ['down', 'Fell most', '▼'], ...(data.active && data.active.length ? [['active', 'Most traded', '●']] : [])];
+  return html`<div class="card">
+    <${Head} title="Biggest movers" href="#/screener" />
+    <div class="mv-tabs">${tabs.map(([k, label, mark]) => html`<button class=${'mv-tab ' + k + (tab === k ? ' on' : '')}
+      onClick=${() => setTab(k)}><i>${mark}</i>${t(label)}</button>`)}</div>
+    ${tab === 'active'
+      ? html`<p class="faint s">${t('At the last session · money traded and the change on the day')}</p>
+        ${bars(data.active, r => r.value / most, r => `${fmt.short(r.value)} ${t('EGP')}`, true)}`
+      : html`<div class="mv-seg"><${Seg} options=${PERIODS} value=${period} onChange=${setPeriod} /></div>
+        ${bars(m[tab], r => Math.abs(r.ret) / top, r => fmt.pct(r.ret, 1))}`}
+    <p class="faint s">${t('Actively traded stocks only. Splits and bonus shares are left out.')}</p>
+  </div>`;
 }
 
 // Market mood (egx_agent/mood.py): a fear & greed gauge built like CNN's from six EGX measures, each scored against
@@ -187,10 +214,15 @@ const net2 = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v) >= 1000 ? (M
 
 export function Investors({ days, latest }) {
   const [n, setN] = useState(1);
+  const [pick, setPick] = useState(null);                  // the session the chart points at; null: the last one
+  const daily = n === 1;
+  // last session: that one day, no chart; a week or a month: added up, with a chart to touch
   const use = days.slice(-n);
-  const sum = (g, k) => use.reduce((a, d) => a + ((d[g] || {})[k] || 0), 0);
-  const span = use.length === 1 ? fmt.date(use[0].date)
-    : t('{from} – {to} · {n} sessions', { from: fmt.date(use[0].date, false), to: fmt.date(use[use.length - 1].date, false), n: use.length });
+  const i = pick == null ? use.length - 1 : Math.min(pick, use.length - 1);
+  const upto = use.slice(0, i + 1);
+  const sum = (g, k) => upto.reduce((a, d) => a + ((d[g] || {})[k] || 0), 0);
+  const span = daily || upto.length === 1 ? fmt.date(upto[upto.length - 1].date)
+    : t('{from} – {to} · {n} sessions', { from: fmt.date(upto[0].date, false), to: fmt.date(upto[upto.length - 1].date, false), n: upto.length });
   const last = days[days.length - 1].date;
   const swatch = (g, k) => html`<i class=${`invt-key ${k === 'individuals' ? 'dash' : ''}`} style=${`--c:${FLOW_COLORS[g]}`}></i>`;
   return html`<section class="card inv">
@@ -199,8 +231,9 @@ export function Investors({ days, latest }) {
     ${latest > last && html`<p class="faint s" style="margin:4px 0 0">${t(latest === sessionState().day
       ? "{date}'s numbers come out about 5 pm. These go up to {last}." : 'No numbers for {date}. These go up to {last}.',
       { date: fmt.date(latest, false), last: fmt.date(last, false) })}</p>`}
-    ${days.length > 2 && html`<${FlowLines} days=${days} />`}
-    <div class="invt-seg"><${Seg} options=${SPANS} value=${n} onChange=${setN} /></div>
+    ${!daily && use.length > 1 && html`<${FlowLines} days=${use} pick=${i} onPick=${setPick} />`}
+    <div class="invt-seg"><${Seg} options=${SPANS} value=${n} onChange=${v => { setN(v); setPick(null); }} /></div>
+    <p class="invt-when"><b>${span}</b></p>
     <table class="invt">
       <thead><tr><th></th><th>${t('Net')}</th></tr></thead>
       ${GROUPS.map(([g, name]) => {
@@ -212,16 +245,64 @@ export function Investors({ days, latest }) {
         </tbody>`;
       })}
     </table>
-    <p class="faint inv-note">${span}. ${t("From the exchange's daily report, via Youm7 or Hapi Journal.")}
-      ${use.length < n ? ' ' + t('Only {k} sessions have these numbers so far.', { k: use.length }) : ''}</p>
+    <p class="faint inv-note">${t("From the exchange's daily report, via Youm7 or Hapi Journal. It comes once a day, after the close, so there are no numbers inside a session.")}
+      ${!daily && days.length < n ? ' ' + t('Only {k} sessions have these numbers so far.', { k: days.length }) : ''}</p>
   </section>`;
 }
 
 // The top strip: EGX30, EGX70, the dollar and gold, each with its change on the last session (views.market_strip).
+const INDEX_HREF = { EGX30: '#/egx30', EGX70: '#/egx30?i=EGX70' };
 function Strip({ rows }) {
-  return html`<div class="mkt-strip">${rows.map(r => html`<div key=${r.name}>
-    <span>${t(r.name)}</span><b>${r.name.startsWith('EGX') ? fmt.int(r.value) : fmt.num(r.value, 2)}</b>
-    <small class=${tone(r.change)}>${r.change > 0 ? '▲' : r.change < 0 ? '▼' : ''} ${fmt.pct(Math.abs(r.change), 2, false)}</small></div>`)}</div>`;
+  const cell = r => html`<span>${t(r.name)}</span><b>${r.name.startsWith('EGX') ? fmt.int(r.value) : fmt.num(r.value, 2)}</b>
+    <small class=${tone(r.change)}>${r.change > 0 ? '▲' : r.change < 0 ? '▼' : ''} ${fmt.pct(Math.abs(r.change), 2, false)}</small>`;
+  return html`<div class="mkt-strip">${rows.map(r => (INDEX_HREF[r.name]
+    ? html`<a key=${r.name} class="mkt-link" href=${INDEX_HREF[r.name]} title=${t('Open its chart')}>${cell(r)}<i class="mkt-go">→</i></a>`
+    : html`<div key=${r.name}>${cell(r)}</div>`))}</div>`;
+}
+
+// Who bought and who sold at the last session (Thndr's Investor Flow): each group's individuals and institutions as a
+// bar from the middle line, bought to the right in green and sold to the left in red. The full card is on Money flow.
+function FlowCard({ days, latest }) {
+  const d = days[days.length - 1];
+  const v = (g, k) => (d[g] || {})[k] || 0;
+  const top = Math.max(0.001, ...GROUPS.flatMap(([g]) => KINDS.map(([k]) => Math.abs(v(g, k)))));
+  return html`<div class="card inv">
+    <${Head} title="Who bought and who sold" href="#/flow" />
+    <p class="faint s" style="margin:0 0 6px">${fmt.date(d.date)} · ${t('net, in pounds')}${latest > d.date
+      ? ' · ' + t(latest === sessionState().day ? "{date}'s numbers come out about 5 pm." : 'No numbers for {date} yet.', { date: fmt.date(latest, false) }) : ''}</p>
+    ${GROUPS.map(([g, name]) => html`<div key=${g} class="fc-group"><b>${t(name)}</b>
+      ${KINDS.map(([k, kn]) => html`<div class="inv-row"><span class="muted">${t(kn)}</span>
+        <div class="inv-track"><span class=${`inv-bar ${v(g, k) >= 0 ? 'up' : 'down'}`}
+          style=${`${v(g, k) >= 0 ? 'inset-inline-start' : 'inset-inline-end'}:50%;width:${Math.max(1, (Math.abs(v(g, k)) / top) * 50)}%`}></span></div>
+        <b class=${`inv-v ${tone(v(g, k))}`}>${net2(v(g, k))}</b></div>`)}</div>`)}
+  </div>`;
+}
+
+// Sectors as a small heatmap: each sector's tile sized by its companies' value, coloured by how much that value moved
+// at the last session (the full stock-by-stock map is the Heatmap tab).
+function SectorHeat({ tiles }) {
+  const by = new Map();
+  for (const x of tiles) {
+    if (!(x.cap > 0) || x.chg1 == null) continue;
+    const s = by.get(x.sector) || { name: x.sector, weight: 0, moved: 0 };
+    s.weight += x.cap; s.moved += x.cap * x.chg1;
+    by.set(x.sector, s);
+  }
+  const W = 100, H = 70;
+  const rects = squarify([...by.values()], 0, 0, W, H);
+  if (!rects.length) return null;
+  const colour = v => (Math.abs(v) < 0.0005 ? 'var(--panel-3)'
+    : `color-mix(in srgb, ${v > 0 ? 'var(--up)' : 'var(--down)'} ${Math.round(25 + 60 * Math.min(1, Math.abs(v) / 0.04))}%, var(--panel-2))`);
+  return html`<div class="card">
+    <${Head} title="Heatmap" href="#/heatmap" />
+    <div class="sh-map" role="img" aria-label=${t('Sectors at the last session')}>${rects.map(r => {
+      const v = r.moved / r.weight;
+      return html`<a key=${r.name} class="sh-tile" href="#/heatmap" title=${`${tn(r.name)} · ${fmt.pct(v, 2)} · ${fmt.short(r.weight)} ${t('EGP')}`}
+        style=${`left:${r.x}%;top:${(r.y / H) * 100}%;width:${r.w}%;height:${(r.h / H) * 100}%;background:${colour(v)}`}>
+        ${r.w > 9 && r.h > 7 && html`<b>${tn(r.name)}</b>`}${r.w > 10 && r.h > 10 && html`<span>${fmt.pct(v, 2)}</span>`}</a>`;
+    })}</div>
+    <p class="faint s">${t("Last session. Bigger tile: more company value. The change is the sector's companies together, by value.")}</p>
+  </div>`;
 }
 
 const weekday = iso => new Date(`${iso}T12:00`).toLocaleDateString(isAr() ? 'ar-EG' : 'en-GB', { weekday: 'short' });
@@ -239,7 +320,7 @@ function Activity({ a }) {
   const partial = i === days.length - 1 && prev && last.stocks < prev.stocks - 5;
   const kinds = [['value', 'Money traded', v => `${fmt.short(v)} ${t('EGP')}`], ['volume', 'Shares traded', v => fmt.short(v)]];
   return html`<div class="card">
-    <div class="card-title" style="margin:0">${t('Market activity')}</div>
+    <${Head} title="Market activity" />
     <p class="faint s" style="margin:4px 0 0">${fmt.date(day.date)}${day[k] && usual
       ? ' · ' + t(day[k] >= usual ? '{p} above a usual day' : '{p} below a usual day', { p: fmt.pct(Math.abs(day[k] / usual - 1), 0, false) }) : ''}</p>
     <div class="act-tabs">${kinds.map(([key, label, show]) => html`<button class=${'act-tab' + (k === key ? ' on' : '')}
@@ -267,7 +348,7 @@ function Participation({ tiles }) {
   const top = Math.max(1, ...Object.values(n));
   const down = moves.filter(v => step(v) < 0).length, up = moves.filter(v => step(v) > 0).length;
   return html`<div class="card">
-    <div class="card-title">${t('Up and down')}</div>
+    <${Head} title="Up and down" href="#/heatmap" />
     <div class="part-bars">${STEPS.map(k => html`<div class="part-col" key=${k} title=${`${n[k]}`}>
       <b>${n[k] || ''}</b><div class=${'part-bar ' + (k < 0 ? 'down' : k > 0 ? 'up' : 'flat')} style=${`height:${(n[k] / top) * 100}%`}></div>
       <span>${k === 0 ? '0' : `${k > 0 ? '+' : '−'}${Math.abs(k)}${Math.abs(k) === 4 ? '+' : ''}`}</span></div>`)}</div>
@@ -283,43 +364,65 @@ function Rates({ r }) {
   const cell = (label, x, goodDown) => x && html`<div><span>${t(label)}</span><b>${fmt.num(x.value, 2)}%</b>
     ${x.change != null && html`<small class=${tone(goodDown ? -x.change : x.change)}>${x.change > 0 ? '+' : '−'}${fmt.num(Math.abs(x.change), 2)} ${t('pts')}</small>`}</div>`;
   const real = r.interest && r.inflation ? r.interest.value - r.inflation.value : null;
-  return html`<section class="section"><div class="card">
-    <div class="card-title">${t('Interest and inflation')}</div>
+  return html`<div class="card">
+    <${Head} title="Interest and inflation" />
     <div class="mkt-strip flat">
       ${cell('Interbank rate', r.interest, false)}
       ${cell('Inflation (a year)', r.inflation, true)}
       ${real != null && html`<div><span>${t('Rate above inflation')}</span><b>${fmt.num(real, 2)} ${t('pts')}</b></div>`}
     </div>
     <p class="faint s">${t('From TradingView. The interbank rate is what banks charge each other overnight; the central bank sets it close to its own rate.')}</p>
-  </div></section>`;
+  </div>`;
 }
 
 // The flows over the shown sessions, added up day by day: one line each, solid for institutions and dashed for
 // individuals, a colour for Egyptians, Arabs and foreigners. The last point is the total on the bars below.
 const FLOW_COLORS = { egyptians: 'var(--accent)', arabs: 'var(--up)', foreigners: 'var(--warn)' };
-function FlowLines({ days }) {
+function FlowLines({ days, pick, onPick }) {
   const W = 600, H = 170, P = 8;
   // a one-off day far bigger than the rest (one block deal, or a misread report) would flatten every other line: it's
-  // left out of the lines (still in the table) and named under the chart
+  // left out of the added-up lines and out of the scale (the table keeps it), and named under the chart
   const size = d => GROUPS.reduce((a, [g]) => a + KINDS.reduce((b, [k]) => b + Math.abs((d[g] || {})[k] || 0), 0), 0);
   const sizes = days.map(size).sort((a, b) => a - b);
   const mid = sizes[Math.floor(sizes.length / 2)] || 1;
   const odd = days.filter(d => size(d) > 6 * mid);
   const lines = GROUPS.flatMap(([g]) => KINDS.map(([k]) => {
     let run = 0;
-    return { g, k, pts: days.map(d => (run += odd.includes(d) ? 0 : ((d[g] || {})[k] || 0))) };
+    const v = d => (d[g] || {})[k] || 0;
+    return { g, k, pts: days.map(d => (run += odd.includes(d) ? 0 : v(d))) };
   }));
   const all = lines.flatMap(l => l.pts).concat(0);
   const lo = Math.min(...all), hi = Math.max(...all), span = hi - lo || 1;
-  const x = i => P + (i / Math.max(days.length - 1, 1)) * (W - 2 * P - 6), y = v => P + (1 - (v - lo) / span) * (H - 2 * P);
+  const x = j => P + (j / Math.max(days.length - 1, 1)) * (W - 2 * P - 6);
+  const y = v => P + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / span) * (H - 2 * P);
+  // drag, hover or touch: the nearest session; arrow keys too
+  const at = e => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const f = (e.clientX - r.left) / r.width;
+    const px = f * W;                              // the chart reads left to right in both languages (dir="ltr")
+    onPick(Math.max(0, Math.min(days.length - 1, Math.round(((px - P) / (W - 2 * P - 6)) * (days.length - 1)))));
+  };
+  const key = e => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); onPick(Math.max(0, Math.min(days.length - 1, pick + (e.key === 'ArrowRight' ? 1 : -1)))); }
+  };
+  const gx = (x(pick) / W) * 100;
   return html`<div class="flow-lines">
-    <div class="flow-plot"><svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label=${t('Flows added up over {n} sessions', { n: days.length })}>
-      <line x1=${P} x2=${W - P} y1=${y(0)} y2=${y(0)} class="zero" vector-effect="non-scaling-stroke" />
-      ${lines.map(l => html`<path d=${l.pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')}
-        fill="none" stroke=${FLOW_COLORS[l.g]} stroke-width="2.2" stroke-dasharray=${l.k === 'individuals' ? '5 4' : ''}
-        stroke-linejoin="round" vector-effect="non-scaling-stroke" />`)}
-    </svg>${lines.map(l => html`<i class="fl-end" style=${`left:${(x(l.pts.length - 1) / W) * 100}%;top:${(y(l.pts[l.pts.length - 1]) / H) * 100}%;background:${FLOW_COLORS[l.g]}`}></i>`)}</div>
-    <p class="faint s">${t('Added up over the last {n} sessions ({from} – {to}). Solid: institutions. Dashed: individuals.', { n: days.length, from: fmt.date(days[0].date, false), to: fmt.date(days[days.length - 1].date, false) })}${odd.length
+    <div class="fl-when" style=${`left:${Math.max(12, Math.min(88, gx))}%`}>${fmt.date(days[pick].date, false)}</div>
+    <div class="flow-plot" dir="ltr" tabindex="0" role="slider" aria-valuemin="1" aria-valuemax=${days.length} aria-valuenow=${pick + 1}
+        aria-valuetext=${fmt.date(days[pick].date)} aria-label=${t('Pick a session on the chart')}
+        onPointerDown=${e => { e.currentTarget.setPointerCapture(e.pointerId); at(e); }} onPointerMove=${e => (e.pointerType === 'mouse' || e.buttons) && at(e)}
+        onKeyDown=${key}>
+      <svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label=${t('Flows added up over {n} sessions', { n: days.length })}>
+        <line x1=${P} x2=${W - P} y1=${y(0)} y2=${y(0)} class="zero" vector-effect="non-scaling-stroke" />
+        ${lines.map(l => html`<path d=${l.pts.map((v, j) => `${j ? 'L' : 'M'}${x(j).toFixed(1)},${y(v).toFixed(1)}`).join('')}
+          fill="none" stroke=${FLOW_COLORS[l.g]} stroke-width="2.2" stroke-dasharray=${l.k === 'individuals' ? '5 4' : ''}
+          stroke-linejoin="round" vector-effect="non-scaling-stroke" />`)}
+      </svg>
+      <i class="fl-guide" style=${`left:${gx}%`}></i>
+      ${lines.map(l => html`<i class="fl-end" style=${`left:${gx}%;top:${(y(l.pts[pick]) / H) * 100}%;background:${FLOW_COLORS[l.g]}`}></i>`)}
+    </div>
+    <p class="faint s">${t('Added up over the last {n} sessions ({from} – {to}). Touch or drag on the chart to see the total up to a session. Solid: institutions. Dashed: individuals.',
+      { n: days.length, from: fmt.date(days[0].date, false), to: fmt.date(days[days.length - 1].date, false) })}${odd.length
       ? ' ' + t('Left out of the lines, far bigger than a usual day: {days}.', { days: odd.map(d => fmt.date(d.date, false)).join(', ') }) : ''}</p>
   </div>`;
 }
