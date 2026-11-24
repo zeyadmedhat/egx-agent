@@ -21,10 +21,6 @@ on:
         description: "Download the latest prices and scan now (untick to only rebuild the site)"
         type: boolean
         default: true
-      quick:
-        description: "Only rebuild and publish: the slow news waits for the next run (the AI forecasts' job ticks it)"
-        type: boolean
-        default: false
   push:
     branches: [main]
     paths: ["app/**", "egx_agent/**", "site/**", "requirements*.txt", "constraints.txt", ".github/workflows/site.yml"]
@@ -65,7 +61,6 @@ jobs:
     timeout-minutes: 60
     outputs:
       publish: ${{ steps.scan.outputs.publish }}
-      ai_due: ${{ steps.ai.outputs.due }}
     steps:
       - uses: actions/checkout@v7
 
@@ -125,18 +120,10 @@ jobs:
           WORKER_KEY: ${{ secrets.WORKER_KEY }}
           SITE_URL: ${{ steps.pages.outputs.base_url }}
           FORCE_SCAN: ${{ inputs.force_scan }}
-          QUICK: ${{ inputs.quick }}
           TZ: Africa/Cairo
         run: >-
           python -m app.site_daily --db state/egx.db --config site/strategy.yaml --out _site
           --backup _backup/state.egxb --mac-feed _macfeed/mubasher.egxm
-
-      - name: Are the AI models' forecasts due?
-        id: ai
-        continue-on-error: true
-        env:
-          TZ: Africa/Cairo
-        run: python -m egx_agent.ai_forecast due --db state/egx.db >> "$GITHUB_OUTPUT"
 
       - name: Tell the owner on Telegram that this run failed
         if: failure()
@@ -196,69 +183,3 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
-
-  # The AI models' forecasts for every stock (egx_agent/ai_forecast.py): once a day, from the last final close, after the
-  # site is live so nothing waits for them. Only this job needs torch (CPU-only) and the models. It keeps the forecasts
-  # with the data, then asks for a quick run that publishes them (a run already waiting does it instead: a new one would
-  # cancel it). A failure here never stops the site; the next run tries again.
-  ai:
-    needs: [build, deploy]
-    if: always() && needs.build.result == 'success' && needs.build.outputs.ai_due != ''
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-          cache: pip
-
-      - name: Bring back this run's data
-        uses: actions/cache/restore@v6
-        with:
-          path: state
-          key: state-${{ github.run_id }}
-          fail-on-cache-miss: true
-
-      # The EGX-trained Chronos-2 (478 MB) is a release file, not in the code: downloaded once, then kept in the cache.
-      - name: The EGX-trained Chronos-2
-        continue-on-error: true
-        uses: actions/cache@v6
-        with:
-          path: _models/chronos2-egx
-          key: chronos2-egx-1
-
-      - name: The AI models' forecasts
-        id: forecast
-        env:
-          HF_HUB_DISABLE_PROGRESS_BARS: "1"
-          TZ: Africa/Cairo
-        run: |
-          mkdir -p _models/chronos2-egx
-          for f in config.json model.safetensors; do
-            [ -s "_models/chronos2-egx/$f" ] || curl -fsSL --retry 3 -o "_models/chronos2-egx/$f" \
-              "https://github.com/${{ github.repository }}/releases/download/chronos2-egx-1/$f" || rm -f "_models/chronos2-egx/$f"
-          done
-          pip install -q -r requirements.txt -c constraints.txt
-          pip install -q --index-url https://download.pytorch.org/whl/cpu torch
-          pip install -q -r requirements-ai.txt
-          python -m egx_agent.ai_forecast run --db state/egx.db
-          python -m egx_agent.ai_forecast due --db state/egx.db >> "$GITHUB_OUTPUT"
-
-      - name: Keep the forecasts with the data
-        if: steps.forecast.outputs.due == ''
-        uses: actions/cache/save@v6
-        with:
-          path: state
-          key: state-${{ github.run_id }}-ai
-
-      - name: Publish them
-        if: steps.forecast.outputs.due == ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          waiting=$(gh run list --workflow site.yml --limit 10 --json status --jq '[.[] | select(.status == "pending" or .status == "queued" or .status == "waiting")] | length')
-          if [ "$waiting" = 0 ]; then gh workflow run site.yml -f force_scan=false -f quick=true; else echo "A waiting run will publish them."; fi

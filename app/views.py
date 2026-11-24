@@ -11,7 +11,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from egx_agent import (ai_forecast, breadth, config, corporate, db, holidays, layers, levels, mood, portfolio, predict, ranges,
+from egx_agent import (breadth, config, corporate, db, holidays, layers, levels, mood, portfolio, predict,
                        record, risk, scan, strategy)
 from egx_agent.data import dividends, flows, fundamentals, macro, news, ownership, prices, shariah, universe
 from egx_agent.indicators import add_indicators
@@ -428,7 +428,6 @@ def today(d: Data) -> dict:
         r["co"] = firms.get(r["symbol"])
         if r["action"] == "BUY":
             r["sell_by"] = sessions_after(scan_date, cfg["max_hold_days"])
-            r["range"] = range_view(d, r["symbol"])     # the chance its target and stop trade within a month
             buys.append(r)
         elif shariah.passes_filter(r["info"], cfg["shariah_filter"]):   # close to a BUY: only what your filter allows
             px = d.prices(r["symbol"])
@@ -540,91 +539,6 @@ def news_view(d: Data) -> dict:
     return {**news_feed(d), "held": sorted({p["symbol"] for p in open_positions(d)}), "watchlist": watchlist(d)}
 
 
-def ai_record(d: Data) -> pd.DataFrame:
-    """Every finished AI forecast with what happened (ai_forecast.record), once a build."""
-    return d.cache.get(d.version, ("ai_record",), lambda: ai_forecast.record(d.conn))
-
-
-def ai_grades(d: Data) -> dict:
-    """How each model and their middle did on every stock, by sessions ahead: {"5": {"middle": grade, ...}}."""
-    def build():
-        rec = ai_record(d)
-        return {str(k): {m: ai_forecast.grade(g) for m, g in rec[rec["step"] == k].groupby("model")}
-                for k in ai_forecast.STEPS}
-    return d.cache.get(d.version, ("ai_grades",), build)
-
-
-AI_RESETS = ("rights", "bonus", "split", "consolidation")
-
-
-def ai_view(d: Data, sym: str, close: pd.Series) -> dict | None:
-    """The stock page's "What the AI models forecast": each model's latest 20-session path from the close it ran
-    after, by 1, 5 and 20 sessions ahead: the middle and the spread of the models, how many point each way, how big the
-    move is for this stock (score: 100 when all agree and the middle moves at least a usual amount), and how the
-    middle's earlier forecasts here and on every stock did against what happened and against "no change"."""
-    rows = d.conn.execute("SELECT model, made, path FROM ai_paths WHERE symbol=?", (sym,)).fetchall()
-    close = pd.Series(close.to_numpy(float), index=[str(t.date()) for t in close.index])
-    made = max((r["made"] for r in rows), default=None)
-    if made is None or not (close.index <= made).any():
-        return None
-    paths = {r["model"]: json.loads(r["path"]) for r in rows if r["made"] == made}
-    start_date = close.index[close.index <= made][-1]            # its last close then (made, unless it didn't trade)
-    start = float(close[start_date])
-    rec = ai_record(d)
-    mine = rec[(rec["symbol"] == sym) & (rec["model"] == "middle")]
-    earlier = pd.read_sql_query("SELECT made, p1, p5, p20 FROM ai_forecasts WHERE symbol=? AND made<?", d.conn,
-                                params=(sym, made)).groupby("made").median().tail(8)
-    grades = ai_grades(d)
-    # bonus shares, a split or a rights issue going ex after the last close: that day the price is reset for the new
-    # shares, which the models can't know (afterwards their forecasts move to the new prices: db.add_price_event)
-    last = close.index[-1]
-    resets = sorted((a for a in news.actions(d.conn, sym, since=last, kinds=AI_RESETS) if a["effective"] > last),
-                    key=lambda a: a["effective"])
-    steps = {}
-    for k in ai_forecast.STEPS:
-        vals = {m: p[k - 1] for m, p in paths.items()}
-        mid = float(np.median(list(vals.values())))
-        up = sum(v > start * 1.0001 for v in vals.values())      # saved to 5 digits: a hair isn't a move
-        down = sum(v < start * 0.9999 for v in vals.values())
-        moves = (close / close.shift(k) - 1).abs().tail(250).dropna()
-        typical = float(moves.median()) if len(moves) >= 40 else None
-        agree = max(0.0, 2 * max(up, down) / len(vals) - 1)     # all one way: 1; split evenly: 0
-        size = min(1.0, abs(mid / start - 1) / typical) if typical else 0.0
-        done = mine[mine["step"] == k].set_index("made")
-        past = []
-        for m, v in earlier[f"p{k}"].dropna().items():
-            target = done["target"].get(m) or holidays.sessions_after(m, k)
-            past.append({"made": m, "target": target, "start": _num(close[close.index <= m].iloc[-1]), "value": float(v),
-                         "actual": _num(done["actual"].get(m))})
-        target = holidays.sessions_after(made, k)
-        reset = next(({"kind": a["kind"], "date": a["effective"]} for a in resets if a["effective"] <= target), None)
-        steps[str(k)] = {"target": target, "reset": reset, "values": vals, "mid": mid,
-                         "lo": min(vals.values()), "hi": max(vals.values()), "up": up, "down": down,
-                         "typical": typical, "score": round(100 * agree * size),
-                         "record": ai_forecast.grade(done.reset_index()), "all": grades.get(str(k), {}), "past": past}
-    shown = close.tail(61)                     # 40 sessions before the start and any since
-    return {"made": made, "start": start, "start_date": start_date, "models": [{"key": m, "name": n, "lab": lab}
-                                                       for m, (n, lab) in ai_forecast.MODELS.items() if m in paths],
-            "paths": paths, "steps": steps, "closes": {"time": list(shown.index), "close": column(shown)},
-            "tested": ai_forecast.TESTED}
-
-
-def range_view(d: Data, sym: str) -> dict | None:
-    """The stock page's "How far it could move" (egx_agent/ranges.py, every stock once a build): its 5- and
-    20-session ranges and price ladders, how its and every stock's ranges of the last year did, and the replay."""
-    r = d.cache.get(d.version, ("ranges",), lambda: ranges.build(d.conn))
-    mine = r["stocks"].get(sym)
-    if not mine:
-        return None
-    # a rights issue, bonus shares or a split going ex inside a window resets the price that day: the range is in
-    # today's prices, so the page says so instead of showing it (as the AI card; such windows aren't in the record)
-    resets = sorted((a for a in news.actions(d.conn, sym, since=mine["made"], kinds=AI_RESETS) if a["effective"] > mine["made"]),
-                    key=lambda a: a["effective"])
-    steps = {k: {**s, "reset": next(({"kind": a["kind"], "date": a["effective"]} for a in resets
-                                     if a["effective"] <= s["target"]), None)} for k, s in mine["steps"].items()}
-    return {**mine, "steps": steps, "all": r["all"], "tested": ranges.TESTED}
-
-
 def _num(v) -> float | None:
     return None if v is None or not np.isfinite(v) else float(v)
 
@@ -683,8 +597,6 @@ def stock_public(d: Data, symbol: str, cols: tuple[str, ...] = SERIES_COLS, tail
     out["news"] = news.stock_news(d.conn, sym)
     out["big_deals"] = news.big_deals(d.conn, sym, (date.today() - timedelta(days=365)).isoformat())
     out["cautions"] = cautions_map(d).get(sym, [])
-    out["ai"] = ai_view(d, sym, ind["close"])
-    out["range"] = range_view(d, sym)
     if {"sup", "ptgt"} & set(cols):
         # The site's browser needs the chart's levels on each recent day: `sup`, the stop under support (NaN when
         # there's none), which an open position's stop rises to, and `ptgt`, the target, for a buy logged that day.

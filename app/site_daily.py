@@ -168,7 +168,7 @@ def morning_texts(conn, cfg: dict, mine: dict[str, list], data_date: str) -> dic
 def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", site_url: str = "",
         force_scan: bool = False, always_publish: bool = True, owner: str = "", mac_feed: Path | None = None,
         code_only: bool = False) -> dict:
-    """code_only: new code, or new AI forecasts, to publish soon: the slow news and dividend history wait for the next
+    """code_only: new code to publish soon: the slow news and dividend history wait for the next
     run. So do Mubasher's stock pages and the dividend history on every run during a session."""
     cfg = config.load_config()
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
                  os.environ.get("FORCE_SCAN", "").lower() == "true",
                  always_publish=os.environ.get("GITHUB_EVENT_NAME") != "schedule",
                  owner=os.environ.get("OWNER_TELEGRAM", ""), mac_feed=Path(a.mac_feed) if a.mac_feed else None,
-                 code_only=os.environ.get("GITHUB_EVENT_NAME") == "push" or os.environ.get("QUICK", "").lower() == "true")
+                 code_only=os.environ.get("GITHUB_EVENT_NAME") == "push")
     publish, warnings = report.pop("publish"), report.pop("warnings")
     if a.backup:
         try:

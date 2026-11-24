@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     resolved TEXT,                  -- 'done' or 'cancelled' (opened below the stop, or couldn't be bought that day)
     PRIMARY KEY (date, symbol, horizon)
 );
-CREATE TABLE IF NOT EXISTS ai_forecasts (   -- what each AI model forecast after a close (egx_agent/ai_forecast.py)
+CREATE TABLE IF NOT EXISTS ai_forecasts (   -- kept, no longer added to: the AI models' forecasts, Oct-Nov 2026
     made TEXT NOT NULL,             -- the close it started from
     symbol TEXT NOT NULL,
     model TEXT NOT NULL,            -- chronos2 | timesfm | tirex | kronos
@@ -385,7 +385,7 @@ def save_personal_settings(conn: sqlite3.Connection, values: dict) -> None:
 
 def add_price_event(conn: sqlite3.Connection, symbol: str, ex_date: str, factor: float) -> None:
     """Remember that a stock's history was re-based (bonus shares or a split) from ex_date on. The AI models'
-    forecasts from before it are in the old prices: they move to the new ones with the history (ai_forecast.py)."""
+    forecasts from before it are in the old prices: they move to the new ones with the history."""
     old = conn.execute("SELECT factor FROM price_events WHERE symbol=? AND ex_date=?", (symbol, ex_date)).fetchone()
     conn.execute(
         """INSERT INTO price_events(symbol, ex_date, factor, detected) VALUES (?,?,?,?)
