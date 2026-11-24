@@ -79,19 +79,32 @@ def test_expected_session_date():
 
 
 def test_a_scan_every_half_hour_during_the_session(tmp_path):
-    """Sunday–Thursday 10:15–14:45 Cairo a run scans the live prices when the last scan is 25+ minutes old."""
-    import json
-
+    """Sunday–Thursday 10:15–14:45 Cairo a run scans the live prices when the last scan started 12+ minutes ago."""
     from egx_agent import db
     from egx_agent.scan import session_scan_due
     conn = db.connect(tmp_path / "egx.db")
     at = lambda d, h, m: datetime(2026, 10, d, h, m, tzinfo=CAIRO)  # noqa: E731  (4 Oct 2026 is a Sunday)
     assert session_scan_due(conn, at(4, 11, 0))                      # no scan yet
-    db.set_meta(conn, "market", json.dumps({"finished": at(4, 10, 50).isoformat()}))
+    db.set_meta(conn, "scan_attempted", at(4, 10, 50).isoformat())
     assert not session_scan_due(conn, at(4, 11, 0))                  # 10 minutes ago
     assert session_scan_due(conn, at(4, 11, 3))                      # 13 minutes ago: the bot asks every 15
     assert not session_scan_due(conn, at(4, 9, 50)) and not session_scan_due(conn, at(4, 15, 30))   # closed
     assert not session_scan_due(conn, at(9, 11, 20))                 # Friday
+
+
+def test_hourly_bars_wait_an_hour(tmp_path, monkeypatch):
+    from datetime import timedelta
+
+    from egx_agent import db
+    from egx_agent.data import prices
+    conn = db.connect(tmp_path / "egx.db")
+    assert prices.hourly_due(conn)                                   # never downloaded
+    monkeypatch.setattr(prices, "intraday_behind", lambda conn: False)
+    at = lambda m: db.set_meta(conn, "hourly_at", (datetime.now() - timedelta(minutes=m)).isoformat())  # noqa: E731
+    at(20)
+    assert not prices.hourly_due(conn)
+    at(55)
+    assert prices.hourly_due(conn)
 
 
 def test_a_late_github_run_goes_on_if_the_site_has_nothing_since_the_last_run_time(tmp_path):

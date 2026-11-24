@@ -429,7 +429,7 @@ def update(conn: sqlite3.Connection, first: Iterable[str] = (), budget_s: float 
     start = time.monotonic()
     misses = broke = 0
     for sym in order:
-        if time.monotonic() - start > budget_s:
+        if time.monotonic() - start >= budget_s:      # 0: the stock pages wait for a later run
             break
         say(f"News for {sym}…")
         state = checked.setdefault(sym, {})

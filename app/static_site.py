@@ -22,7 +22,9 @@ import re
 import secrets
 import shutil
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
+from multiprocessing import get_context
 from pathlib import Path
 
 import yaml
@@ -64,6 +66,8 @@ def derive_key(password: str, salt: bytes, iterations: int = ITERATIONS) -> byte
 
 
 def to_json(obj) -> bytes:
+    if isinstance(obj, bytes):      # a stock's file, made by another process (_stock_files)
+        return obj
     return json.dumps(views.clean(obj), ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
@@ -167,12 +171,40 @@ def public_data(conn, cfg: dict, telegram: dict | None = None, scan_url: str | N
                               "health": views.data_health(d)}           # ⚙ → Data health
     with_prices = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices")}
     hourly = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM intraday")}
-    for sym in d.table.index:
+    syms = list(d.table.index)
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+    n = min(os.cpu_count() or 1, 4)
+    if n > 1 and path and len(syms) >= PARALLEL_FROM:      # the stock files: most of the build's time
+        conn.commit()          # the other processes read the file
+        with ProcessPoolExecutor(n, mp_context=get_context("spawn")) as pool:
+            parts = pool.map(_stock_files, [(path, cfg, syms[i::n], with_prices, hourly) for i in range(n)])
+            made = {k: v for part in parts for k, v in part.items()}
+        return out | made
+    return out | _stock_objects(d, syms, with_prices, hourly)
+
+
+PARALLEL_FROM = 40      # fewer stocks (the tests) are quicker in one process
+
+
+def _stock_objects(d: views.Data, syms: list[str], with_prices: set[str], hourly: set[str]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for sym in syms:
         if sym in with_prices:
             out[f"stock/{sym}"] = views.stock_public(d, sym, STOCK_COLS, SERIES_TAIL)
         if sym in hourly:      # the 1-hour and 4-hour charts, loaded only when someone picks them
             out[f"intraday/{sym}"] = views.stock_intraday(d, sym)
     return out
+
+
+def _stock_files(job: tuple) -> dict[str, bytes]:
+    """Some of the stocks' files, in a process of its own: ready as JSON, which is quick to send back."""
+    path, cfg, syms, with_prices, hourly = job
+    conn = db.connect(path)
+    try:
+        d = views.Data(conn, cfg, views.Cache(), is_admin=False, multi_user=True)
+        return {name: to_json(obj) for name, obj in _stock_objects(d, syms, with_prices, hourly).items()}
+    finally:
+        conn.close()
 
 
 # ------------------------------------------------------------------ the page itself

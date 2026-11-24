@@ -54,14 +54,15 @@ def annotate(level: str, title: str, text: str) -> None:
         print(f"::{level} title={title}::{text}", flush=True)
 
 
-def _progress(label: str):
+def _progress(label: str, fine: bool = False):
     last = {"step": -1}
 
     def say(p: float, _msg: str = "") -> None:   # the message can name stocks: only show how far along it is
-        step = int(p * 10)
+        # a scan's parts after the prices start at 80.5% and on: each is logged, so the log shows how long it took
+        step = round(p * 100, 1) if fine and p > 0.8 else int(p * 10) * 10
         if step != last["step"]:
             last["step"] = step
-            log(f"{label}: {step * 10}%")
+            log(f"{label}: {step:g}%")
     return say
 
 
@@ -165,7 +166,10 @@ def morning_texts(conn, cfg: dict, mine: dict[str, list], data_date: str) -> dic
 
 
 def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", site_url: str = "",
-        force_scan: bool = False, always_publish: bool = True, owner: str = "", mac_feed: Path | None = None) -> dict:
+        force_scan: bool = False, always_publish: bool = True, owner: str = "", mac_feed: Path | None = None,
+        code_only: bool = False) -> dict:
+    """code_only: new code, or new AI forecasts, to publish soon: the slow news and dividend history wait for the next
+    run. So do Mubasher's stock pages and the dividend history on every run during a session."""
     cfg = config.load_config()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = db.connect(db_path)
@@ -193,10 +197,11 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             report["holidays"] = f"not checked ({type(exc).__name__})"
 
         # 1. prices and signals
+        quick = code_only or scan.in_session()
         if fresh or force_scan or scan.scan_is_stale(conn, RETRY) or scan.session_scan_due(conn):
             first = {**cfg, "history_years": prices.DEEP_YEARS} if fresh else cfg
             log("First run: downloading 10 years of prices for every stock." if fresh else "Downloading new prices.")
-            market = scan.run_scan(conn, first, progress=_progress("Scan"))
+            market = scan.run_scan(conn, first, progress=_progress("Scan", fine=True), quick=quick and not fresh)
             if fresh:
                 db.set_meta(conn, "history_years_loaded", str(prices.DEEP_YEARS))
             report["scan"] = f"{market['date']}: {market['buys']} BUY, {market['watches']} watch"
@@ -209,18 +214,22 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
             report["scan"] = f"re-scored with the new strategy: {market['buys']} BUY"
         else:
             report["scan"] = "no new close yet"
-        if not report["scan"][:4].isdigit():      # no download this run: the news still moves (weekends too)
+        if not report["scan"][:4].isdigit() and code_only:
+            report["news"] = "left for the next run"
+        elif not report["scan"][:4].isdigit():    # no download this run: the news still moves (weekends too)
             try:
                 got = news.update(conn, first=list(db.latest_scan(conn)[1].get("symbol", [])),
-                                  budget_s=NEWS_BUDGET_S)
+                                  budget_s=0 if quick else NEWS_BUDGET_S)
                 report["news"] = f"{got['new']} new headlines, {got['actions']} new dividends/bonus shares" + (
                     f" ({len(got['failed'])} sources didn't answer)" if got["failed"] else "")
                 health.note(conn, got["failed"], got["tried"])
             except Exception as exc:  # the site still builds with the news it has
                 report["news"] = f"not updated ({type(exc).__name__})"
                 health.note(conn, ["News"], ["News"])
-            tried: list[str] = []
-            health.note(conn, scan.history_step(conn, tried, NEWS_BUDGET_S), tried)   # past dividends, a few stocks
+            if not quick:
+                tried: list[str] = []
+                health.note(conn, scan.history_step(conn, tried, NEWS_BUDGET_S), tried)   # past dividends, a few stocks
+        if not report["scan"][:4].isdigit():
             report.update(catch_up(conn, cfg))
         db.set_meta(conn, "site_strategy", strategy)
         data_date = db.get_meta(conn, "scan_data_date")
@@ -281,7 +290,9 @@ def run(db_path: Path, out: Path, password: str, site_id: str, token: str = "", 
 
         # 4. the site, then this close's signals to each connected friend
         prices.fix_double_rebase(conn)          # also when this run had no new prices
+        log("Building the pages.")
         res = static_site.build(conn, cfg, out, password, site_id, telegram, static_site.scan_page(site_id))
+        log("Pages built.")
         report["site"] = f"{res['files']} files, {res['bytes'] / 1e6:.1f} MB"
         report["publish"] = always_publish or live_stamp(site_url) != res["stamp"]
         if not report["publish"]:
@@ -395,7 +406,8 @@ def main(argv: list[str] | None = None) -> int:
                  os.environ.get("TELEGRAM_TOKEN", "").strip(), os.environ.get("SITE_URL", ""),
                  os.environ.get("FORCE_SCAN", "").lower() == "true",
                  always_publish=os.environ.get("GITHUB_EVENT_NAME") != "schedule",
-                 owner=os.environ.get("OWNER_TELEGRAM", ""), mac_feed=Path(a.mac_feed) if a.mac_feed else None)
+                 owner=os.environ.get("OWNER_TELEGRAM", ""), mac_feed=Path(a.mac_feed) if a.mac_feed else None,
+                 code_only=os.environ.get("GITHUB_EVENT_NAME") == "push" or os.environ.get("QUICK", "").lower() == "true")
     publish, warnings = report.pop("publish"), report.pop("warnings")
     if a.backup:
         try:

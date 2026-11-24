@@ -11,7 +11,7 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Callable, Protocol
 
 import pandas as pd
@@ -272,7 +272,15 @@ def update_intraday(conn: sqlite3.Connection, symbols: list[str], provider=None,
             else:
                 db.replace_intraday(conn, futures[fut], df)
                 got += 1
+    if got:
+        db.set_meta(conn, "hourly_at", datetime.now().isoformat(timespec="seconds"))
     return {"updated": got, "failed": sorted(failed)}
+
+
+def hourly_due(conn: sqlite3.Connection, every: timedelta = timedelta(minutes=50)) -> bool:
+    """During a session the hourly bars are downloaded about once an hour: enough for hourly candles."""
+    at = db.get_meta(conn, "hourly_at")
+    return not at or intraday_behind(conn) or datetime.now() - datetime.fromisoformat(at) >= every
 
 
 def intraday_behind(conn: sqlite3.Connection, symbol: str | None = None) -> bool:

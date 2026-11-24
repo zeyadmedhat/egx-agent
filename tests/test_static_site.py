@@ -593,7 +593,7 @@ def test_daily_job_messages_each_friend_once_per_close(tmp_path, monkeypatch):
     monkeypatch.setattr(scan, "scan_is_stale", lambda conn, *_: False)          # no downloads in tests
     monkeypatch.setattr(scan, "session_scan_due", lambda conn, *_: False)
     scans = []
-    monkeypatch.setattr(scan, "run_scan", lambda conn, cfg, progress=None, update_data=True: scans.append(update_data)
+    monkeypatch.setattr(scan, "run_scan", lambda conn, cfg, progress=None, update_data=True, **k: scans.append(update_data)
                         or {"date": "x", "buys": 1, "watches": 0})
     monkeypatch.setattr(jobs, "train_job", lambda conn, say: None)
     bot = FakeBot()

@@ -45,15 +45,21 @@ def scan_is_final(conn: sqlite3.Connection) -> bool:
 SESSION = (time(10, 15), time(14, 45))   # EGX trades 10:00–14:30 Cairo; prices come about 15 minutes late
 
 
+def in_session(now: datetime | None = None) -> bool:
+    now = now or datetime.now(CAIRO)
+    return holidays.is_session(now.date()) and SESSION[0] <= now.time() <= SESSION[1]
+
+
 def session_scan_due(conn: sqlite3.Connection, now: datetime | None = None,
                      every: timedelta = timedelta(minutes=12)) -> bool:
     """During a session, a scan of the live prices every 15 minutes (the bot asks for a run every 15). It
-    isn't final (scan_is_final), so it's scanned again after the close and Telegram waits for that one."""
+    isn't final (scan_is_final), so it's scanned again after the close and Telegram waits for that one.
+    Counted from the last scan's start: from its end, a scan of a few minutes made the next run skip its own."""
     now = now or datetime.now(CAIRO)
-    if not holidays.is_session(now.date()) or not SESSION[0] <= now.time() <= SESSION[1]:
+    if not in_session(now):
         return False
-    finished = json.loads(db.get_meta(conn, "market") or "{}").get("finished")
-    return not finished or now - datetime.fromisoformat(finished).astimezone(CAIRO) >= every
+    started = db.get_meta(conn, "scan_attempted")
+    return not started or now - datetime.fromisoformat(started).astimezone(CAIRO) >= every
 
 
 def scan_is_stale(conn: sqlite3.Connection, retry: timedelta = timedelta(hours=2)) -> bool:
@@ -124,13 +130,16 @@ def process_account(conn: sqlite3.Connection, cfg: dict, ind: dict[str, pd.DataF
 
 
 def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str], None] | None = None,
-             update_data: bool = True,
+             update_data: bool = True, quick: bool = False,
              accounts: Callable[[], Iterable[tuple[sqlite3.Connection, dict]]] | None = None) -> dict:
     """Download prices, score every stock and save the signals (shared by everyone), then update each paper account.
 
     Signals are saved without share counts or the Shariah filter: each person's own settings apply when they look
     (views.signals) and to their paper account here. accounts yields (connection, settings) per person; by default
     it's just this connection, as on your Mac.
+
+    quick (the website's runs during a session): Mubasher's stock pages and the dividend history wait for the runs
+    outside it, and the hourly bars are downloaded once an hour.
     """
     say = progress or (lambda p, msg: None)
     db.set_meta(conn, "scan_attempted", datetime.now().isoformat(timespec="seconds"))
@@ -173,15 +182,16 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
             failed.append(checked[-1])
         events = res.get("events", [])
         say(0.805, "Downloading hourly prices for the 1-hour and 4-hour charts…")
-        checked.append("TradingView hourly prices")
         try:
-            hourly = prices.update_intraday(conn, [s for s in syms if s != prices.INDEX_SYMBOL],
-                                            aliases=cfg.get("symbol_aliases"))
-            if hourly["failed"] and len(hourly["failed"]) > PRICES_FAILING * len(syms):
-                failed.append(checked[-1])
+            if not quick or prices.hourly_due(conn):
+                checked.append("TradingView hourly prices")
+                hourly = prices.update_intraday(conn, [s for s in syms if s != prices.INDEX_SYMBOL],
+                                                aliases=cfg.get("symbol_aliases"))
+                if hourly["failed"] and len(hourly["failed"]) > PRICES_FAILING * len(syms):
+                    failed.append(checked[-1])
         except Exception as exc:  # only the hourly charts need them: they show what was downloaded before
             warnings.append(f"Hourly prices not updated ({type(exc).__name__})")
-            failed.append(checked[-1])
+            failed.append("TradingView hourly prices")
         try:
             prices.update_rights(conn)        # KORA_r1 and the like, while they trade: kept for their chart
         except Exception as exc:
@@ -212,7 +222,8 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
         except Exception as exc:  # the site shows the free floats it has
             warnings.append(f"Owners (Mubasher) not updated ({type(exc).__name__})")
         say(0.812, "Reading past dividends from TradingView…")
-        failed += history_step(conn, checked)
+        if not quick:
+            failed += history_step(conn, checked)
         say(0.815, "Downloading news, dividends and bonus shares…")
         try:
             first = list(db.latest_scan(conn)[1].get("symbol", []))
@@ -220,7 +231,7 @@ def run_scan(conn: sqlite3.Connection, cfg: dict, progress: Callable[[float, str
                 first = [r[0] for r in conn.execute("SELECT symbol FROM trades WHERE status = 'open'")] + first
             except sqlite3.OperationalError:
                 pass
-            got = news.update(conn, first=first,
+            got = news.update(conn, first=first, budget_s=0 if quick else news.BUDGET_S,
                               progress=lambda msg: say(0.815, msg))
             if got["failed"]:
                 warnings.append(f"Some news sources didn't answer (the others were read): {', '.join(got['failed'])}")
