@@ -49,7 +49,7 @@ export function Egx30Page({ route }) {
         sub=${t('average {v}', avg)} />
       <${Kpi} label="vs its 200-day average" value=${fmt.pct(vs(d.ema200), 1)} valueClass=${tone(vs(d.ema200))}
         sub=${t('average {v}', { v: fmt.int(d.ema200) })} />
-      <${Kpi} label="1-year low – high" value=${`${fmt.int(d.low52)} – ${fmt.int(d.high52)}`} />
+      <${Kpi} label="1-year low – high" value=${html`<span style="font-size:16px;white-space:normal">${fmt.int(d.low52)} – ${fmt.int(d.high52)}</span>`} />
       <${Kpi} label="From its record close" value=${fmt.pct(d.from_ath, 1)} valueClass=${tone(d.from_ath)}
         sub=${`${fmt.int(d.ath)} · ${fmt.date(d.ath_date)}`} />
       ${d.usd_close != null && html`<${Kpi} label="In dollars" value=${`$${fmt.int(d.usd_close)}`}

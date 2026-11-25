@@ -404,6 +404,18 @@ def test_the_20_session_model_uses_egypt_data_and_an_older_design_is_retrained(t
     assert predict.needs_training(conn, cfg)
 
 
+def test_the_quick_dataset_has_the_same_latest_day_as_the_full_one(tmp_path, cfg):
+    frames, index_df, sectors = predict.load_frames(_market(tmp_path), cfg)
+    short = next(iter(frames))
+    frames[short] = frames[short].iloc[:-3]             # a stock that didn't trade on the last day
+    full = predict.build_dataset(frames, index_df, sectors, cfg)
+    quick = predict.build_dataset(frames, index_df, sectors, cfg, labels=False)
+    day = full["date"].max()
+    a, b = (d[d["date"] == day].reset_index(drop=True)[list(quick.columns)] for d in (full, quick))
+    assert len(a) and a[predict.LEVEL_FEATURES].notna().any().any() and short not in set(a["symbol"])
+    pd.testing.assert_frame_equal(a, b, check_exact=True)
+
+
 def test_a_model_trained_without_egypt_data_retrains_once_it_arrives(tmp_path, cfg, fast_model):
     conn = _market(tmp_path)
     meta = predict.train(conn, cfg)                     # no scan ran first and the download failed

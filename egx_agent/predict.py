@@ -273,6 +273,7 @@ def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
     say = progress or (lambda p, m: None)
     index_close = index_df["close"] if len(index_df) else None
     parts = []
+    last_day = max((df.index[-1] for df in frames.values() if len(df) >= 60), default=None)
     for i, (sym, df) in enumerate(frames.items()):
         if len(df) < 60:
             continue
@@ -290,7 +291,8 @@ def build_dataset(frames: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
         f["setup_on"] = rules["any_setup"].to_numpy()          # a setup the user's settings trade
         f["rule_base"] = rules["base_score"].to_numpy()
         # the chart's support/resistance plan on every day (levels.py), from the bars up to that day only
-        lv = levels.frame(ind, cfg)
+        # (without labels only the latest day is predicted, and these took over 90% of the time, so only that day)
+        lv = levels.frame(ind, cfg, None if labels else np.asarray(ind.index == last_day))
         f[LEVEL_FEATURES] = level_features(lv, ind["close"])
         chart = cfg.get("levels_mode") == "chart" and lv["stop"].notna()
         stop = np.where(chart, lv["stop"], rules["stop"])
